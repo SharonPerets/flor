@@ -1,0 +1,952 @@
+/* Room Planner Styles */
+:root {
+  --planner-primary: #1a1a1a;
+  --planner-secondary: #2d3748;
+  --planner-accent: #4a90e2;
+  --planner-bg: #f8fafc;
+  --planner-white: #ffffff;
+  --planner-light-gray: #e2e8f0;
+  --planner-medium-gray: #94a3b8;
+  --planner-dark-gray: #64748b;
+  --planner-success: #10b981;
+  --planner-warning: #f59e0b;
+  --planner-shadow: rgba(0, 0, 0, 0.1);
+  --planner-shadow-heavy: rgba(0, 0, 0, 0.2);
+}
+
+/* Global Layout */
+.planner-main {
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  height: calc(100vh - 80px);
+  background: var(--planner-bg);
+  gap: 0;
+}
+
+/* Header */
+.planner-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: var(--planner-white);
+  border-bottom: 2px solid var(--planner-light-gray);
+  z-index: 1000;
+  box-shadow: 0 2px 10px var(--planner-shadow);
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 30px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.back-button {
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  background: var(--planner-light-gray);
+  color: var(--planner-primary);
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.back-button:hover {
+  background: var(--planner-accent);
+  color: white;
+  transform: translateX(5px);
+}
+
+.planner-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin: 0;
+}
+
+.header-controls {
+  display: flex;
+  gap: 15px;
+}
+
+.save-btn,
+.reset-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.save-btn {
+  background: var(--planner-success);
+  color: white;
+}
+
+.reset-btn {
+  background: var(--planner-warning);
+  color: white;
+}
+
+.save-btn:hover,
+.reset-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px var(--planner-shadow);
+}
+
+/* Furniture Catalog Sidebar */
+.furniture-catalog {
+  background: var(--planner-white);
+  border-right: 2px solid var(--planner-light-gray);
+  padding: 20px;
+  overflow-y: auto;
+  margin-top: 80px;
+  height: calc(100vh - 80px);
+}
+
+.catalog-header h2 {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin-bottom: 20px;
+}
+
+.catalog-search input {
+  width: 100%;
+  padding: 12px 15px;
+  border: 2px solid var(--planner-light-gray);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  margin-bottom: 20px;
+}
+
+.catalog-search input:focus {
+  outline: none;
+  border-color: var(--planner-accent);
+}
+
+.catalog-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 25px;
+}
+
+.category-btn {
+  padding: 8px 15px;
+  border: 2px solid var(--planner-light-gray);
+  background: white;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  color: var(--planner-dark-gray);
+}
+
+.category-btn.active,
+.category-btn:hover {
+  background: var(--planner-accent);
+  border-color: var(--planner-accent);
+  color: white;
+}
+
+/* Furniture Grid */
+.furniture-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}
+
+.furniture-item {
+  background: white;
+  border: 2px solid var(--planner-light-gray);
+  border-radius: 8px;
+  padding: 15px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+}
+
+.furniture-item:hover {
+  border-color: var(--planner-accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px var(--planner-shadow);
+}
+
+.furniture-item.selected {
+  border-color: var(--planner-success);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.furniture-icon {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 10px;
+  background: var(--planner-light-gray);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 3D Furniture Icons */
+.furniture-icon.cabinet {
+  background: linear-gradient(135deg, #ddb892, #c8a882);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.furniture-icon.cabinet::before {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 40px;
+  background: linear-gradient(90deg, #c8a882, #b8986f);
+  border: 1px solid #a0885f;
+  border-radius: 2px;
+  left: 8px;
+  top: 10px;
+}
+
+.furniture-icon.cabinet::after {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 40px;
+  background: linear-gradient(90deg, #c8a882, #b8986f);
+  border: 1px solid #a0885f;
+  border-radius: 2px;
+  right: 8px;
+  top: 10px;
+}
+
+.furniture-icon.drawer {
+  background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.furniture-icon.drawer::before {
+  content: '';
+  position: absolute;
+  width: 45px;
+  height: 8px;
+  background: #94a3b8;
+  border-radius: 1px;
+  top: 15px;
+}
+
+.furniture-icon.drawer::after {
+  content: '';
+  position: absolute;
+  width: 45px;
+  height: 8px;
+  background: #94a3b8;
+  border-radius: 1px;
+  top: 28px;
+}
+
+.furniture-icon.table {
+  background: linear-gradient(135deg, #ddb892, #c8a882);
+}
+
+.furniture-icon.table::before {
+  content: '';
+  position: absolute;
+  width: 50px;
+  height: 6px;
+  background: #b8986f;
+  top: 20px;
+  border-radius: 3px;
+}
+
+.furniture-icon.table::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 25px;
+  background: #a0885f;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.furniture-icon.chair {
+  background: linear-gradient(135deg, #64748b, #475569);
+}
+
+.furniture-icon.chair::before {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  background: #475569;
+  border-radius: 4px 4px 0 0;
+  top: 8px;
+}
+
+.furniture-icon.chair::after {
+  content: '';
+  position: absolute;
+  width: 30px;
+  height: 8px;
+  background: #475569;
+  bottom: 12px;
+  border-radius: 2px;
+}
+
+.furniture-item h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin-bottom: 5px;
+}
+
+.furniture-item .dimensions {
+  font-size: 0.8rem;
+  color: var(--planner-medium-gray);
+  margin-bottom: 8px;
+}
+
+.furniture-item .add-btn {
+  width: 100%;
+  padding: 6px 12px;
+  background: var(--planner-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.furniture-item .add-btn:hover {
+  background: var(--planner-secondary);
+}
+
+/* Room Designer */
+.room-designer {
+  padding: 20px;
+  margin-top: 80px;
+  height: calc(100vh - 80px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.room-settings {
+  background: var(--planner-white);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 10px var(--planner-shadow);
+}
+
+.room-settings h3 {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin-bottom: 15px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr) auto;
+  gap: 20px;
+  align-items: end;
+}
+
+.setting-group label {
+  display: block;
+  font-weight: 500;
+  color: var(--planner-dark-gray);
+  margin-bottom: 5px;
+  font-size: 0.9rem;
+}
+
+.setting-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid var(--planner-light-gray);
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.setting-group input:focus {
+  outline: none;
+  border-color: var(--planner-accent);
+}
+
+.apply-btn {
+  padding: 10px 25px;
+  background: var(--planner-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  height: fit-content;
+}
+
+.apply-btn:hover {
+  background: var(--planner-secondary);
+  transform: translateY(-1px);
+}
+
+/* 3D Room Container - Improved */
+.room-container {
+  flex: 1;
+  background: var(--planner-white);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px var(--planner-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.room-3d {
+  width: 100%;
+  height: calc(100% - 60px);
+  position: relative;
+  background: #f8fafc;
+  border: 2px solid var(--planner-light-gray);
+  overflow: hidden;
+  transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transform-style: preserve-3d;
+}
+
+/* Simplified Room Floor - Top View */
+.room-floor {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 400px;
+  height: 400px;
+  background: white;
+  border: 3px solid var(--planner-secondary);
+  box-shadow: 0 0 20px rgba(0,0,0,0.1);
+  transition: all 0.5s ease;
+}
+
+/* Grid Pattern for Room */
+.room-floor::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+  opacity: 0.3;
+}
+
+/* Room dimensions labels */
+.room-floor::after {
+  content: attr(data-dimensions);
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--planner-accent);
+  color: white;
+  padding: 5px 15px;
+  border-radius: 15px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Remove 3D walls - keep it simple */
+.room-walls {
+  display: none;
+}
+
+/* Furniture in room - draggable */
+.furniture-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.room-furniture {
+  pointer-events: all;
+  position: absolute;
+  border-radius: 6px;
+  cursor: move;
+  user-select: none;
+  transition: box-shadow 0.3s ease;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(0,0,0,0.7);
+}
+
+.room-furniture:hover {
+  box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+  z-index: 10;
+}
+
+.room-furniture.dragging {
+  box-shadow: 0 12px 35px rgba(0,0,0,0.4);
+  transform: scale(1.05);
+  z-index: 100;
+}
+
+/* Different furniture types with distinct colors */
+.furniture-storage {
+  background: linear-gradient(135deg, #ddb892, #c8a882);
+  border: 2px solid #a0885f;
+}
+
+.furniture-table {
+  background: linear-gradient(135deg, #8b4513, #d2691e);
+  border: 2px solid #654321;
+  color: white;
+}
+
+.furniture-seating {
+  background: linear-gradient(135deg, #4a5568, #718096);
+  border: 2px solid #2d3748;
+  color: white;
+}
+
+.furniture-bedroom {
+  background: linear-gradient(135deg, #e53e3e, #fc8181);
+  border: 2px solid #c53030;
+  color: white;
+}
+
+/* Remove button for furniture */
+.remove-furniture {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 20px;
+  height: 20px;
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 20;
+}
+
+.room-furniture:hover .remove-furniture {
+  opacity: 1;
+}
+
+.room-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: var(--planner-light-gray);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-top: 2px solid var(--planner-medium-gray);
+}
+
+.room-info-display {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.room-size-display {
+  background: var(--planner-accent);
+  color: white;
+  padding: 8px 15px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.view-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.view-btn {
+  padding: 6px 12px;
+  background: white;
+  border: 2px solid var(--planner-medium-gray);
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.85rem;
+}
+
+.view-btn:hover,
+.view-btn.active {
+  background: var(--planner-accent);
+  border-color: var(--planner-accent);
+  color: white;
+}
+
+.room-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.action-btn {
+  padding: 8px 15px;
+  background: white;
+  border: 2px solid var(--planner-medium-gray);
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 0.9rem;
+}
+
+.action-btn:hover {
+  background: var(--planner-success);
+  border-color: var(--planner-success);
+  color: white;
+  transform: translateY(-1px);
+}
+
+/* Right Sidebar - Room Info */
+.room-info {
+  background: var(--planner-white);
+  border-left: 2px solid var(--planner-light-gray);
+  padding: 20px;
+  margin-top: 80px;
+  height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.info-header h2 {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin-bottom: 25px;
+}
+
+.room-stats {
+  background: var(--planner-bg);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 25px;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--planner-light-gray);
+}
+
+.stat-item:last-child {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.stat-label {
+  font-weight: 500;
+  color: var(--planner-dark-gray);
+}
+
+.stat-value {
+  font-weight: 600;
+  color: var(--planner-primary);
+}
+
+.placed-furniture {
+  margin-bottom: 25px;
+}
+
+.placed-furniture h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin-bottom: 15px;
+}
+
+.furniture-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 20px;
+  color: var(--planner-medium-gray);
+  font-style: italic;
+}
+
+.export-options h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--planner-primary);
+  margin-bottom: 15px;
+}
+
+.export-btn {
+  width: 100%;
+  padding: 12px 15px;
+  background: var(--planner-light-gray);
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition: all 0.3s ease;
+  text-align: right;
+}
+
+.export-btn:hover {
+  background: var(--planner-accent);
+  color: white;
+  transform: translateY(-1px);
+}
+
+/* Different View Modes */
+.room-3d {
+  transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transform-style: preserve-3d;
+}
+
+/* Top View (Default) */
+.room-3d.view-top {
+  transform: rotateX(0deg) rotateY(0deg);
+}
+
+.room-3d.view-top .room-floor {
+  transform: translate(-50%, -50%);
+}
+
+/* Front View */
+.room-3d.view-front {
+  transform: rotateX(0deg) rotateY(0deg);
+}
+
+.room-3d.view-front .room-floor {
+  transform: translate(-50%, -50%) rotateX(90deg);
+  background: #e2e8f0;
+  border: 3px solid var(--planner-secondary);
+  box-shadow: 0 0 20px rgba(0,0,0,0.1);
+}
+
+/* Hide grid pattern in front view */
+.room-3d.view-front .room-floor::before {
+  display: none;
+}
+
+/* Show walls only in front view */
+.room-3d.view-top .room-walls {
+  display: none;
+}
+
+.room-3d.view-front .room-walls {
+  display: block;
+}
+
+.room-walls {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.wall {
+  position: absolute;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  border: 2px solid var(--planner-light-gray);
+  opacity: 0.9;
+  transition: all 0.8s ease;
+}
+
+/* Wall positioning for front view */
+.room-3d.view-front .wall-back {
+  width: 600px;
+  height: 350px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, #f0f0f0 0%, #d5d5d5 50%, #c0c0c0 100%);
+  border: 4px solid #666;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+
+.room-3d.view-front .wall-left,
+.room-3d.view-front .wall-right {
+  display: none;
+}
+
+/* Add floor in front view */
+.room-3d.view-front .wall-back::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: linear-gradient(to bottom, #b8b8b8 0%, #999 50%, #777 100%);
+  border: 2px solid #555;
+  border-top: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+}
+
+/* Room label for front view */
+.room-3d.view-front .wall-back::before {
+  content: 'חדר - מבט קדמי';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,0.9);
+  padding: 5px 15px;
+  border-radius: 15px;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--planner-secondary);
+  border: 1px solid #ccc;
+  z-index: 10;
+}
+
+/* Furniture positioning changes */
+.room-furniture {
+  transition: all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Front view furniture - show as profile/side view */
+.room-3d.view-front .room-furniture {
+  transform-origin: center bottom;
+}
+
+/* Different furniture profiles in front view */
+.room-3d.view-front .furniture-storage {
+  /* Cabinet/wardrobe profile */
+  background: linear-gradient(180deg, #ddb892 0%, #c8a882 50%, #b8986f 100%);
+  border: 2px solid #a0885f;
+  border-radius: 4px 4px 0 0;
+}
+
+.room-3d.view-front .furniture-storage::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: #a0885f;
+  box-shadow: 0 20px 0 #a0885f, 0 40px 0 #a0885f;
+}
+
+.room-3d.view-front .furniture-table {
+  /* Table profile */
+  background: linear-gradient(180deg, #8b4513 0%, #8b4513 15%, transparent 15%, transparent 85%, #654321 85%);
+  border: 2px solid #654321;
+  border-radius: 2px;
+}
+
+.room-3d.view-front .furniture-table::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 20%;
+  right: 20%;
+  height: 80%;
+  background: linear-gradient(180deg, transparent 0%, transparent 90%, #654321 90%);
+  border-left: 2px solid #654321;
+  border-right: 2px solid #654321;
+}
+
+.room-3d.view-front .furniture-seating {
+  /* Chair profile */
+  background: linear-gradient(180deg, #4a5568 0%, #4a5568 60%, transparent 60%, transparent 80%, #4a5568 80%);
+  border: 2px solid #2d3748;
+  border-radius: 4px 4px 0 0;
+}
+
+.room-3d.view-front .furniture-seating::after {
+  content: '';
+  position: absolute;
+  top: 10%;
+  left: 80%;
+  width: 15%;
+  height: 50%;
+  background: #4a5568;
+  border: 2px solid #2d3748;
+  border-radius: 0 4px 0 0;
+}
+
+.room-3d.view-front .furniture-bedroom {
+  /* Bed profile */
+  background: linear-gradient(180deg, #e53e3e 0%, #e53e3e 40%, #fc8181 40%, #fc8181 70%, transparent 70%);
+  border: 2px solid #c53030;
+  border-radius: 2px;
+}
+
+.room-3d.view-front .furniture-bedroom::after {
+  content: '';
+  position: absolute;
+  top: 10%;
+  right: 5%;
+  width: 20%;
+  height: 30%;
+  background: #e53e3e;
+  border: 2px solid #c53030;
+  border-radius: 4px 4px 0 0;
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .planner-main {
+    grid-template-columns: 250px 1fr 250px;
+  }
+}
+
+@media (max-width: 968px) {
+  .planner-main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
+  
+  .furniture-catalog,
+  .room-info {
+    margin-top: 0;
+    height: auto;
+    max-height: 300px;
+  }
+  
+  .room-designer {
+    margin-top: 0;
+    height: 60vh;
+  }
+}

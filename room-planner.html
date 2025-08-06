@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Floriash - מתכנן חדרים אינטראקטיבי. תכננו את החדר שלכם עם רהיטים וציוד מקצועי"/>
+  <title>Floriash - מתכנן חדרים | כלי תכנון מקצועי</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Roboto:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Styles -->
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="room-planner.css">
+</head>
+<body>
+
+  <!-- Header with navigation back -->
+  <header class="planner-header">
+    <div class="header-content">
+      <a href="index.html" class="back-button">← חזור לדף הבית</a>
+      <h1 class="planner-title">מתכנן חדרים מקצועי</h1>
+      <div class="header-controls">
+        <button class="save-btn">💾 שמור פרויקט</button>
+        <button class="reset-btn">🔄 איפוס</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Planner Interface -->
+  <main class="planner-main">
+    
+    <!-- Left Sidebar - Furniture Catalog -->
+    <aside class="furniture-catalog">
+      <div class="catalog-header">
+        <h2>// קטלוג רהיטים</h2>
+        <div class="catalog-search">
+          <input type="text" placeholder="חפש פריט..." id="searchInput">
+        </div>
+      </div>
+      
+      <div class="catalog-categories">
+        <button class="category-btn active" data-category="all">הכל</button>
+        <button class="category-btn" data-category="storage">אחסון</button>
+        <button class="category-btn" data-category="tables">שולחנות</button>
+        <button class="category-btn" data-category="seating">ישיבה</button>
+        <button class="category-btn" data-category="bedroom">חדר שינה</button>
+      </div>
+
+      <div class="furniture-grid" id="furnitureGrid">
+        <!-- Furniture items will be generated here -->
+      </div>
+    </aside>
+
+    <!-- Center - Room Designer -->
+    <section class="room-designer">
+      
+      <!-- Room Settings Panel -->
+      <div class="room-settings">
+        <h3>// הגדרות חדר</h3>
+        <div class="settings-grid">
+          <div class="setting-group">
+            <label for="roomWidth">רוחב (מטר)</label>
+            <input type="number" id="roomWidth" min="2" max="10" step="0.1" value="4.0">
+          </div>
+          <div class="setting-group">
+            <label for="roomLength">אורך (מטר)</label>
+            <input type="number" id="roomLength" min="2" max="10" step="0.1" value="4.0">
+          </div>
+          <div class="setting-group">
+            <label for="roomHeight">גובה (מטר)</label>
+            <input type="number" id="roomHeight" min="2.2" max="4" step="0.1" value="2.7">
+          </div>
+          <button class="apply-btn" id="applyRoomSettings">עדכן חדר</button>
+        </div>
+      </div>
+
+      <!-- 3D Room View -->
+      <div class="room-container">
+        <div class="room-3d view-top" id="room3d">
+          <div class="room-floor"></div>
+          <div class="room-walls">
+            <div class="wall wall-back"></div>
+            <div class="wall wall-left"></div>
+            <div class="wall wall-right"></div>
+          </div>
+          <div class="room-grid"></div>
+          <div class="furniture-container" id="furnitureContainer">
+            <!-- Placed furniture will appear here -->
+          </div>
+        </div>
+        
+        <div class="room-controls">
+          <div class="room-info-display">
+            <span class="room-size-display" id="roomSizeDisplay">חדר: 4.0×4.0 מטר</span>
+          </div>
+          <div class="view-controls">
+            <button class="view-btn active" data-view="top">👁️ מבט עליון</button>
+            <button class="view-btn" data-view="front">📐 מבט קדמי</button>
+          </div>
+          <div class="room-actions">
+            <button class="action-btn" onclick="roomPlanner.clearRoom()">🗑️ נקה חדר</button>
+            <button class="action-btn" onclick="roomPlanner.centerView()">🎯 מרכז תצוגה</button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Right Sidebar - Room Info & Properties -->
+    <aside class="room-info">
+      <div class="info-header">
+        <h2>// פרטי הפרויקט</h2>
+      </div>
+      
+      <div class="room-stats">
+        <div class="stat-item">
+          <span class="stat-label">שטח החדר:</span>
+          <span class="stat-value" id="roomArea">16.0 מ"ר</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">נפח החדר:</span>
+          <span class="stat-value" id="roomVolume">43.2 מ"ק</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">פריטי רהיטים:</span>
+          <span class="stat-value" id="furnitureCount">0</span>
+        </div>
+      </div>
+
+      <div class="placed-furniture">
+        <h3>רהיטים בחדר</h3>
+        <div class="furniture-list" id="furnitureList">
+          <div class="empty-state">
+            <p>עדיין לא הוספת רהיטים לחדר</p>
+            <p>בחר פריטים מהקטלוג בצד שמאל</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="export-options">
+        <h3>ייצוא הפרויקט</h3>
+        <button class="export-btn">📋 קבל הצעת מחיר</button>
+        <button class="export-btn">📧 שלח למעצבת</button>
+        <button class="export-btn">🖼️ שמור תמונה</button>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Scripts -->
+  <script src="room-planner.js"></script>
+</body>
+</html>

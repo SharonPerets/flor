@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Floriash - מעצבת ושרטטת מקצועית. שרטוטים טכניים, הדמיות תלת-ממד וליווי עיצובי. גגות, רהיטים, מטבחים ועוד."/>
+  <meta name="keywords" content="שרטוטים, הדמיות, עיצוב, מטבחים, רהיטים, גגות, סולארי, SketchUp, SolidWorks"/>
+  <title>Floriash - מעצבת ושרטטת מקצועית | מהרעיון למציאות</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Heebo', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #ffffff;
+      color: #2c3e50;
+      direction: rtl;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Hero Section */
+    .hero {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      color: white;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 100" fill="rgba(255,255,255,0.1)"><polygon points="1000,100 1000,0 0,100"/></svg>') no-repeat bottom;
+      background-size: cover;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
+      max-width: 800px;
+      padding: 0 20px;
+      animation: fadeInUp 1s ease-out;
+    }
+
+    .hero h1 {
+      font-size: 4rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    }
+
+    .hero-subtitle {
+      font-size: 1.5rem;
+      font-weight: 300;
+      margin-bottom: 2rem;
+      opacity: 0.9;
+    }
+
+    .hero-description {
+      font-size: 1.2rem;
+      margin-bottom: 3rem;
+      opacity: 0.8;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .cta-button {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      color: white;
+      padding: 15px 40px;
+      border-radius: 50px;
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 1.1rem;
+      border: 2px solid rgba(255,255,255,0.3);
+      transition: all 0.3s ease;
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+    }
+
+    .cta-button:hover {
+      background: rgba(255,255,255,0.3);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+
+    /* Mobile touch improvements */
+    .cta-button:active,
+    .submit-btn:active,
+    .service-card:active {
+      transform: scale(0.98);
+    }
+
+    /* Improved mobile navigation */
+    .mobile-nav {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.9);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border-radius: 25px;
+      padding: 10px 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      display: none;
+      z-index: 1000;
+    }
+
+    .mobile-nav.show {
+      display: flex;
+      gap: 15px;
+    }
+
+    .mobile-nav a {
+      color: #667eea;
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 15px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .mobile-nav a:hover,
+    .mobile-nav a.active {
+      background: #667eea;
+      color: white;
+    }
+
+    /* Sections */
+    .section {
+      padding: 80px 0;
+      position: relative;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+
+    .section-title {
+      font-size: 2.5rem;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 3rem;
+      color: #2c3e50;
+      position: relative;
+    }
+
+    .section-title::after {
+      content: '';
+      position: absolute;
+      bottom: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80px;
+      height: 4px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 2px;
+    }
+
+    /* About Section */
+    .about {
+      background: #f8f9fa;
+    }
+
+    .about-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    .about-text {
+      font-size: 1.1rem;
+      line-height: 1.8;
+      color: #555;
+    }
+
+    .about-text p {
+      margin-bottom: 1.5rem;
+    }
+
+    .tools {
+      display: flex;
+      gap: 20px;
+      margin-top: 2rem;
+    }
+
+    .tool-badge {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 8px 20px;
+      border-radius: 25px;
+      font-weight: 500;
+      font-size: 0.9rem;
+    }
+
+    .about-visual {
+      text-align: center;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 30px;
+    }
+
+    .stat-item {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      transition: transform 0.3s ease;
+    }
+
+    .stat-item:hover {
+      transform: translateY(-5px);
+    }
+
+    .stat-number {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #667eea;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-label {
+      font-weight: 500;
+      color: #666;
+    }
+
+    /* Services Section */
+    .services-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 40px;
+      margin-top: 3rem;
+    }
+
+    .service-card {
+      background: white;
+      padding: 40px 30px;
+      border-radius: 20px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.1);
+      text-align: center;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .service-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 4px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      transition: left 0.3s ease;
+    }
+
+    .service-card:hover::before {
+      left: 0;
+    }
+
+    .service-card:hover {
+      transform: translateY(-10px);
+      box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+    }
+
+    .service-icon {
+      font-size: 3rem;
+      margin-bottom: 1.5rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .service-title {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #2c3e50;
+    }
+
+    .service-description {
+      color: #666;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+    }
+
+    .service-features {
+      list-style: none;
+      text-align: right;
+    }
+
+    .service-features li {
+      padding: 5px 0;
+      color: #555;
+      position: relative;
+      padding-right: 20px;
+    }
+
+    .service-features li::before {
+      content: '✓';
+      position: absolute;
+      right: 0;
+      color: #667eea;
+      font-weight: bold;
+    }
+
+    /* Specializations Section */
+    .specializations {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .specializations .section-title {
+      color: white;
+    }
+
+    .specializations .section-title::after {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .spec-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 30px;
+    }
+
+    .spec-item {
+      background: rgba(255,255,255,0.1);
+      padding: 30px;
+      border-radius: 15px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: all 0.3s ease;
+    }
+
+    .spec-item:hover {
+      background: rgba(255,255,255,0.2);
+      transform: translateY(-5px);
+    }
+
+    .spec-emoji {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      display: block;
+    }
+
+    .spec-title {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    .spec-description {
+      opacity: 0.9;
+      line-height: 1.6;
+    }
+
+    /* Contact Section */
+    .contact {
+      background: #f8f9fa;
+    }
+
+    .contact-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: start;
+    }
+
+    .contact-info h3 {
+      font-size: 1.5rem;
+      margin-bottom: 1.5rem;
+      color: #2c3e50;
+    }
+
+    .contact-info p {
+      color: #666;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+
+    .contact-methods {
+      list-style: none;
+    }
+
+    .contact-methods li {
+      padding: 10px 0;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      color: #555;
+    }
+
+    .contact-icon {
+      width: 20px;
+      height: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 0.8rem;
+    }
+
+    .contact-form {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.1);
+    }
+
+    .form-group {
+      margin-bottom: 25px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #2c3e50;
+    }
+
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 15px 20px;
+      border: 2px solid #e9ecef;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      font-family: inherit;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .submit-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px 30px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1.1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+    }
+
+    .success-message {
+      background: #d4edda;
+      color: #155724;
+      padding: 15px;
+      border-radius: 10px;
+      margin-top: 20px;
+      display: none;
+      border: 1px solid #c3e6cb;
+    }
+
+    /* Footer */
+    footer {
+      background: #2c3e50;
+      color: white;
+      text-align: center;
+      padding: 40px 0;
+    }
+
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-brand {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .footer-text {
+      opacity: 0.8;
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .fade-in-up {
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .hero {
+        min-height: 80vh;
+        padding: 20px 0;
+      }
+
+      .hero h1 {
+        font-size: 2.5rem;
+      }
+
+      .hero-subtitle {
+        font-size: 1.2rem;
+      }
+
+      .hero-description {
+        font-size: 1rem;
+        margin-bottom: 2rem;
+      }
+
+      .cta-button {
+        padding: 12px 30px;
+        font-size: 1rem;
+      }
+
+      .about-content,
+      .contact-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+      }
+
+      .stat-item {
+        padding: 20px;
+      }
+
+      .stat-number {
+        font-size: 1.5rem;
+      }
+
+      .services-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
+      }
+
+      .service-card {
+        padding: 30px 20px;
+      }
+
+      .spec-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+
+      .spec-item {
+        padding: 25px 20px;
+      }
+
+      .section-title {
+        font-size: 2rem;
+      }
+
+      .section {
+        padding: 60px 0;
+      }
+
+      .container {
+        padding: 0 15px;
+      }
+
+      .contact-form {
+        padding: 30px 20px;
+      }
+
+      .footer-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 15px;
+      }
+
+      .tools {
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .service-features {
+        text-align: center;
+      }
+    }
+
+    /* Extra small devices (phones, 600px and down) */
+    @media (max-width: 480px) {
+      .hero h1 {
+        font-size: 2rem;
+      }
+
+      .hero-subtitle {
+        font-size: 1rem;
+      }
+
+      .hero-description {
+        font-size: 0.9rem;
+      }
+
+      .section-title {
+        font-size: 1.6rem;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+      }
+
+      .service-icon {
+        font-size: 2.5rem;
+      }
+
+      .spec-emoji {
+        font-size: 2rem;
+      }
+
+      .about-text {
+        font-size: 1rem;
+      }
+
+      .contact-info h3 {
+        font-size: 1.3rem;
+      }
+
+      .form-group input,
+      .form-group textarea {
+        padding: 12px 15px;
+      }
+
+      .submit-btn {
+        padding: 12px 25px;
+        font-size: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero Section -->
+  <section class="hero" id="home">
+    <div class="hero-content">
+      <h1>Floriash</h1>
+      <p class="hero-subtitle">מעצבת ושרטטת מקצועית</p>
+      <p class="hero-description">
+        מהרעיון למציאות - אני מלווה אותך בכל שלב של הדרך עם שרטוטים מדויקים והדמיות מרשימות
+      </p>
+      <a href="#contact" class="cta-button">בואו נתחיל לעבוד ביחד</a>
+    </div>
+  </section>
+
+  <!-- About Section -->
+  <section class="section about" id="about">
+    <div class="container">
+      <h2 class="section-title">קצת עליי</h2>
+      <div class="about-content">
+        <div class="about-text">
+          <p>
+            שלום! אני פלורינה, מעצבת ושרטטת עם תשוקה אמיתית להפוך רעיונות למציאות מרשימה.
+          </p>
+          <p>
+            אני מתמחה ביצירת שרטוטים טכניים מדויקים והדמיות תלת-ממד מרשימות שעוזרות ללקוחותיי לראות בדיוק איך הפרויקט שלהם ייראה לפני ביצוע.
+          </p>
+          <p>
+            עם ניסיון במגוון רחב של פרויקטים - מתכנון גגות למערכות סולאריות ועד עיצוב רהיטים מותאמים אישית ומטבחים חלומיים.
+          </p>
+          <div class="tools">
+            <span class="tool-badge">SketchUp Pro</span>
+            <span class="tool-badge">SolidWorks</span>
+          </div>
+        </div>
+        <div class="about-visual">
+          <div class="stats-grid">
+            <div class="stat-item fade-in-up">
+              <div class="stat-number">100+</div>
+              <div class="stat-label">פרויקטים הושלמו</div>
+            </div>
+            <div class="stat-item fade-in-up">
+              <div class="stat-number">5★</div>
+              <div class="stat-label">דירוג לקוחות</div>
+            </div>
+            <div class="stat-item fade-in-up">
+              <div class="stat-number">2</div>
+              <div class="stat-label">תוכנות מקצועיות</div>
+            </div>
+            <div class="stat-item fade-in-up">
+              <div class="stat-number">24/7</div>
+              <div class="stat-label">זמינות</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Services Section -->
+  <section class="section services" id="services">
+    <div class="container">
+      <h2 class="section-title">השירותים שלי</h2>
+      <div class="services-grid">
+        <div class="service-card">
+          <div class="service-icon">📐</div>
+          <h3 class="service-title">שרטוטים טכניים</h3>
+          <p class="service-description">
+            שרטוטים מדויקים ומפורטים לפרויקטים מכל הסוגים
+          </p>
+          <ul class="service-features">
+            <li>שרטוטי עבודה מפורטים</li>
+            <li>מידות מדויקות</li>
+            <li>תאימות לתקנים</li>
+            <li>קבצי CAD איכותיים</li>
+          </ul>
+        </div>
+
+        <div class="service-card">
+          <div class="service-icon">🎨</div>
+          <h3 class="service-title">הדמיות תלת-ממד</h3>
+          <p class="service-description">
+            הדמיות פוטוריאליסטיות שמציגות בדיוק איך הפרויקט ייראה
+          </p>
+          <ul class="service-features">
+            <li>הדמיות באיכות גבוהה</li>
+            <li>זוויות צילום מגוונות</li>
+            <li>חומרים וטקסטורות אמיתיות</li>
+            <li>תאורה מקצועית</li>
+          </ul>
+        </div>
+
+        <div class="service-card">
+          <div class="service-icon">🤝</div>
+          <h3 class="service-title">ליווי עיצובי</h3>
+          <p class="service-description">
+            ליווי אישי לאורך כל הפרויקט מהרעיון ועד המימוש
+          </p>
+          <ul class="service-features">
+            <li>ייעוץ מקצועי</li>
+            <li>התאמת פתרונות</li>
+            <li>ליווי בבחירת חומרים</li>
+            <li>תמיכה מלאה</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Specializations Section -->
+  <section class="section specializations">
+    <div class="container">
+      <h2 class="section-title">התמחויותיי</h2>
+      <div class="spec-grid">
+        <div class="spec-item">
+          <span class="spec-emoji">🏠</span>
+          <h3 class="spec-title">גגות ומערכות סולאריות</h3>
+          <p class="spec-description">
+            תכנון מדויק של גגות והתקנת לוחות סולאריים עם חישובי עומסים ותאימות מלאה לתקנים
+          </p>
+        </div>
+
+        <div class="spec-item">
+          <span class="spec-emoji">🪑</span>
+          <h3 class="spec-title">רהיטים מותאמים</h3>
+          <p class="spec-description">
+            עיצוב רהיטים ייחודיים המותאמים אישית לצרכים ולחלל המגורים שלכם
+          </p>
+        </div>
+
+        <div class="spec-item">
+          <span class="spec-emoji">🍳</span>
+          <h3 class="spec-title">מטבחים וחללי בישול</h3>
+          <p class="spec-description">
+            תכנון מטבחים פונקציונליים ויפים עם התחשבות בארגונומיה ובזרימת העבודה
+          </p>
+        </div>
+
+        <div class="spec-item">
+          <span class="spec-emoji">🔧</span>
+          <h3 class="spec-title">פתרונות תעשייתיים</h3>
+          <p class="spec-description">
+            תכנון פתרונות מקצועיים לעסקים ולתעשייה עם דגש על פונקציונליות ויעילות
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact Section -->
+  <section class="section contact" id="contact">
+    <div class="container">
+      <h2 class="section-title">בואו ניצור קשר</h2>
+      <div class="contact-content">
+        <div class="contact-info">
+          <h3>מוכנים להתחיל?</h3>
+          <p>
+            יש לכם רעיון לפרויקט? רוצים לדעת איך זה ייראה בפועל? 
+            אני כאן כדי לעזור לכם להגשים את החזון שלכם.
+          </p>
+          <ul class="contact-methods">
+            <li>
+              <span class="contact-icon">📧</span>
+              <span>מענה תוך 24 שעות</span>
+            </li>
+            <li>
+              <span class="contact-icon">💰</span>
+              <span>הצעת מחיר חינם</span>
+            </li>
+            <li>
+              <span class="contact-icon">⚡</span>
+              <span>ביצוע מהיר ומקצועי</span>
+            </li>
+            <li>
+              <span class="contact-icon">🎯</span>
+              <span>התאמה אישית מלאה</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="contact-form">
+          <form id="contactForm">
+            <div class="form-group">
+              <label for="name">שם מלא</label>
+              <input type="text" id="name" name="name" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="email">אימייל</label>
+              <input type="email" id="email" name="email" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="phone">טלפון (אופציונלי)</label>
+              <input type="tel" id="phone" name="phone">
+            </div>
+            
+            <div class="form-group">
+              <label for="project">תיאור הפרויקט</label>
+              <textarea id="project" name="project" rows="5" placeholder="ספרו לי על הפרויקט שלכם - מה אתם רוצים ליצור? מה החזון שלכם?"></textarea>
+            </div>
+            
+            <button type="submit" class="submit-btn">שלחו בקשה</button>
+            
+            <div class="success-message" id="successMessage">
+              🎉 תודה! הבקשה שלכם נשלחה בהצלחה. אחזור אליכם בהקדם!
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mobile Navigation -->
+  <nav class="mobile-nav" id="mobileNav">
+    <a href="#home">בית</a>
+    <a href="#about">אודותיי</a>
+    <a href="#services">שירותים</a>
+    <a href="#contact">צור קשר</a>
+  </nav>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-brand">Floriash</div>
+        <div class="footer-text">
+          &copy; 2025 Floriash - מעצבת ושרטטת מקצועית. כל הזכויות שמורות.
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Check if device is mobile
+    function isMobile() {
+      return window.innerWidth <= 768;
+    }
+
+    // Show/hide mobile navigation
+    function toggleMobileNav() {
+      const mobileNav = document.getElementById('mobileNav');
+      if (isMobile()) {
+        mobileNav.classList.add('show');
+      } else {
+        mobileNav.classList.remove('show');
+      }
+    }
+
+    // Smooth scrolling
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+          
+          // Update active navigation link
+          document.querySelectorAll('.mobile-nav a').forEach(link => {
+            link.classList.remove('active');
+          });
+          this.classList.add('active');
+        }
+      });
+    });
+
+    // Form submission with better mobile feedback
+    document.getElementById('contactForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      // Show loading state
+      const submitBtn = this.querySelector('.submit-btn');
+      const originalText = submitBtn.textContent;
+      submitBtn.textContent = 'שולח...';
+      submitBtn.disabled = true;
+      
+      // Simulate form submission delay
+      setTimeout(() => {
+        // Show success message
+        const successMessage = document.getElementById('successMessage');
+        successMessage.style.display = 'block';
+        
+        // Reset form
+        this.reset();
+        
+        // Reset button
+        submitBtn.textContent = originalText;
+        submitBtn.disabled = false;
+        
+        // Hide success message after 5 seconds
+        setTimeout(() => {
+          successMessage.style.display = 'none';
+        }, 5000);
+        
+        // Scroll to success message on mobile
+        if (isMobile()) {
+          successMessage.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 1000);
+    });
+
+    // Add animation on scroll with better mobile performance
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('fade-in-up');
+        }
+      });
+    }, observerOptions);
+
+    // Observe all cards and stat items
+    document.querySelectorAll('.service-card, .stat-item, .spec-item').forEach(el => {
+      observer.observe(el);
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', toggleMobileNav);
+    
+    // Initialize on load
+    window.addEventListener('load', () => {
+      toggleMobileNav();
+      
+      // Add touch feedback for mobile
+      if (isMobile()) {
+        document.body.style.cursor = 'default';
+        
+        // Prevent zoom on double tap for better UX
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function(event) {
+          const now = (new Date()).getTime();
+          if (now - lastTouchEnd <= 300) {
+            event.preventDefault();
+          }
+          lastTouchEnd = now;
+        }, false);
+      }
+    });
+
+    // Add scroll spy for navigation
+    window.addEventListener('scroll', () => {
+      if (!isMobile()) return;
+      
+      const sections = document.querySelectorAll('section[id]');
+      const navLinks = document.querySelectorAll('.mobile-nav a');
+      
+      let current = '';
+      sections.forEach(section => {
+        const sectionTop = section.offsetTop;
+        const sectionHeight = section.clientHeight;
+        if (window.pageYOffset >= sectionTop - 60) {
+          current = section.getAttribute('id');
+        }
+      });
+      
+      navLinks.forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === '#' + current) {
+          link.classList.add('active');
+        }
+      });
+    });
+  </script>
+</body>
+</html>
