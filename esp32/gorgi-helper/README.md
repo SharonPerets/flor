@@ -48,6 +48,12 @@ default one (**Settings → System → Sound → Input**).
 
 Gorgi and the PC must be on the same Wi-Fi network.
 
+## Memory
+
+Gorgi remembers things you tell it, like your name, the people and pets in your life, what you
+like, or plans you mention. They're kept on your PC in `memory.json` (tray menu → **Memories...**
+opens it). Say "Gorgi, forget that" or "forget everything" to remove them.
+
 ## If it doesn't connect
 
 - Right-click the tray icon to see the status.

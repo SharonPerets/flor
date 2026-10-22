@@ -34,7 +34,7 @@ import websockets  # noqa: E402
 import updater  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "3.4"  # must match esp32/VERSION
+VERSION = "3.5"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -508,6 +508,12 @@ def start_tray(helper, loop):
     def open_settings_item(_icon, _item):
         show_settings(helper.config)
 
+    def open_memories(_icon, _item):
+        path = data_dir() / "memory.json"
+        if not path.exists():
+            path.write_text('{"facts": []}', encoding="utf-8")
+        os.startfile(path)  # opens in Notepad (or whatever opens .json files)
+
     def run_async(coro):
         asyncio.run_coroutine_threadsafe(coro, loop)
 
@@ -525,6 +531,7 @@ def start_tray(helper, loop):
         pystray.MenuItem("Check for updates", lambda _icon, _item: run_async(helper.check_updates(manual=True))),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Settings...", open_settings_item, default=True),
+        pystray.MenuItem("Memories...", open_memories),
         pystray.MenuItem("Start with Windows", toggle_autostart, checked=lambda _item: autostart_enabled()),
         pystray.MenuItem("Open settings folder", open_folder),
         pystray.MenuItem("Quit", quit_app),
@@ -600,7 +607,9 @@ def make_voice(config):
         log.error("voice features unavailable: %s", e)
         return None
 
-    brain = Brain(config)  # one brain, so Gorgi remembers between taps
+    from memory import Memory
+
+    brain = Brain(config, Memory(data_dir() / "memory.json"))  # one brain, so Gorgi remembers between taps
     transcriber = Transcriber(config.get("whisper_model") or "base.en", data_dir() / "models")
     # Download/load Whisper in the background so the first chat is quick
     threading.Thread(target=transcriber.load, daemon=True).start()
@@ -650,6 +659,7 @@ def self_test(out_path):
         import pystray  # noqa: F401
         import zeroconf  # noqa: F401
         import brain  # noqa: F401
+        import memory  # noqa: F401
         import conversation  # noqa: F401
         import settings_window  # noqa: F401
 

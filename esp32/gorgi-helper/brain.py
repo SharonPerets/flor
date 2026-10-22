@@ -39,7 +39,18 @@ You can control the music on your friend's PC. When asked, put action tags at th
 Only use action tags when your friend asks for a music or volume change.
 
 Example: [happy] Sure thing, skipping this one! [action:next]
+
+You have a long-term memory. When your friend tells you something worth remembering for
+weeks (their name, people and pets in their life, likes and dislikes, birthdays, plans,
+things they are working on), add a short fact at the END of your reply:
+[remember: Their name is Sharon]
+Write the fact about your friend in the third person, one fact per tag. Don't store small talk,
+and don't repeat facts you already remember. If they ask you to forget something, add
+[forget: words from that fact], or [forget: everything] to forget it all.
+Use what you remember naturally, without listing it.
 """
+
+MEMORY_RE = re.compile(r"\[(remember|forget)\s*:\s*([^\]]+)\]", re.IGNORECASE)
 
 TAG_RE = re.compile(r"\[([a-zA-Z_]+)(?::([a-zA-Z0-9_]+))?(?::([0-9]+))?\]")
 
@@ -54,9 +65,12 @@ class BrainError(Exception):
 
 
 def parse_reply(reply):
-    """'[happy] Hi! [action:next]' -> ('happy', 'Hi!', [('next', None)])"""
+    """'[happy] Hi! [action:next]' -> ('happy', 'Hi!', [('next', None)])
+
+    Memory tags come out as ('remember', 'fact') and ('forget', 'words')."""
     mood = None
-    actions = []
+    actions = [(m.group(1).lower(), m.group(2).strip()) for m in MEMORY_RE.finditer(reply)]
+    reply = MEMORY_RE.sub("", reply)
     for m in TAG_RE.finditer(reply):
         name = m.group(1).lower()
         if name in MOODS and mood is None:
@@ -71,8 +85,9 @@ def parse_reply(reply):
 
 
 class Brain:
-    def __init__(self, config):
+    def __init__(self, config, memory=None):
         self.config = config
+        self.memory = memory
         self.history = []
         self.last_chat = 0.0
 
@@ -101,6 +116,8 @@ class Brain:
 
         model = self.config.get("model") or DEFAULT_MODEL
         system = PERSONALITY + "\n" + context
+        if self.memory is not None:
+            system += "\n\n" + self.memory.prompt_block()
         messages = [{"role": "system", "content": system}] + self.history + [{"role": "user", "content": text}]
         body = {"model": model, "messages": messages, "stream": False}
         if model.startswith("gpt-oss"):
@@ -131,4 +148,13 @@ class Brain:
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
         self.history = self.history[-MAX_HISTORY_TURNS * 2:]
         self.last_chat = time.monotonic()
-        return parse_reply(reply)
+        mood, spoken, actions = parse_reply(reply)
+        music = []
+        for name, value in actions:
+            if name == "remember" and self.memory is not None:
+                self.memory.add(value)
+            elif name == "forget" and self.memory is not None:
+                self.memory.forget(value)
+            elif name not in ("remember", "forget"):
+                music.append((name, value))
+        return mood, spoken, music
