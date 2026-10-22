@@ -1,7 +1,6 @@
 """A small Settings window: Ollama key, AI model, Gorgi's voice."""
 
 import asyncio
-import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -13,24 +12,14 @@ VOICES = {
 }
 SUGGESTED_MODELS = ["gpt-oss:20b", "gpt-oss:120b"]
 
-_open = threading.Lock()
 
+def show_window(config, save_config, list_models):
+    """Shows the Settings window and returns when it's closed.
 
-def open_settings(config, save_config, list_models):
-    """Shows the window in its own thread. list_models(key) -> list of names (may raise)."""
-    if not _open.acquire(blocking=False):
-        return  # already open
-    threading.Thread(target=_run, args=(config, save_config, list_models), daemon=True).start()
-
-
-def _run(config, save_config, list_models):
-    try:
-        _window(config, save_config, list_models)
-    finally:
-        _open.release()
-
-
-def _window(config, save_config, list_models):
+    Runs in its own process (GorgiHelper.exe --settings): Tkinter must own the
+    main thread of a process, or it can crash the app later.
+    list_models(key) -> list of model names (may raise).
+    """
     root = tk.Tk()
     root.title("Gorgi Helper - Settings")
     root.resizable(False, False)

@@ -409,14 +409,41 @@ def start_tray(helper, loop):
     return icon
 
 
+_settings_process = None
+
+
 def show_settings(config):
+    """Opens the Settings window as a separate process, then reloads the settings."""
+    import subprocess
+
+    global _settings_process
+    if _settings_process is not None and _settings_process.poll() is None:
+        return  # already open
+    if getattr(sys, "frozen", False):
+        command = [sys.executable, "--settings"]
+    else:
+        command = [sys.executable, os.path.abspath(__file__), "--settings"]
+    _settings_process = subprocess.Popen(command)
+
+    def wait_and_reload(process):
+        process.wait()
+        config.update(load_config())  # the brain and voice read this same dict
+        log.info("settings reloaded (model: %s, voice: %s)", config.get("model"), config.get("voice"))
+
+    threading.Thread(target=wait_and_reload, args=(_settings_process,), daemon=True).start()
+
+
+def run_settings_window():
+    """The --settings process: show the window in this process's main thread."""
     from brain import Brain
-    from settings_window import open_settings
+    from settings_window import show_window
+
+    config = load_config()
 
     async def list_models(key):
         return await Brain({**config, "ollama_api_key": key}).list_models()
 
-    open_settings(config, save_config, list_models)
+    show_window(config, save_config, list_models)
 
 
 # ---------------------------------------------------------------- voice
@@ -541,10 +568,14 @@ def main():
     parser.add_argument("--no-tray", action="store_true", help="run without the tray icon")
     parser.add_argument("--address", help="Gorgi's IP address (skips auto-discovery)")
     parser.add_argument("--selftest", metavar="FILE", help=argparse.SUPPRESS)
+    parser.add_argument("--settings", action="store_true", help="only show the Settings window")
     args = parser.parse_args()
 
     if args.selftest:
         self_test(args.selftest)
+        return
+    if args.settings:
+        run_settings_window()
         return
 
     setup_logging(console=args.no_tray or not getattr(sys, "frozen", False))
