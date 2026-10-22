@@ -25,8 +25,10 @@ Gorgi and the PC must be on the same Wi-Fi network.
 The helper checks GitHub once a day. When a new version is out, a message pops up near the clock.
 Right-click the Gorgi icon and choose:
 
-- **Update Gorgi Helper to …** — downloads the new installer, updates itself quietly and restarts.
-- **Update Gorgi to …** — sends the new firmware to Gorgi over Wi-Fi. Gorgi shows a progress bar and restarts.
+- **Update Gorgi Helper to …** — downloads the new installer (with a progress window), updates itself
+  quietly and restarts.
+- **Update Gorgi to …** — sends the new firmware to Gorgi over Wi-Fi, with a progress window on the PC.
+  Gorgi's screen goes dark while it installs, then it restarts.
 
 **Check for updates** in the same menu checks right away.
 
@@ -41,6 +43,8 @@ paired helper, then set it up again.
 - After answering, Gorgi listens about 5 more seconds for a follow-up. Stay quiet to end.
 - **Tap the face again** to stop at any time.
 - Music commands work too: "next song", "pause the music", "volume 30", "turn it up".
+- Ask about the weather: "will it rain tomorrow?". Gorgi uses the forecast from its weather screen
+  (for the city picked there).
 
 If Gorgi says it didn't hear anything: Windows **Settings → Privacy & security → Microphone**,
 turn on **Let desktop apps access your microphone**, and check the right microphone is the

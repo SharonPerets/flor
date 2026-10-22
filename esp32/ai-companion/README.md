@@ -58,6 +58,9 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
+- **Swipe left**: the weather screen, now and the next 7 days. Tap the city name to pick another
+  city in Israel (Nahariya is the default). Swipe right, or wait 45 seconds, to go back to the face.
+  The forecast comes from [Open-Meteo](https://open-meteo.com) and updates every 30 minutes.
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.
   Tap to wake it up.
 
@@ -68,6 +71,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/main.cpp` | Behaviour: touch, demo conversation, sleeping |
 | `src/face.cpp` | The face: expressions, blinking, looking around, talking mouth |
 | `src/ui.cpp` | Top bar, subtitles, media bar |
+| `src/weather.cpp` | The weather screen: forecast, weather pictures, city picker |
+| `src/weather_net.cpp` | Downloads the forecast in the background |
 | `src/gfx.cpp` | Smooth-edged drawing (circles, rounded boxes, icons, text) |
 | `src/display.cpp` | Draws in fast memory, strip by strip, then copies to the screen |
 | `src/gfont_data.cpp` | Smooth text, made from the Nunito font by `tools/make_fonts.py` |

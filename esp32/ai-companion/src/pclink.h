@@ -14,7 +14,7 @@
 //                    {"type":"heard","text":"what you said"}
 //                    {"type":"say","text":"Gorgi's answer","mood":"happy"}
 //                    {"type":"level","value":0.4}       (voice loudness while speaking)
-//   Gorgi -> helper  {"type":"hello","version":"3.4","paired":true}
+//   Gorgi -> helper  {"type":"hello","version":"3.6","paired":true}
 //                    {"type":"cmd","action":"playpause"|"next"|"prev"}
 //                    {"type":"cmd","action":"volume","value":40}
 //                    {"type":"talk"}     (face tapped: start a conversation)
@@ -31,7 +31,7 @@
 #include "ui.h"
 
 // Shown at startup and sent to the helper, so it's easy to see which version is running
-#define GORGI_VERSION "3.5"
+#define GORGI_VERSION "3.6"
 
 namespace pclink {
 
