@@ -384,7 +384,7 @@ bool moodFromName(const char* name, Mood& out) {
   return false;
 }
 
-bool Face::begin(LGFX&) {
+bool Face::begin() {
   setMood(Mood::Neutral);
   cur_ = target_;
   haveLast_ = false;
@@ -539,7 +539,7 @@ Face::Pose Face::buildPose(uint32_t now, int fx, int fy) const {
   return p;
 }
 
-bool Face::render(LGFX&, int x, int y, uint32_t now) {
+bool Face::render(int x, int y, uint32_t now) {
   update(now);
   const Rect face{x, y, WIDTH, HEIGHT};
   const Pose p = buildPose(now, x, y);

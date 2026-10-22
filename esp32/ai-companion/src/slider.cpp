@@ -45,6 +45,7 @@ void show(int offset) {
   uint16_t* rows = display::scratch(cap);
   const int perBand = (int)(cap / W);
   if (!rows || perBand < 1) return;
+  display::willCover(AREA);  // every pixel of AREA is drawn below
 
   // Which part of which picture goes where, along one row
   const uint16_t* left;

@@ -33,7 +33,7 @@ class Face {
   static constexpr int WIDTH = 600;
   static constexpr int HEIGHT = 274;
 
-  bool begin(LGFX& lcd);
+  bool begin();
   void setMood(Mood m);
   Mood mood() const { return mood_; }
   void setTalking(bool on) { talking_ = on; }
@@ -50,7 +50,7 @@ class Face {
 
   // Advance the animation and draw what changed. (x, y) is where the face
   // area starts on the screen. Returns true if anything was drawn.
-  bool render(LGFX& lcd, int x, int y, uint32_t nowMs);
+  bool render(int x, int y, uint32_t nowMs);
 
   // What gets drawn, in screen coordinates rounded to quarter pixels. Two
   // frames with the same Pose look exactly the same, so nothing is redrawn.

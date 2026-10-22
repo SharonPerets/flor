@@ -28,7 +28,7 @@ struct MediaInfo {
 };
 
 // Draws the empty screen background. Call once, after display::begin().
-void begin(LGFX& lcd);
+void begin();
 
 void setClock(const String& text);
 void setStatus(const String& text, const gfx::Color& color, bool pulse);

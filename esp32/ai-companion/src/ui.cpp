@@ -237,7 +237,7 @@ void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
 
 }  // namespace
 
-void begin(LGFX&) {
+void begin() {
   display::render(Rect{0, 0, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
   dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = dirtyDots = true;
 }

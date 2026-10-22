@@ -18,8 +18,10 @@
 #include "board.h"
 #include "display.h"
 #include "face.h"
+#include "gfont.h"
 #include "music_screen.h"
 #include "pclink.h"
+#include "screen.h"
 #include "slider.h"
 #include "ui.h"
 #include "weather.h"
@@ -27,7 +29,6 @@
 
 namespace {
 
-LGFX lcd;
 Face face;
 
 // How long before Gorgi gets sleepy / falls asleep with nobody around
@@ -221,7 +222,7 @@ void drawPageInto(int which, Page p, uint32_t now) {
   });
   if (p == Page::Face) {
     face.invalidate();
-    face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+    face.render(ui::FACE_X, ui::FACE_Y, now);
     ui::drawSubtitleNow();
   }
   display::setTarget(nullptr, slider::AREA);
@@ -715,8 +716,9 @@ void handleTouch(uint32_t now) {
       if (now - touchStart >= FORGET_WIFI_PRESS_MS) {
         longPressDone = true;
         say(Mood::Surprised, "Forgetting Wi-Fi and restarting...");
-        face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+        face.render(ui::FACE_X, ui::FACE_Y, now);
         ui::update(now);
+        screen::present();
         delay(1500);
         pclink::forgetWifi();
       } else if (now - touchStart >= 1500) {
@@ -808,9 +810,9 @@ void updatePhase(uint32_t now) {
 
 void fatal(const char* msg) {
   Serial.println(msg);
-  lcd.setTextColor(TFT_RED);
-  lcd.setFont(&fonts::FreeSansBold12pt7b);
-  lcd.drawString(msg, 20, 20);
+  display::render(gfx::Rect{0, 0, SCREEN_W, SCREEN_H}, ui::BACKGROUND,
+                  [&](gfx::Canvas& c) { c.text(gfont::SUBTITLE, msg, 20, 60, gfx::rgb(0xFF6B6B)); });
+  screen::present();
   while (true) delay(1000);
 }
 
@@ -818,7 +820,7 @@ void drawFrame(uint32_t now) {
   if (slide.on) {
     // the slider owns the middle of the screen
   } else if (page == Page::Face) {
-    face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+    face.render(ui::FACE_X, ui::FACE_Y, now);
   } else if (page == Page::Weather) {
     if (wxDirty) {
       wxDirty = false;
@@ -838,6 +840,7 @@ void drawFrame(uint32_t now) {
     musicProgressKey = key;
   }
   ui::update(now);
+  screen::present();
 }
 
 }  // namespace
@@ -848,15 +851,13 @@ void setup() {
   Serial.printf("Gorgi %s starting...\n", GORGI_VERSION);
 
   board::begin();
-  lcd.init();
-  lcd.fillScreen(TFT_BLACK);
-
   if (!psramFound()) fatal("PSRAM not found - check board settings");
-  if (!display::begin(lcd)) fatal("Not enough memory for the drawing buffer");
-  if (!face.begin(lcd)) fatal("Could not start the face");
+  if (!screen::begin()) fatal("The screen didn't start");
+  if (!display::begin()) fatal("Not enough memory for the drawing buffer");
+  if (!face.begin()) fatal("Could not start the face");
   if (!slider::begin() || !music::begin()) fatal("Not enough memory for the screens");
 
-  ui::begin(lcd);
+  ui::begin();
   media.volume = 50;
   ui::setClock("Gorgi");
   showIdleStatus();
@@ -918,11 +919,16 @@ void loop() {
     frames++;
   }
 
+  screen::present();  // a slide step drawn above (does nothing if nothing changed)
+
   if (now - fpsTimer >= 10000) {
     const display::Stats st = display::takeStats();
     Serial.printf("frames/s: %.1f  per frame: %.1f ms (max %.1f)  shapes %.0f ms, copy %.0f ms, %u px per s\n",
                   frames / ((now - fpsTimer) / 1000.0f), frames ? renderMicros / 1000.0f / frames : 0.0f,
                   renderMaxMicros / 1000.0f, st.drawUs / 10000.0f, st.pushUs / 10000.0f, st.pixels / 10);
+    const screen::Stats sc = screen::takeStats();
+    Serial.printf("screen: %u pictures in 10 s, waited %.0f ms, sync %.0f ms\n", sc.frames, sc.waitUs / 1000.0f,
+                  sc.syncUs / 1000.0f);
     Serial.printf("free heap: %u  free psram: %u  wifi: %d  pc: %d\n", ESP.getFreeHeap(), ESP.getFreePsram(),
                   (int)pclink::wifiState(), (int)pclink::helperConnected());
     frames = 0;
