@@ -56,7 +56,8 @@ MediaInfo media;
 Target pressed = Target::None;
 uint32_t pressedUntil = 0;
 
-int pageIndex = 0, pageCount = 1;
+float pagePos = 0;
+int pageCount = 1;
 bool subtitleVisible = true;
 bool dirtyDots = true;
 bool dirtyClock = true, dirtyStatus = true, dirtySub = true;
@@ -140,12 +141,10 @@ void drawStatus(Canvas& c) {
 void drawDots(Canvas& c) {
   if (pageCount < 2) return;
   const float gap = 18, cx = 400 - gap * (pageCount - 1) * 0.5f;
-  for (int i = 0; i < pageCount; ++i) {
-    if (i == pageIndex)
-      c.fillRRect(cx + i * gap - 9, 19, 18, 6, 3, ACCENT);
-    else
-      c.fillCircle(cx + i * gap, 22, 3.5f, DOT);
-  }
+  for (int i = 0; i < pageCount; ++i) c.fillCircle(cx + i * gap, 22, 3.5f, DOT);
+  // the current screen: a short bar that slides along with the screens
+  const float x = cx + pagePos * gap;
+  c.fillRRect(x - 9, 19, 18, 6, 3, ACCENT);
 }
 
 void drawSubtitle(Canvas& c) {
@@ -243,11 +242,23 @@ void begin(LGFX&) {
   dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = dirtyDots = true;
 }
 
-void setPage(int index, int count) {
-  if (index == pageIndex && count == pageCount) return;
-  pageIndex = index;
+void setPages(int count, float position) {
   pageCount = count;
+  pagePos = position;
   dirtyDots = true;
+}
+
+void setPagePosition(float position) {
+  if (fabsf(position - pagePos) < 0.01f) return;
+  pagePos = position;
+  dirtyDots = true;
+}
+
+void drawSubtitleNow() {
+  const bool was = subtitleVisible;
+  subtitleVisible = true;
+  redraw(SUB_AREA, BG, drawSubtitle);
+  subtitleVisible = was;
 }
 
 void setSubtitleVisible(bool visible) {

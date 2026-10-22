@@ -23,6 +23,7 @@ FONTS = [
     ("Z_BIG", 44, 800, "Z"),          # sleeping Zzz
     ("Z_SMALL", 30, 800, "Z"),
     ("BIG", 76, 800, "-0123456789"),  # the big temperature on the weather screen
+    ("HEADLINE", 34, 800, "ascii"),   # song title on the music screen
 ]
 GAMMA = 0.85  # a little extra weight on the edges: light text on dark looks thin otherwise
 

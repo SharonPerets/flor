@@ -31,6 +31,7 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import httpx  # noqa: E402
 import websockets  # noqa: E402
 
+import album_art  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
 
@@ -96,12 +97,17 @@ class FakeMedia:
     """Stand-in used on non-Windows systems, for development and tests."""
 
     def __init__(self):
-        self.info = {"title": "Test Song", "artist": "Test Artist", "playing": True}
+        self.info = {"title": "Test Song", "artist": "Test Artist", "album": "Test Album", "playing": True,
+                     "pos": 10.0, "dur": 200.0}
+        self.art = None  # picture file bytes for get_art
         self.volume = 40
         self.commands = []
 
     async def get_info(self):
         return dict(self.info)
+
+    async def get_art(self):
+        return self.art
 
     async def command(self, action):
         self.commands.append(action)
@@ -444,25 +450,80 @@ class Helper:
             # Report the new state soon, once the media app has reacted
             asyncio.get_running_loop().call_later(0.4, self.refresh_event.set)
 
+    async def _send_art(self, ws, track):
+        """Sends the song's picture to Gorgi (once per picture). Returns its id, or 0."""
+        try:
+            raw = await self.media.get_art()
+            if not raw:
+                return 0
+            if raw == self._art_raw:
+                return self._art_id
+            pixels = await asyncio.to_thread(album_art.to_rgb565, raw)
+        except Exception as e:
+            log.info("album art skipped: %s", e)
+            return 0
+        self._art_raw = raw
+        self._art_id += 1
+        for piece in album_art.pieces(self._art_id, pixels):
+            await ws.send(piece)
+        log.info("album art sent for %s", track[0])
+        return self._art_id
+
     async def _send_loop(self, ws):
         last_media = None
         last_clock = None
         last_full_send = 0.0
+        last_track = None
+        art_id = 0
+        art_recheck_at = None  # apps sometimes update the picture a moment after the song
+        sent_pos = None  # (position, when) last sent, to notice jumps
+        self._art_raw = None
+        self._art_id = getattr(self, "_art_id", 0)
         while True:
             info = await self.media.get_info()
             volume = self.media.get_volume()
+            now = time.monotonic()
+
+            track = (info["title"], info["artist"], info.get("album", ""))
+            if track != last_track:
+                last_track = track
+                art_id = await self._send_art(ws, track) if info["title"] else 0
+                art_recheck_at = now + 3
+            elif art_recheck_at and now >= art_recheck_at:
+                art_recheck_at = None
+                if info["title"]:
+                    art_id = await self._send_art(ws, track) or art_id
+
             media = {
                 "type": "media",
                 "title": info["title"],
                 "artist": info["artist"],
+                "album": info.get("album", ""),
                 "playing": info["playing"],
                 "volume": 50 if volume is None else volume,
+                "art": art_id,
             }
-            now = time.monotonic()
+            pos, dur = info.get("pos"), info.get("dur")
+            # The position moves all the time; Gorgi counts along by itself. It's
+            # only sent again when it jumps (you skipped ahead) or with other news.
+            jumped = False
+            if pos is not None and dur:
+                if sent_pos is not None:
+                    expected = sent_pos[0] + ((now - sent_pos[1]) if info["playing"] else 0)
+                    jumped = abs(pos - expected) > 2.5
+                else:
+                    jumped = True
             # Resend every 30 s even if nothing changed, in case Gorgi restarted
             full = now - last_full_send > 30
-            if full or (media != last_media and now >= self.ignore_volume_until):
-                await ws.send(json.dumps(media))
+            if full or jumped or (media != last_media and now >= self.ignore_volume_until):
+                message = dict(media)
+                if pos is not None and dur:
+                    message["pos"] = round(pos, 1)
+                    message["dur"] = round(dur, 1)
+                    sent_pos = (pos, now)
+                else:
+                    sent_pos = None
+                await ws.send(json.dumps(message))
                 last_media = media
             if full:
                 last_full_send = now

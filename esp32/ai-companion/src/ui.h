@@ -17,8 +17,14 @@ enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume };
 struct MediaInfo {
   String title;
   String artist;
+  String album;
   bool playing = false;
   int volume = 50;  // 0..100
+  // How far into the song (seconds), as of millis() == posAtMs. Not every app reports it.
+  bool hasPos = false;
+  float pos = 0, dur = 0;
+  uint32_t posAtMs = 0;
+  uint32_t artId = 0;  // album art sent by the helper (0 = none)
 };
 
 // Draws the empty screen background. Call once, after display::begin().
@@ -31,8 +37,12 @@ void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
 void showPressed(Target t);  // brief highlight on a button
-// Screens: dots in the top bar show which one is on (index 0..count-1)
-void setPage(int index, int count);
+// Screens: dots in the top bar show which one is on. position is the screen's
+// number (0..count-1); in between while sliding.
+void setPages(int count, float position);
+void setPagePosition(float position);
+// Draws the subtitle right away (used to draw the face screen into a picture)
+void drawSubtitleNow();
 // The subtitle only shows on the face screen
 void setSubtitleVisible(bool visible);
 // Shows a line of text with a progress bar under the face, right away

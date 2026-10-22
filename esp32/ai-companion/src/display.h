@@ -31,6 +31,20 @@ struct Stats {
 };
 Stats takeStats();
 
+// Draw into a picture in memory instead of the screen (used to slide screens).
+// The picture holds area.w * area.h pixels, row after row. Anything outside
+// area is skipped. setTarget(nullptr, ...) goes back to drawing on the screen.
+void setTarget(uint16_t* picture, const gfx::Rect& area);
+bool drawingToPicture();
+
+// Copies a rectangle of a picture to the screen. picture is pictureW pixels
+// wide; (sx, sy) is where the rectangle starts in it.
+void copyToScreen(const uint16_t* picture, int pictureW, int sx, int sy, int x, int y, int w, int h);
+
+// The fast drawing buffer, for anyone who needs to put a picture together
+// row by row (the screen slider). Holds `pixels` pixels.
+uint16_t* scratch(size_t& pixels);
+
 // Redraws a rectangle of the screen: fills it with bg, then runs draw(canvas)
 // once for each strip. draw should draw everything that belongs in the
 // rectangle (in screen coordinates); anything outside the strip is skipped.

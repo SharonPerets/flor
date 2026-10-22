@@ -9,6 +9,7 @@
 
 import concurrent.futures
 import ctypes
+import datetime
 import logging
 import sys
 
@@ -66,23 +67,78 @@ class WindowsMedia:
         return self._manager.get_current_session()
 
     async def get_info(self):
-        """Returns {"title", "artist", "playing"} for whatever is playing."""
-        empty = {"title": "", "artist": "", "playing": False}
+        """Returns {"title", "artist", "album", "playing", "pos", "dur"} for whatever is playing.
+        pos and dur (seconds) are None when the app doesn't say."""
+        empty = {"title": "", "artist": "", "album": "", "playing": False, "pos": None, "dur": None}
         try:
             session = await self._session()
             if session is None:
                 return empty
             props = await session.try_get_media_properties_async()
             playback = session.get_playback_info()
+            playing = playback.playback_status == PlaybackStatus.PLAYING
+            pos, dur = self._timeline(session, playing)
             return {
                 "title": props.title or "",
                 "artist": props.artist or "",
-                "playing": playback.playback_status == PlaybackStatus.PLAYING,
+                "album": props.album_title or "",
+                "playing": playing,
+                "pos": pos,
+                "dur": dur,
             }
         except Exception as e:  # media apps come and go; never crash on it
             log.debug("media info failed: %s", e)
             self._manager = None
             return empty
+
+    @staticmethod
+    def _timeline(session, playing):
+        """(seconds into the song, song length), or (None, None)"""
+        try:
+            t = session.get_timeline_properties()
+            dur = (t.end_time - t.start_time).total_seconds()
+            if dur <= 1:
+                return None, None
+            pos = (t.position - t.start_time).total_seconds()
+            if playing and t.last_updated_time:
+                # the position is as of the last update; add the time since then
+                updated = t.last_updated_time
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=datetime.timezone.utc)
+                since = (datetime.datetime.now(datetime.timezone.utc) - updated).total_seconds()
+                if 0 < since < 24 * 3600:
+                    pos += since
+            return max(0.0, min(pos, dur)), dur
+        except Exception as e:
+            log.debug("timeline failed: %s", e)
+            return None, None
+
+    async def get_art(self):
+        """The song's picture as file bytes (PNG/JPEG), or None."""
+        try:
+            session = await self._session()
+            if session is None:
+                return None
+            props = await session.try_get_media_properties_async()
+            if props.thumbnail is None:
+                return None
+            from winrt.windows.storage.streams import Buffer, DataReader, InputStreamOptions
+
+            stream = await props.thumbnail.open_read_async()
+            size = int(stream.size)
+            if not 0 < size < 20_000_000:
+                return None
+            buf = await stream.read_async(Buffer(size), size, InputStreamOptions.READ_AHEAD)
+            try:
+                return bytes(memoryview(buf))
+            except TypeError:  # older winrt: read it out by hand
+                reader = DataReader.from_buffer(buf)
+                data = bytearray(buf.length)
+                reader.read_bytes(data)
+                return bytes(data)
+        except Exception as e:
+            log.info("couldn't get the album art: %s", e)
+            return None
 
     async def command(self, action):
         """action: "playpause", "next" or "prev"."""

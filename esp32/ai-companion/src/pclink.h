@@ -8,7 +8,9 @@
 // it without an IP address. Messages are small JSON objects:
 //
 //   helper -> Gorgi  {"type":"hello","name":"MY-PC","key":"<pairing secret>"}
-//                    {"type":"media","title":"..","artist":"..","playing":true,"volume":40}
+//                    {"type":"media","title":"..","artist":"..","album":"..","playing":true,"volume":40,
+//                     "pos":63.5,"dur":215.0,"art":7}   (pos/dur in seconds, art = album art id)
+//                    binary "GART" + id + total + offset + RGB565 data   (album art, in pieces)
 //                    {"type":"clock","text":"21:45"}
 //                    {"type":"voice","state":"listening"|"thinking"|"idle","followup":false}
 //                    {"type":"heard","text":"what you said"}
@@ -48,6 +50,8 @@ struct Handlers {
   std::function<void(WifiState)> onWifi;
   // Conversation messages: "voice", "heard", "say" and "level"
   std::function<void(const char* type, JsonObjectConst msg)> onVoice;
+  // A piece of album art (see music_screen.h)
+  std::function<void(uint32_t id, uint32_t total, uint32_t offset, const uint8_t* data, size_t len)> onArt;
   // Firmware update over Wi-Fi: percent 0..100, or -1 if it failed
   std::function<void(int percent, const String& message)> onUpdate;
 };

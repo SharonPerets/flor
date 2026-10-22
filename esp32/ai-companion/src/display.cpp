@@ -1,6 +1,7 @@
 #include "display.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #if defined(ESP_PLATFORM)
 #include <esp_heap_caps.h>
@@ -13,6 +14,8 @@ LGFX* lcd = nullptr;
 Stats stats;
 uint16_t* buffer = nullptr;
 size_t capacity = 0;  // in pixels
+uint16_t* target = nullptr;  // drawing into a picture instead of the screen
+gfx::Rect targetArea{0, 0, 0, 0};
 
 }  // namespace
 
@@ -42,6 +45,27 @@ bool begin(LGFX& l) {
   return false;
 }
 
+void setTarget(uint16_t* picture, const gfx::Rect& area) {
+  target = picture;
+  targetArea = area;
+}
+
+bool drawingToPicture() { return target != nullptr; }
+
+uint16_t* scratch(size_t& pixels) {
+  pixels = capacity;
+  return buffer;
+}
+
+void copyToScreen(const uint16_t* picture, int pictureW, int sx, int sy, int x, int y, int w, int h) {
+  if (!lcd || w <= 0 || h <= 0) return;
+  if (w == pictureW) {  // whole rows: one copy
+    lcd->pushImage(x, y, w, h, picture + (size_t)sy * pictureW + sx);
+    return;
+  }
+  for (int r = 0; r < h; ++r) lcd->pushImage(x, y + r, w, 1, picture + (size_t)(sy + r) * pictureW + sx);
+}
+
 Stats takeStats() {
   Stats s = stats;
   stats = Stats();
@@ -52,7 +76,7 @@ namespace detail {
 
 void renderBands(const gfx::Rect& want, const gfx::Color& bg, DrawFn fn, void* ctx) {
   if (!lcd || !buffer) return;
-  const gfx::Rect area = gfx::intersect(want, gfx::Rect{0, 0, SCREEN_W, SCREEN_H});
+  const gfx::Rect area = gfx::intersect(want, target ? targetArea : gfx::Rect{0, 0, SCREEN_W, SCREEN_H});
   if (area.empty()) return;
   const int rowsPerBand = (int)(capacity / (size_t)area.w);
   if (rowsPerBand < 1) return;
@@ -65,6 +89,12 @@ void renderBands(const gfx::Rect& want, const gfx::Color& bg, DrawFn fn, void* c
     canvas.clear(bg);
     fn(canvas, ctx);
     const uint32_t t1 = micros();
+    if (target) {
+      for (int r = 0; r < h; ++r)
+        memcpy(target + (size_t)(y + r - targetArea.y) * targetArea.w + (area.x - targetArea.x),
+               buffer + (size_t)r * area.w, area.w * 2);
+      continue;
+    }
     lcd->pushImage(area.x, y, area.w, h, buffer);
     stats.drawUs += t1 - t0;
     stats.pushUs += micros() - t1;

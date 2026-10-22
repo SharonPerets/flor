@@ -86,8 +86,14 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
     ui::MediaInfo m;
     m.title = (const char*)(doc["title"] | "");
     m.artist = (const char*)(doc["artist"] | "");
+    m.album = (const char*)(doc["album"] | "");
     m.playing = doc["playing"] | false;
     m.volume = doc["volume"] | 50;
+    m.hasPos = doc["pos"].is<float>() && doc["dur"].is<float>();
+    m.pos = doc["pos"] | 0.0f;
+    m.dur = doc["dur"] | 0.0f;
+    m.posAtMs = millis();
+    m.artId = doc["art"] | 0u;
     if (handlers.onMedia) handlers.onMedia(m);
   } else if (strcmp(type, "clock") == 0) {
     if (handlers.onClock) handlers.onClock(String((const char*)(doc["text"] | "")));
@@ -108,6 +114,14 @@ void onSocketEvent(uint8_t client, WStype_t type, uint8_t* payload, size_t lengt
       break;
     case WStype_TEXT:
       handleMessage(client, payload, length);
+      break;
+    case WStype_BIN:
+      // Album art in pieces: "GART", picture id, total bytes, offset (each 4 bytes, little-endian), data
+      if ((int)client == helperClient && length > 16 && memcmp(payload, "GART", 4) == 0 && handlers.onArt) {
+        uint32_t head[3];
+        memcpy(head, payload + 4, sizeof head);
+        handlers.onArt(head[0], head[1], head[2], payload + 16, length - 16);
+      }
       break;
     default:
       break;
