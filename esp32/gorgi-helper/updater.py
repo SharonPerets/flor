@@ -65,20 +65,43 @@ async def fetch_latest(client):
     return release
 
 
-async def download(client, url):
-    resp = await client.get(url, follow_redirects=True, timeout=600,
-                            headers={"User-Agent": "GorgiHelper"})
-    resp.raise_for_status()
-    return resp.content
+async def download(client, url, progress=None):
+    """Downloads a file. progress(fraction 0..1) is called as it arrives."""
+    data = bytearray()
+    async with client.stream("GET", url, follow_redirects=True, timeout=600,
+                             headers={"User-Agent": "GorgiHelper"}) as resp:
+        resp.raise_for_status()
+        total = int(resp.headers.get("content-length") or 0)
+        async for chunk in resp.aiter_bytes(65536):
+            data += chunk
+            if progress and total:
+                progress(len(data) / total)
+    return bytes(data)
 
 
-async def send_firmware(client, address, key, data):
-    """Uploads firmware to Gorgi. Returns (ok, message)."""
+async def send_firmware(client, address, key, data, progress=None):
+    """Uploads firmware to Gorgi. Returns (ok, message). progress(fraction) as it goes."""
     params = {"key": key, "size": str(len(data)), "md5": hashlib.md5(data).hexdigest()}
+    # A normal file-upload form, built by hand so we can report progress
+    boundary = "gorgi" + hashlib.md5(data[:64]).hexdigest()
+    head = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"firmware\"; filename=\"firmware.bin\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n").encode()
+    tail = f"\r\n--{boundary}--\r\n".encode()
+
+    async def body():
+        yield head
+        step = 16384
+        for i in range(0, len(data), step):
+            yield data[i:i + step]
+            if progress:
+                progress(min(1.0, (i + step) / len(data)))
+        yield tail
+
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}",
+               "Content-Length": str(len(head) + len(data) + len(tail))}
     try:
         resp = await client.post(f"http://{address}:{UPDATE_PORT}/update", params=params,
-                                 files={"firmware": ("firmware.bin", data, "application/octet-stream")},
-                                 timeout=300)
+                                 content=body(), headers=headers, timeout=300)
     except httpx.HTTPError as e:
         return False, f"couldn't reach Gorgi ({e})"
     if resp.status_code == 200:
@@ -95,9 +118,10 @@ def save_installer(data, version):
 
 
 def run_installer(path):
-    """Starts the installer quietly. It closes this app, updates it and starts it again."""
+    """Starts the installer. It closes this app, updates it and starts it again."""
     flags = 0
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    subprocess.Popen([str(path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+    # /SILENT: no questions, but the installer shows its progress
+    subprocess.Popen([str(path), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
                      close_fds=True, creationflags=flags)

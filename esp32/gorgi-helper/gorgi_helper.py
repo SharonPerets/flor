@@ -32,6 +32,7 @@ import httpx  # noqa: E402
 import websockets  # noqa: E402
 
 import updater  # noqa: E402
+import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
 VERSION = "3.5"  # must match esp32/VERSION
@@ -168,6 +169,27 @@ async def find_gorgi(config_address):
 # ---------------------------------------------------------------- the link
 
 
+class _NoWindow:
+    """Stand-in progress window (tests, or when windows can't be shown)."""
+
+    def update(self, percent, text=""):
+        pass
+
+    def done(self, text):
+        pass
+
+    def fail(self, text):
+        pass
+
+
+def make_progress_window(title):
+    if not IS_WINDOWS:
+        return _NoWindow()
+    from progress_window import ProgressWindow
+
+    return ProgressWindow(title)
+
+
 class Helper:
     def __init__(self, media, config, on_status=None, make_conversation=None):
         self.media = media
@@ -190,6 +212,7 @@ class Helper:
         self.latest = None        # newest release on GitHub
         self.updating = False
         self._offered = set()     # versions we already told the user about
+        self.make_progress = make_progress_window
 
     def set_status(self, text, connected):
         if (text, connected) != self.status:
@@ -282,20 +305,24 @@ class Helper:
         self.updating = True
         v = self.latest.version
         self.set_status(f"Updating Gorgi to {v}...", True)
+        window = self.make_progress(f"Updating Gorgi to {v}")
         try:
             async with httpx.AsyncClient() as client:
-                data = await updater.download(client, self.latest.firmware_url)
+                data = await updater.download(client, self.latest.firmware_url,
+                                              lambda f: window.update(f * 30, "Downloading..."))
                 log.info("sending firmware %s (%d bytes) to Gorgi", v, len(data))
-                ok, message = await updater.send_firmware(client, self.gorgi_address,
-                                                          self.config.get("helper_key", ""), data)
+                window.update(30, "Sending to Gorgi (its screen turns off for a moment)...")
+                ok, message = await updater.send_firmware(
+                    client, self.gorgi_address, self.config.get("helper_key", ""), data,
+                    lambda f: window.update(30 + f * 68, "Sending to Gorgi (its screen turns off for a moment)..."))
         except Exception as e:
             ok, message = False, f"download failed ({e})"
         self.updating = False
         log.info("Gorgi update: %s", message)
         if ok:
-            self.on_notify("Gorgi updated", f"Gorgi is restarting with version {v}.")
+            window.done(f"Done! Gorgi is restarting with version {v}.")
         else:
-            self.on_notify("Gorgi update failed", message)
+            window.fail(f"Gorgi update failed: {message}")
         self.on_changed()
 
     async def update_helper(self):
@@ -304,16 +331,20 @@ class Helper:
         self.updating = True
         v = self.latest.version
         self.set_status(f"Downloading Gorgi Helper {v}...", self.ws is not None)
+        window = self.make_progress(f"Updating Gorgi Helper to {v}")
         try:
             async with httpx.AsyncClient() as client:
-                data = await updater.download(client, self.latest.helper_url)
+                data = await updater.download(client, self.latest.helper_url,
+                                              lambda f: window.update(f * 100, f"Downloading... {f * 100:.0f}%"))
             path = updater.save_installer(data, v)
+            window.done("Downloaded. Installing - Gorgi Helper restarts by itself.")
             log.info("starting installer %s", path)
+            await asyncio.sleep(1.5)
             updater.run_installer(path)
         except Exception as e:
             self.updating = False
             log.warning("helper update failed: %s", e)
-            self.on_notify("Update failed", str(e))
+            window.fail(f"Update failed: {e}")
             return
         self.stop_event.set()  # quit, so the installer can replace this app
 
@@ -388,6 +419,10 @@ class Helper:
                 log.info("Gorgi firmware version: %s (%s)", self.gorgi_version,
                          "paired" if self.gorgi_paired else "paired with another helper")
                 self.offer_updates()
+                continue
+            if msg.get("type") == "weather":
+                weather.update(msg)
+                log.info("weather for %s from Gorgi", msg.get("city"))
                 continue
             if msg.get("type") == "talk":
                 log.info("Gorgi was tapped: starting a conversation")
@@ -660,6 +695,7 @@ def self_test(out_path):
         import zeroconf  # noqa: F401
         import brain  # noqa: F401
         import memory  # noqa: F401
+        import progress_window  # noqa: F401
         import conversation  # noqa: F401
         import settings_window  # noqa: F401
 
@@ -723,6 +759,7 @@ def main():
     parser.add_argument("--address", help="Gorgi's IP address (skips auto-discovery)")
     parser.add_argument("--selftest", metavar="FILE", help=argparse.SUPPRESS)
     parser.add_argument("--settings", action="store_true", help="only show the Settings window")
+    parser.add_argument("--progress", metavar="TITLE", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.selftest:
@@ -730,6 +767,11 @@ def main():
         return
     if args.settings:
         run_settings_window()
+        return
+    if args.progress:
+        from progress_window import run_window
+
+        run_window(args.progress)
         return
 
     setup_logging(console=args.no_tray or not getattr(sys, "frozen", False))

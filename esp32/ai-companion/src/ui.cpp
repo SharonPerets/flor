@@ -23,6 +23,7 @@ const Color TEXT = gfx::rgb(0xE8EEF4);
 const Color TEXT_TITLE = gfx::rgb(0xF2F6FA);
 const Color TEXT_MUTED = gfx::rgb(0x9AA7B5);
 const Color TRACK = gfx::rgb(0x2A3441);
+const Color DOT = gfx::rgb(0x55616E);
 const Color PLAY_ICON = gfx::rgb(0x05201E);
 const Color ACCENT = gfx::rgb(0x4FE3D6);
 const Color ACCENT_PRESSED = gfx::rgb(0x8FF0E8);
@@ -38,6 +39,7 @@ constexpr int VOL_X0 = 598, VOL_X1 = 738;
 
 constexpr Rect CLOCK_AREA{0, 0, 300, 44};
 constexpr Rect STATUS_AREA{420, 0, 380, 44};
+constexpr Rect DOTS_AREA{340, 0, 120, 44};
 constexpr Rect SUB_AREA{SUB_X, SUB_Y, SUB_W, SUB_H};
 constexpr Rect BAR_AREA{BAR_X, BAR_Y, BAR_W, BAR_H};
 constexpr Rect TEXT_AREA{TEXT_X - 8, BAR_Y + 4, TEXT_W + 16, BAR_H - 8};
@@ -54,6 +56,9 @@ MediaInfo media;
 Target pressed = Target::None;
 uint32_t pressedUntil = 0;
 
+int pageIndex = 0, pageCount = 1;
+bool subtitleVisible = true;
+bool dirtyDots = true;
 bool dirtyClock = true, dirtyStatus = true, dirtySub = true;
 bool dirtyBar = true, dirtyText = true, dirtyButtons = true, dirtyVolume = true;
 bool pulseOn = true;
@@ -132,7 +137,19 @@ void drawStatus(Canvas& c) {
   c.text(gfont::SMALL, statusText.c_str(), x + 38, 29, statusColor);
 }
 
+void drawDots(Canvas& c) {
+  if (pageCount < 2) return;
+  const float gap = 18, cx = 400 - gap * (pageCount - 1) * 0.5f;
+  for (int i = 0; i < pageCount; ++i) {
+    if (i == pageIndex)
+      c.fillRRect(cx + i * gap - 9, 19, 18, 6, 3, ACCENT);
+    else
+      c.fillCircle(cx + i * gap, 22, 3.5f, DOT);
+  }
+}
+
 void drawSubtitle(Canvas& c) {
+  if (!subtitleVisible) return;
   if (progress >= 0) {
     const float w = Canvas::textWidth(gfont::SUBTITLE, subtitle.c_str());
     c.text(gfont::SUBTITLE, subtitle.c_str(), SUB_X + (SUB_W - w) * 0.5f, SUB_Y + 24, TEXT);
@@ -223,7 +240,20 @@ void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
 
 void begin(LGFX&) {
   display::render(Rect{0, 0, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
-  dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = true;
+  dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = dirtyDots = true;
+}
+
+void setPage(int index, int count) {
+  if (index == pageIndex && count == pageCount) return;
+  pageIndex = index;
+  pageCount = count;
+  dirtyDots = true;
+}
+
+void setSubtitleVisible(bool visible) {
+  if (visible == subtitleVisible) return;
+  subtitleVisible = visible;
+  if (visible) dirtySub = true;  // when hidden, the other screen draws over it
 }
 
 void setClock(const String& text) {
@@ -298,7 +328,8 @@ void update(uint32_t now) {
   }
   if (dirtyClock) { redraw(CLOCK_AREA, BG, drawClock); dirtyClock = false; }
   if (dirtyStatus) { redraw(STATUS_AREA, BG, drawStatus); dirtyStatus = false; }
-  if (dirtySub) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
+  if (dirtyDots) { redraw(DOTS_AREA, BG, drawDots); dirtyDots = false; }
+  if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
   if (dirtyBar) {  // the whole bar (first time): it also covers the parts below
     redraw(BAR_AREA, BG, drawBar);
     dirtyBar = dirtyText = dirtyButtons = dirtyVolume = false;

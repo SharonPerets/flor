@@ -22,12 +22,17 @@ FONTS = [
     ("SMALL", 16, 700, "ascii"),      # artist and status
     ("Z_BIG", 44, 800, "Z"),          # sleeping Zzz
     ("Z_SMALL", 30, 800, "Z"),
+    ("BIG", 76, 800, "-0123456789"),  # the big temperature on the weather screen
 ]
 GAMMA = 0.85  # a little extra weight on the edges: light text on dark looks thin otherwise
 
 
 def chars_for(spec):
-    return [chr(c) for c in range(32, 127)] if spec == "ascii" else list(spec)
+    """Every character from the first to the last one asked for (the table has no gaps)."""
+    if spec == "ascii":
+        return [chr(c) for c in range(32, 127)]
+    codes = [ord(ch) for ch in spec]
+    return [chr(c) for c in range(min(codes), max(codes) + 1)]
 
 
 def make_font(path, name, size, weight, spec):

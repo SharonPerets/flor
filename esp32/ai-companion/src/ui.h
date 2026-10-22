@@ -31,6 +31,10 @@ void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
 void showPressed(Target t);  // brief highlight on a button
+// Screens: dots in the top bar show which one is on (index 0..count-1)
+void setPage(int index, int count);
+// The subtitle only shows on the face screen
+void setSubtitleVisible(bool visible);
 // Shows a line of text with a progress bar under the face, right away
 // (used while a firmware update arrives, when nothing else gets drawn).
 void showProgress(const String& text, int percent);
@@ -44,6 +48,9 @@ int volumeFromX(int x);
 // Converts UTF-8 text (curly quotes, dashes, emoji...) into plain ASCII
 // that the fonts can show.
 String toAscii(const String& utf8);
+
+// Screen background
+constexpr gfx::Color BACKGROUND = gfx::rgb(0x05070A);
 
 // Status colours
 constexpr gfx::Color COLOR_TEXT_DIM = gfx::rgb(0xC9D3DD);

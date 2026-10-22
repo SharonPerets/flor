@@ -22,8 +22,12 @@ class Recorder:
     def __init__(self, device=None):
         self.device = device
 
-    async def record(self, wait_for_speech=7.0, max_seconds=15.0, end_silence=0.9, cancel=None):
-        """Records one utterance. Returns float32 audio at 16 kHz, or None if nobody spoke."""
+    async def record(self, wait_for_speech=7.0, max_seconds=15.0, end_silence=0.9, cancel=None,
+                     min_speech=0.25, sensitivity=3.0):
+        """Records one utterance. Returns float32 audio at 16 kHz, or None if nobody spoke.
+
+        min_speech: seconds of sound needed to count as speech (shorter = a click or a cough).
+        sensitivity: how much louder than the background speech must be (higher = stricter)."""
         import sounddevice as sd
 
         loop = asyncio.get_running_loop()
@@ -59,7 +63,7 @@ class Recorder:
                     noise = rms
                 elif not speaking:
                     noise = 0.95 * noise + 0.05 * rms
-                threshold = max(noise * 3.0, 0.012)
+                threshold = max(noise * sensitivity, 0.012)
 
                 if speaking:
                     chunks.append(block)
@@ -79,7 +83,7 @@ class Recorder:
                     elif elapsed > wait_for_speech:
                         return None
 
-        if speech_seconds < 0.25:  # just a click or a cough
+        if speech_seconds < min_speech:  # just a click or a cough
             return None
         return np.concatenate(chunks)
 

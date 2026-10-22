@@ -26,5 +26,6 @@ extern const Font TITLE;     // 22 px extra bold
 extern const Font SMALL;     // 16 px bold
 extern const Font Z_BIG;     // only the letter Z
 extern const Font Z_SMALL;   // only the letter Z
+extern const Font BIG;       // 76 px, only - and digits
 
 }  // namespace gfont

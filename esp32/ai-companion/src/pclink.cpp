@@ -132,12 +132,12 @@ void onUpdateUpload() {
     updateSize = (size_t)http.arg("size").toInt();
     updateWritten = 0;
     Serial.printf("pclink: receiving firmware update (%u bytes)\n", (unsigned)updateSize);
+    report(0, "Updating - back in a moment!");  // before anything is written to flash
     if (!Update.begin(updateSize > 0 ? updateSize : UPDATE_SIZE_UNKNOWN)) {
       updateError = Update.errorString();
       return;
     }
     if (http.hasArg("md5")) Update.setMD5(http.arg("md5").c_str());
-    report(0, "Updating... 0%");
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (updateRejected || updateError.length()) return;
     if (Update.write(up.buf, up.currentSize) != up.currentSize) {
@@ -263,6 +263,11 @@ void sendSimple(const char* type) {
   if (helperClient < 0) return;
   JsonDocument doc;
   doc["type"] = type;
+  sendJson(helperClient, doc);
+}
+
+void send(JsonDocument& doc) {
+  if (helperClient < 0) return;
   sendJson(helperClient, doc);
 }
 

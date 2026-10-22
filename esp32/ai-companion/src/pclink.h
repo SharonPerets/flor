@@ -19,6 +19,7 @@
 //                    {"type":"cmd","action":"volume","value":40}
 //                    {"type":"talk"}     (face tapped: start a conversation)
 //                    {"type":"cancel"}   (face tapped again: stop it)
+//                    {"type":"weather","city":"Nahariya","now":{...},"days":[...]}
 #pragma once
 
 #include <Arduino.h>
@@ -63,6 +64,9 @@ void sendCommand(const char* action, int value = -1);
 
 // Send a message with only a type, like "talk" or "cancel".
 void sendSimple(const char* type);
+
+// Send any message (it must have a "type"). Does nothing if the helper isn't connected.
+void send(JsonDocument& doc);
 
 // Firmware updates: the helper sends the new firmware with
 //   POST http://gorgi.local:8080/update?key=<pairing secret>&size=<bytes>&md5=<hex>

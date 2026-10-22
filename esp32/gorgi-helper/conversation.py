@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 
+import weather
 from brain import BrainError
 
 log = logging.getLogger("gorgi.talk")
@@ -46,7 +47,13 @@ class Conversation:
             while True:
                 await self.send({"type": "voice", "state": "listening", "followup": followup})
                 wait = self.followup_seconds if followup else FIRST_WAIT_SECONDS
-                audio = await self.recorder.record(wait_for_speech=wait)
+                if followup:
+                    # Stricter while waiting for a follow-up: a fan, a car or the end of
+                    # Gorgi's own voice shouldn't count as someone talking.
+                    audio = await self.recorder.record(wait_for_speech=wait, max_seconds=8.0,
+                                                       min_speech=0.6, sensitivity=4.0)
+                else:
+                    audio = await self.recorder.record(wait_for_speech=wait)
                 if audio is None:
                     if not followup:
                         await self._say("confused", "I didn't hear anything. Is the microphone on?")
@@ -56,7 +63,8 @@ class Conversation:
                 text = await asyncio.to_thread(self.transcriber.transcribe, audio)
                 log.info("heard: %r", text)
                 if not text:
-                    await self._say("confused", "Sorry, I didn't catch that.")
+                    if not followup:  # after a follow-up wait it was just noise: end quietly
+                        await self._say("confused", "Sorry, I didn't catch that.")
                     return
                 await self.send({"type": "heard", "text": text})
 
@@ -75,7 +83,7 @@ class Conversation:
                 if not keep_talking:
                     return
                 followup = True
-                await asyncio.sleep(0.3)  # let the room go quiet before listening again
+                await asyncio.sleep(0.7)  # let the room (and Gorgi's own voice) go quiet before listening again
         finally:
             try:
                 await self.send({"type": "voice", "state": "idle"})
@@ -132,4 +140,7 @@ class Conversation:
         volume = self.media.get_volume()
         if volume is not None:
             lines.append(f"PC volume: {volume}%.")
+        forecast = weather.summary()
+        if forecast:
+            lines.append(forecast)
         return "\n".join(lines)

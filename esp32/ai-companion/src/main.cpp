@@ -10,14 +10,18 @@
 //   hold face 1 s     -> show the next expression (handy for testing)
 //   media buttons     -> control music on the PC
 //   hold clock 5 s    -> forget Wi-Fi and open the "Gorgi-Setup" network again
+//   swipe left        -> weather screen (swipe right to come back)
 
 #include <Arduino.h>
+#include <Preferences.h>
 
 #include "board.h"
 #include "display.h"
 #include "face.h"
 #include "pclink.h"
 #include "ui.h"
+#include "weather.h"
+#include "weather_net.h"
 
 namespace {
 
@@ -42,6 +46,27 @@ bool inConversation = false;  // the helper is running a conversation
 uint32_t lastVoiceMsg = 0;    // last conversation message from the helper
 constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 
+// ---------- screens ----------
+// Swipe left/right in the middle of the screen to switch. More screens can be
+// added to this list later.
+enum class Page { Face, Weather, Count };
+Page page = Page::Face;
+uint32_t pageTouched = 0;  // last touch on a page other than the face
+constexpr uint32_t PAGE_IDLE_MS = 45 * 1000;  // then back to the face
+constexpr int SWIPE_MIN_PX = 80;
+
+// Weather
+weather::Data wx;
+int wxCity = weather::DEFAULT_CITY;
+bool wxPicker = false;
+bool wxDirty = true;
+String wxStatus;
+uint32_t wxNextFetch = 0;  // 0 = as soon as Wi-Fi is up
+bool wxFetching = false;
+constexpr uint32_t WX_REFRESH_MS = 30 * 60 * 1000;
+constexpr uint32_t WX_RETRY_MS = 2 * 60 * 1000;
+Preferences wxPrefs;
+
 ui::MediaInfo media;
 String pcName;
 bool gotMediaSinceConnect = false;
@@ -51,6 +76,8 @@ bool touching = false;
 uint32_t touchStart = 0;
 ui::Target touchTarget = ui::Target::None;
 bool longPressDone = false;
+int touchX0 = 0, touchY0 = 0, touchEndX = 0, touchEndY = 0;
+bool swiping = false;  // the finger moved sideways: no tap, no long press
 int testMoodIndex = 0;
 
 // Volume slider
@@ -148,16 +175,124 @@ void endConversation() {
   moodHoldUntil = millis() + 4000;
 }
 
+// ---------- screens ----------
+
+void showPage(Page p) {
+  if (p == page) return;
+  page = p;
+  pageTouched = millis();
+  ui::setPage((int)p, (int)Page::Count);
+  ui::setSubtitleVisible(p == Page::Face);
+  if (p == Page::Face) {
+    // clear what the other screen drew, then draw the face and subtitle again
+    display::render(weather::AREA, ui::BACKGROUND, [](gfx::Canvas&) {});
+    face.invalidate();
+  } else {
+    wxPicker = false;
+    wxDirty = true;
+  }
+}
+
+// Gives the forecast to the helper, so Gorgi can talk about it
+void sendWeather() {
+  if (!wx.valid) return;
+  JsonDocument doc;
+  doc["type"] = "weather";
+  doc["city"] = weather::CITIES[wx.city].name;
+  JsonObject now = doc["now"].to<JsonObject>();
+  now["temp"] = roundf(wx.temp * 10) / 10;
+  now["feels"] = roundf(wx.feels * 10) / 10;
+  now["humidity"] = wx.humidity;
+  now["wind"] = roundf(wx.wind);
+  now["sky"] = weather::describe(wx.code);
+  now["time"] = wx.updated;
+  JsonArray days = doc["days"].to<JsonArray>();
+  for (int i = 0; i < wx.dayCount; ++i) {
+    JsonObject d = days.add<JsonObject>();
+    d["day"] = wx.days[i].name;
+    d["sky"] = weather::describe(wx.days[i].code);
+    d["hi"] = wx.days[i].hi;
+    d["lo"] = wx.days[i].lo;
+    d["rain"] = wx.days[i].rain;
+  }
+  pclink::send(doc);
+}
+
+void fetchWeather() {
+  weather::request(wxCity);
+  wxFetching = true;
+  if (!wx.valid || wx.city != wxCity) {
+    wxStatus = "Getting the weather...";
+    wxDirty = true;
+  }
+}
+
+void updateWeather(uint32_t now) {
+  if (pclink::wifiState() != pclink::WifiState::Online) {
+    if (!wx.valid && wxStatus != "Waiting for Wi-Fi...") {
+      wxStatus = "Waiting for Wi-Fi...";
+      wxDirty = true;
+    }
+    return;
+  }
+  if (!wxFetching && (wxNextFetch == 0 || (int32_t)(now - wxNextFetch) >= 0)) fetchWeather();
+
+  bool ok = false;
+  String error;
+  if (weather::takeResult(wx, ok, error)) {
+    wxFetching = false;
+    if (ok && wx.city != wxCity) {  // the city changed while it was downloading
+      fetchWeather();
+      return;
+    }
+    wxNextFetch = now + (ok ? WX_REFRESH_MS : WX_RETRY_MS);
+    if (!ok) wxStatus = "Can't get the weather right now (" + error + ")";
+    wxDirty = true;
+    if (ok) sendWeather();
+  }
+}
+
+void onWeatherTap(int x, int y) {
+  int city = wxCity;
+  switch (weather::tap(x, y, wxPicker, city)) {
+    case weather::Tap::OpenPicker:
+      wxPicker = true;
+      wxDirty = true;
+      break;
+    case weather::Tap::ClosePicker:
+      wxPicker = false;
+      wxDirty = true;
+      break;
+    case weather::Tap::PickCity:
+      wxPicker = false;
+      wxDirty = true;
+      if (city != wxCity) {
+        wxCity = city;
+        wxPrefs.putInt("city", city);
+        if (!wxFetching) fetchWeather();  // otherwise it fetches again when the current one ends
+        else if (!wx.valid || wx.city != wxCity) wxStatus = "Getting the weather...";
+      }
+      break;
+    case weather::Tap::None:
+      break;
+  }
+}
+
 // ---------- firmware update over Wi-Fi ----------
 
 bool updating = false;
 
 void drawFrame(uint32_t now);
 
-// While the new firmware arrives nothing else runs, so this draws right away.
+// While new firmware is written to flash, the chip can't read the screen's
+// picture memory, so the picture jumps around. So Gorgi says goodbye, then
+// turns the screen off; it comes back on by itself after the restart.
+// (The progress bar is shown on the PC.)
 void onUpdate(int percent, const String& message) {
-  if (percent < 0) {
+  if (percent < 0) {  // failed: back to normal
     updating = false;
+    board::setBacklight(true);
+    face.invalidate();
     face.setMood(Mood::Sad);
     ui::setSubtitle(message);
     showIdleStatus();
@@ -168,13 +303,19 @@ void onUpdate(int percent, const String& message) {
   if (!updating) {
     updating = true;
     if (inConversation) endConversation();
-    face.setMood(Mood::Thinking);
+    showPage(Page::Face);
+    face.setMood(Mood::Happy);
     face.setTalking(false);
     ui::setStatus("Updating", ui::COLOR_THINK, false);
+    ui::setSubtitle(message);
+    const uint32_t until = millis() + 600;
+    while ((int32_t)(millis() - until) < 0) {  // let the face settle so the message is seen
+      drawFrame(millis());
+      delay(30);
+    }
+    delay(1200);
+    board::setBacklight(false);
   }
-  if (percent >= 100) face.setMood(Mood::Happy);
-  for (int i = 0; i < 3; ++i) drawFrame(millis());  // let the face settle a little
-  ui::showProgress(message, percent);
 }
 
 // ---------- conversation messages from the helper ----------
@@ -183,6 +324,7 @@ void onVoice(const char* type, JsonObjectConst msg) {
   uint32_t now = millis();
   lastVoiceMsg = now;
   lastActivity = now;  // a conversation keeps Gorgi awake
+  if (page != Page::Face && strcmp(type, "level") != 0) showPage(Page::Face);
 
   if (strcmp(type, "level") == 0) {
     face.setTalkLevel(msg["value"] | 0.0f, now);
@@ -227,6 +369,7 @@ void onHelper(bool connected, const String& name) {
   if (inConversation) endConversation();
   if (connected) {
     pcName = name;
+    sendWeather();
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
   } else {
@@ -360,6 +503,10 @@ void handleTouch(uint32_t now) {
     touchStart = now;
     longPressDone = false;
     touchTarget = ui::hitTest(tp.x, tp.y);
+    touchX0 = tp.x;
+    touchY0 = tp.y;
+    swiping = false;
+    if (page != Page::Face) pageTouched = now;
     ui::showPressed(touchTarget);
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
@@ -380,12 +527,24 @@ void handleTouch(uint32_t now) {
 
   if (tp.pressed && touching) {
     lastActivity = now;
+    if (page != Page::Face) pageTouched = now;
+    // A sideways drag in the middle of the screen is a swipe, not a tap
+    if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(tp.x - touchX0) > 30 &&
+        abs(tp.x - touchX0) > abs(tp.y - touchY0)) {
+      swiping = true;
+    }
+    if (swiping) {
+      touchEndX = tp.x;
+      touchEndY = tp.y;
+      return;
+    }
     if (touchTarget == ui::Target::Volume) {
       media.volume = ui::volumeFromX(tp.x);
       ui::setVolume(media.volume);
       sendVolume(false);
     }
-    if (touchTarget == ui::Target::Face && !longPressDone && now - touchStart >= LONG_PRESS_MS) {
+    if (touchTarget == ui::Target::Face && page == Page::Face && !longPressDone &&
+        now - touchStart >= LONG_PRESS_MS) {
       longPressDone = true;
       onLongPressFace();
     }
@@ -407,6 +566,19 @@ void handleTouch(uint32_t now) {
     touching = false;
     ui::Target released = touchTarget;
     touchTarget = ui::Target::None;
+    if (swiping) {
+      swiping = false;
+      const int dx = touchEndX - touchX0, dy = touchEndY - touchY0;
+      if (abs(dx) >= SWIPE_MIN_PX && abs(dx) > abs(dy)) {
+        int next = (int)page + (dx < 0 ? 1 : -1);  // swipe left -> the next screen
+        if (next >= 0 && next < (int)Page::Count) showPage((Page)next);
+      }
+      return;
+    }
+    if (released == ui::Target::Face && page != Page::Face) {
+      if (!longPressDone) onWeatherTap(touchX0, touchY0);
+      return;
+    }
     if (released == ui::Target::Volume)
       onVolumeReleased();
     else if (released == ui::Target::Clock && !longPressDone)
@@ -477,7 +649,13 @@ void fatal(const char* msg) {
 }
 
 void drawFrame(uint32_t now) {
-  face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+  if (page == Page::Face) {
+    face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+  } else if (wxDirty) {
+    wxDirty = false;
+    display::render(weather::AREA, ui::BACKGROUND,
+                    [](gfx::Canvas& c) { weather::draw(c, wx, wxCity, wxPicker, wxStatus.c_str()); });
+  }
   ui::update(now);
 }
 
@@ -517,6 +695,11 @@ void setup() {
   h.onUpdate = onUpdate;
   pclink::begin(h);
 
+  wxPrefs.begin("weather", false);
+  wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
+  ui::setPage(0, (int)Page::Count);
+  weather::beginFetching();
+
   lastActivity = millis();
   showMediaPlaceholder();
   if (!board::touchFound())
@@ -536,6 +719,8 @@ void loop() {
   pclink::loop();
   handleTouch(now);
   updatePhase(millis());
+  updateWeather(millis());
+  if (page != Page::Face && !touching && msSince(millis(), pageTouched) > PAGE_IDLE_MS) showPage(Page::Face);
 
   // Gorgi barely moves while asleep, so it is redrawn less often (less load on the screen memory)
   const uint32_t interval = phase == Phase::Asleep ? SLEEP_FRAME_MS : FRAME_MS;
