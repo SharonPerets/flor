@@ -27,7 +27,7 @@ jobs:
           key: pio-${{ hashFiles('esp32/ai-companion/platformio.ini') }}
 
       - name: Install PlatformIO
-        run: pip install platformio esptool
+        run: pip install platformio esptool "click<8.2"  # the platform's esptool breaks with click 8.2+
 
       - name: Build
         run: pio run -e waveshare-s3-lcd7
