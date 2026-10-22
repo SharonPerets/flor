@@ -459,6 +459,10 @@ class _Report(list):
 def self_test(out_path):
     lines = _Report(out_path)
     lines.append("starting")
+    import faulthandler
+
+    crash_log = open(Path(out_path).with_suffix(".crash.txt"), "w")
+    faulthandler.enable(crash_log)  # records where a hard crash happened
     try:
         import numpy  # first, so a problem here shows its real error
 
