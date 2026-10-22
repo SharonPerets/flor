@@ -1,0 +1,47 @@
+name: Gorgi firmware
+
+on:
+  push:
+    paths:
+      - "esp32/ai-companion/**"
+      - ".github/workflows/gorgi-firmware.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: esp32/ai-companion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('esp32/ai-companion/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio esptool
+
+      - name: Build
+        run: pio run -e waveshare-s3-lcd7
+
+      - name: Make a single flashable file
+        run: |
+          B=.pio/build/waveshare-s3-lcd7
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -1)
+          python -m esptool --chip esp32s3 merge_bin -o gorgi-full.bin \
+            --flash_mode keep --flash_freq keep --flash_size 8MB \
+            0x0 $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 "$BOOT_APP0" 0x10000 $B/firmware.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gorgi-firmware
+          path: |
+            esp32/ai-companion/gorgi-full.bin
+            esp32/ai-companion/.pio/build/waveshare-s3-lcd7/firmware.bin
