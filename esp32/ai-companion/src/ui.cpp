@@ -1,20 +1,31 @@
 #include "ui.h"
 
+#include <math.h>
+
+#include "display.h"
+#include "gfont.h"
+
 namespace ui {
 namespace {
 
-constexpr uint16_t BG = rgb565(0x05070A);
-constexpr uint16_t PANEL = rgb565(0x10151C);
-constexpr uint16_t BORDER = rgb565(0x1F2935);
-constexpr uint16_t BTN = rgb565(0x151C25);
-constexpr uint16_t BTN_PRESSED = rgb565(0x2A3646);
-constexpr uint16_t TILE = rgb565(0x1C2733);
-constexpr uint16_t TEXT = rgb565(0xE8EEF4);
-constexpr uint16_t TEXT_TITLE = rgb565(0xF2F6FA);
-constexpr uint16_t TEXT_MUTED = rgb565(0x9AA7B5);
-constexpr uint16_t TRACK = rgb565(0x2A3441);
-constexpr uint16_t PLAY_ICON = rgb565(0x05201E);
-constexpr uint16_t ACCENT_PRESSED = rgb565(0x8FF0E8);
+using gfx::Canvas;
+using gfx::Color;
+using gfx::Pt;
+using gfx::Rect;
+
+const Color BG = gfx::rgb(0x05070A);
+const Color PANEL = gfx::rgb(0x10151C);
+const Color BORDER = gfx::rgb(0x1F2935);
+const Color BTN = gfx::rgb(0x151C25);
+const Color BTN_PRESSED = gfx::rgb(0x2A3646);
+const Color TILE = gfx::rgb(0x1C2733);
+const Color TEXT = gfx::rgb(0xE8EEF4);
+const Color TEXT_TITLE = gfx::rgb(0xF2F6FA);
+const Color TEXT_MUTED = gfx::rgb(0x9AA7B5);
+const Color TRACK = gfx::rgb(0x2A3441);
+const Color PLAY_ICON = gfx::rgb(0x05201E);
+const Color ACCENT = gfx::rgb(0x4FE3D6);
+const Color ACCENT_PRESSED = gfx::rgb(0x8FF0E8);
 
 // Subtitle area
 constexpr int SUB_X = 16, SUB_Y = 318, SUB_W = 768, SUB_H = 58;
@@ -25,12 +36,17 @@ constexpr int TEXT_X = 106, TEXT_W = 250;
 constexpr int PREV_X = 396, PLAY_X = 462, NEXT_X = 528;
 constexpr int VOL_X0 = 598, VOL_X1 = 738;
 
-LGFX* lcd = nullptr;
-LGFX_Sprite subSprite;
+constexpr Rect CLOCK_AREA{0, 0, 300, 44};
+constexpr Rect STATUS_AREA{420, 0, 380, 44};
+constexpr Rect SUB_AREA{SUB_X, SUB_Y, SUB_W, SUB_H};
+constexpr Rect BAR_AREA{BAR_X, BAR_Y, BAR_W, BAR_H};
+constexpr Rect TEXT_AREA{TEXT_X - 8, BAR_Y + 4, TEXT_W + 16, BAR_H - 8};
+constexpr Rect BUTTON_AREA{PREV_X - 34, BAR_Y + 4, NEXT_X - PREV_X + 68, BAR_H - 8};
+constexpr Rect VOLUME_AREA{560, BAR_Y + 4, 224, BAR_H - 8};
 
 String clockText = "Gorgi";
 String statusText = "";
-uint16_t statusColor = COLOR_TEXT_DIM;
+Color statusColor = COLOR_TEXT_DIM;
 bool statusPulse = false;
 String subtitle = "";
 MediaInfo media;
@@ -38,96 +54,86 @@ Target pressed = Target::None;
 uint32_t pressedUntil = 0;
 
 bool dirtyClock = true, dirtyStatus = true, dirtySub = true;
-bool dirtyText = true, dirtyButtons = true, dirtyVolume = true;
+bool dirtyBar = true, dirtyText = true, dirtyButtons = true, dirtyVolume = true;
 bool pulseOn = true;
 uint32_t nextPulseMs = 0;
 
-// ---------- icons ----------
+// ---------------------------------------------------------------- icons
 
-void iconPrev(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c) {
-  g.fillRect(cx - 9, cy - 8, 3, 16, c);
-  g.fillTriangle(cx + 8, cy - 8, cx + 8, cy + 8, cx - 5, cy, c);
+void iconPrev(Canvas& c, float cx, float cy, const Color& col) {
+  c.fillRRect(cx - 9.5f, cy - 8.5f, 3.2f, 17, 1.6f, col);
+  const Pt tri[3] = {{cx + 8.5f, cy - 8.5f}, {cx + 8.5f, cy + 8.5f}, {cx - 5.0f, cy}};
+  c.fillPolygon(tri, 3, col, 1.0f, 1.6f);
 }
 
-void iconNext(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c) {
-  g.fillRect(cx + 7, cy - 8, 3, 16, c);
-  g.fillTriangle(cx - 8, cy - 8, cx - 8, cy + 8, cx + 5, cy, c);
+void iconNext(Canvas& c, float cx, float cy, const Color& col) {
+  c.fillRRect(cx + 6.3f, cy - 8.5f, 3.2f, 17, 1.6f, col);
+  const Pt tri[3] = {{cx - 8.5f, cy - 8.5f}, {cx - 8.5f, cy + 8.5f}, {cx + 5.0f, cy}};
+  c.fillPolygon(tri, 3, col, 1.0f, 1.6f);
 }
 
-void iconPlay(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c) {
-  g.fillTriangle(cx - 7, cy - 11, cx - 7, cy + 11, cx + 11, cy, c);
+void iconPlay(Canvas& c, float cx, float cy, const Color& col) {
+  const Pt tri[3] = {{cx - 7.5f, cy - 11.5f}, {cx - 7.5f, cy + 11.5f}, {cx + 11.5f, cy}};
+  c.fillPolygon(tri, 3, col, 1.0f, 2.2f);
 }
 
-void iconPause(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c) {
-  g.fillRoundRect(cx - 9, cy - 10, 6, 20, 1, c);
-  g.fillRoundRect(cx + 3, cy - 10, 6, 20, 1, c);
+void iconPause(Canvas& c, float cx, float cy, const Color& col) {
+  c.fillRRect(cx - 9.0f, cy - 10.5f, 6.0f, 21, 2.0f, col);
+  c.fillRRect(cx + 3.0f, cy - 10.5f, 6.0f, 21, 2.0f, col);
 }
 
-void iconSpeaker(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c, bool loud) {
-  g.fillRect(cx - 9, cy - 4, 5, 8, c);
-  g.fillTriangle(cx - 6, cy, cx + 1, cy - 8, cx + 1, cy + 8, c);
+void iconSpeaker(Canvas& c, float cx, float cy, const Color& col, bool loud) {
+  c.fillRRect(cx - 9.0f, cy - 4.0f, 6.0f, 8.0f, 1.2f, col);
+  const Pt cone[4] = {{cx - 5.5f, cy - 4.0f}, {cx + 1.5f, cy - 8.5f}, {cx + 1.5f, cy + 8.5f}, {cx - 5.5f, cy + 4.0f}};
+  c.fillPolygon(cone, 4, col, 1.0f, 1.0f);
   if (loud) {
-    g.fillArc(cx + 2, cy, 7, 5, 300, 420, c);
-    g.fillArc(cx + 2, cy, 12, 10, 300, 420, c);
+    c.strokeArc(cx + 3.0f, cy, 6.5f, 2.2f, -48, 48, col);
+    c.strokeArc(cx + 3.0f, cy, 11.5f, 2.2f, -48, 48, col);
   }
 }
 
-void iconMic(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c) {
-  g.fillRoundRect(cx - 4, cy - 10, 8, 13, 4, c);
-  g.fillArc(cx, cy - 2, 8, 6, 0, 180, c);
-  g.fillRect(cx - 1, cy + 6, 2, 4, c);
+void iconMic(Canvas& c, float cx, float cy, const Color& col) {
+  c.fillCapsule(cx, cy - 6.5f, cx, cy - 1.5f, 3.4f, col);
+  c.strokeArc(cx, cy - 1.5f, 6.8f, 1.8f, 15, 165, col);
+  c.fillCapsule(cx, cy + 5.0f, cx, cy + 8.0f, 0.9f, col);
 }
 
-void iconNote(lgfx::LovyanGFX& g, int cx, int cy, uint16_t c) {
-  g.fillCircle(cx - 8, cy + 9, 5, c);
-  g.fillCircle(cx + 8, cy + 6, 5, c);
-  g.fillRect(cx - 4, cy - 10, 3, 19, c);
-  g.fillRect(cx + 10, cy - 13, 3, 19, c);
-  g.fillTriangle(cx - 4, cy - 10, cx + 13, cy - 13, cx + 13, cy - 8, c);
-  g.fillTriangle(cx - 4, cy - 10, cx + 13, cy - 8, cx - 4, cy - 5, c);
+void iconNote(Canvas& c, float cx, float cy, const Color& col) {
+  c.fillCircle(cx - 8.0f, cy + 9.0f, 5.0f, col);
+  c.fillCircle(cx + 8.0f, cy + 6.0f, 5.0f, col);
+  c.fillCapsule(cx - 3.2f, cy - 10.0f, cx - 3.2f, cy + 9.0f, 1.5f, col);
+  c.fillCapsule(cx + 12.8f, cy - 13.0f, cx + 12.8f, cy + 6.0f, 1.5f, col);
+  const Pt beam[4] = {{cx - 3.2f, cy - 10.0f}, {cx + 12.8f, cy - 13.0f}, {cx + 12.8f, cy - 7.5f}, {cx - 3.2f, cy - 4.5f}};
+  c.fillPolygon(beam, 4, col, 1.0f, 0.8f);
 }
 
-// Cut text to fit a width, adding "..." when needed
-String fit(lgfx::LovyanGFX& g, const String& s, int maxW) {
-  if (g.textWidth(s.c_str()) <= maxW) return s;
+// ---------------------------------------------------------------- helpers
+
+// Cuts text to fit a width, adding "..." when needed
+String fit(const gfont::Font& f, const String& s, float maxW) {
+  if (Canvas::textWidth(f, s.c_str()) <= maxW) return s;
   String t = s;
-  while (t.length() > 0 && g.textWidth((t + "...").c_str()) > maxW) t.remove(t.length() - 1);
+  while (t.length() > 0 && Canvas::textWidth(f, (t + "...").c_str()) > maxW) t.remove(t.length() - 1);
   return t + "...";
 }
 
-// ---------- parts ----------
+// ---------------------------------------------------------------- parts (drawn in screen coordinates)
 
-void drawClock() {
-  lcd->fillRect(0, 0, 300, 44, BG);
-  lcd->setFont(&fonts::FreeSansBold12pt7b);
-  lcd->setTextDatum(textdatum_t::middle_left);
-  lcd->setTextColor(COLOR_TEXT_DIM);
-  lcd->drawString(clockText.c_str(), 20, 24);
-}
+void drawClock(Canvas& c) { c.text(gfont::TITLE, clockText.c_str(), 20, 30, COLOR_TEXT_DIM); }
 
-void drawStatus() {
-  lcd->fillRect(420, 0, 380, 44, BG);
+void drawStatus(Canvas& c) {
   if (statusText.length() == 0) return;
-  lcd->setFont(&fonts::FreeSansBold9pt7b);
-  int tw = lcd->textWidth(statusText.c_str());
-  int w = tw + 52;
-  int x = 780 - w;
-  lcd->fillRoundRect(x, 8, w, 32, 16, PANEL);
-  lcd->drawRoundRect(x, 8, w, 32, 16, BORDER);
-  iconMic(*lcd, x + 20, 24, (statusPulse && !pulseOn) ? BORDER : statusColor);
-  lcd->setTextDatum(textdatum_t::middle_left);
-  lcd->setTextColor(statusColor);
-  lcd->drawString(statusText.c_str(), x + 36, 24);
+  const float tw = Canvas::textWidth(gfont::SMALL, statusText.c_str());
+  const float w = tw + 52, x = 780 - w;
+  c.fillRRect(x, 8, w, 32, 16, BORDER);
+  c.fillRRect(x + 1, 9, w - 2, 30, 15, PANEL);
+  iconMic(c, x + 21, 24, (statusPulse && !pulseOn) ? BORDER : statusColor);
+  c.text(gfont::SMALL, statusText.c_str(), x + 38, 29, statusColor);
 }
 
-void drawSubtitle() {
-  subSprite.fillScreen(BG);
-  subSprite.setFont(&fonts::FreeSansBold12pt7b);
-  subSprite.setTextColor(TEXT);
-  subSprite.setTextDatum(textdatum_t::middle_center);
-
+void drawSubtitle(Canvas& c) {
   // Word wrap into at most two lines
-  const int maxW = 680;
+  const float maxW = 700;
   String lines[2];
   int line = 0;
   String word;
@@ -141,7 +147,7 @@ void drawSubtitle() {
     }
     if (word.length() == 0) continue;
     String candidate = lines[line].length() ? lines[line] + " " + word : word;
-    if (subSprite.textWidth(candidate.c_str()) <= maxW) {
+    if (Canvas::textWidth(gfont::SUBTITLE, candidate.c_str()) <= maxW) {
       lines[line] = candidate;
     } else if (line == 0) {
       line = 1;
@@ -152,70 +158,63 @@ void drawSubtitle() {
     }
     word = "";
   }
-  if (truncated) lines[1] = fit(subSprite, lines[1] + " ...", maxW);
+  if (truncated) lines[1] = fit(gfont::SUBTITLE, lines[1] + " ...", maxW);
 
-  int lineH = 27;
+  auto centered = [&](const String& s, int baseline) {
+    const float w = Canvas::textWidth(gfont::SUBTITLE, s.c_str());
+    c.text(gfont::SUBTITLE, s.c_str(), SUB_X + (SUB_W - w) * 0.5f, baseline, TEXT);
+  };
   if (lines[1].length() == 0) {
-    subSprite.drawString(lines[0].c_str(), SUB_W / 2, SUB_H / 2);
+    centered(lines[0], SUB_Y + 38);
   } else {
-    subSprite.drawString(lines[0].c_str(), SUB_W / 2, SUB_H / 2 - lineH / 2);
-    subSprite.drawString(lines[1].c_str(), SUB_W / 2, SUB_H / 2 + lineH / 2);
+    centered(lines[0], SUB_Y + 26);
+    centered(lines[1], SUB_Y + 53);
   }
-  subSprite.pushSprite(lcd, SUB_X, SUB_Y);
 }
 
-void drawBarFrame() {
-  lcd->fillRect(0, BAR_Y - 4, 800, 480 - BAR_Y + 4, BG);
-  lcd->fillRoundRect(BAR_X, BAR_Y, BAR_W, BAR_H, 20, PANEL);
-  lcd->drawRoundRect(BAR_X, BAR_Y, BAR_W, BAR_H, 20, BORDER);
-  lcd->fillRoundRect(30, BAR_CY - 30, 60, 60, 12, TILE);
-  iconNote(*lcd, 60, BAR_CY, COLOR_ACCENT);
-}
+void drawBar(Canvas& c) {
+  c.fillRRect(BAR_X, BAR_Y, BAR_W, BAR_H, 20, BORDER);
+  c.fillRRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, 19, PANEL);
 
-void drawText() {
-  lcd->fillRect(TEXT_X, BAR_Y + 6, TEXT_W, BAR_H - 12, PANEL);
-  lcd->setTextDatum(textdatum_t::middle_left);
-  lcd->setFont(&fonts::FreeSansBold12pt7b);
-  lcd->setTextColor(TEXT_TITLE);
-  lcd->drawString(fit(*lcd, media.title, TEXT_W - 4).c_str(), TEXT_X, BAR_CY - 12);
-  lcd->setFont(&fonts::FreeSans9pt7b);
-  lcd->setTextColor(TEXT_MUTED);
-  lcd->drawString(fit(*lcd, media.artist, TEXT_W - 4).c_str(), TEXT_X, BAR_CY + 16);
-}
+  // album tile
+  c.fillRRect(30, BAR_CY - 30, 60, 60, 13, TILE);
+  iconNote(c, 60, BAR_CY, ACCENT);
 
-void drawButtons() {
-  lcd->fillCircle(PREV_X, BAR_CY, 26, pressed == Target::Prev ? BTN_PRESSED : BTN);
-  iconPrev(*lcd, PREV_X, BAR_CY, TEXT);
-  lcd->fillCircle(PLAY_X, BAR_CY, 30, pressed == Target::PlayPause ? ACCENT_PRESSED : COLOR_ACCENT);
+  // song
+  c.text(gfont::TITLE, fit(gfont::TITLE, media.title, TEXT_W - 4).c_str(), TEXT_X, BAR_CY - 3, TEXT_TITLE);
+  c.text(gfont::SMALL, fit(gfont::SMALL, media.artist, TEXT_W - 4).c_str(), TEXT_X, BAR_CY + 21, TEXT_MUTED);
+
+  // buttons
+  c.fillCircle(PREV_X, BAR_CY, 26, pressed == Target::Prev ? BTN_PRESSED : BTN);
+  iconPrev(c, PREV_X, BAR_CY, TEXT);
+  c.fillCircle(PLAY_X, BAR_CY, 30, pressed == Target::PlayPause ? ACCENT_PRESSED : ACCENT);
   if (media.playing)
-    iconPause(*lcd, PLAY_X, BAR_CY, PLAY_ICON);
+    iconPause(c, PLAY_X, BAR_CY, PLAY_ICON);
   else
-    iconPlay(*lcd, PLAY_X + 2, BAR_CY, PLAY_ICON);
-  lcd->fillCircle(NEXT_X, BAR_CY, 26, pressed == Target::Next ? BTN_PRESSED : BTN);
-  iconNext(*lcd, NEXT_X, BAR_CY, TEXT);
+    iconPlay(c, PLAY_X + 2, BAR_CY, PLAY_ICON);
+  c.fillCircle(NEXT_X, BAR_CY, 26, pressed == Target::Next ? BTN_PRESSED : BTN);
+  iconNext(c, NEXT_X, BAR_CY, TEXT);
+
+  // volume
+  iconSpeaker(c, 578, BAR_CY, TEXT_MUTED, false);
+  const int v = constrain(media.volume, 0, 100);
+  const float kx = VOL_X0 + (VOL_X1 - VOL_X0) * v / 100.0f;
+  c.fillRRect(VOL_X0, BAR_CY - 3, VOL_X1 - VOL_X0, 6, 3, TRACK);
+  if (kx > VOL_X0) c.fillRRect(VOL_X0, BAR_CY - 3, kx - VOL_X0, 6, 3, ACCENT);
+  c.fillCircle(kx, BAR_CY + 1, 12, BG, 0.35f);  // soft shadow
+  c.fillCircle(kx, BAR_CY, 10, TEXT);
+  iconSpeaker(c, 760, BAR_CY, TEXT_MUTED, true);
 }
 
-void drawVolume() {
-  lcd->fillRect(564, BAR_Y + 10, 210, BAR_H - 20, PANEL);
-  iconSpeaker(*lcd, 578, BAR_CY, TEXT_MUTED, false);
-  int v = constrain(media.volume, 0, 100);
-  int kx = VOL_X0 + (VOL_X1 - VOL_X0) * v / 100;
-  lcd->fillRoundRect(VOL_X0, BAR_CY - 3, VOL_X1 - VOL_X0, 6, 3, TRACK);
-  lcd->fillRoundRect(VOL_X0, BAR_CY - 3, kx - VOL_X0 + 1, 6, 3, COLOR_ACCENT);
-  lcd->fillCircle(kx, BAR_CY, 10, TEXT);
-  iconSpeaker(*lcd, 760, BAR_CY, TEXT_MUTED, true);
+void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
+  display::render(area, bg, [&](Canvas& c) { draw(c); });
 }
 
 }  // namespace
 
-void begin(LGFX& display) {
-  lcd = &display;
-  lcd->fillScreen(BG);
-  subSprite.setColorDepth(16);
-  subSprite.setPsram(true);
-  subSprite.createSprite(SUB_W, SUB_H);
-  drawBarFrame();
-  dirtyClock = dirtyStatus = dirtySub = dirtyText = dirtyButtons = dirtyVolume = true;
+void begin(LGFX&) {
+  display::render(Rect{0, 0, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
+  dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = true;
 }
 
 void setClock(const String& text) {
@@ -224,8 +223,8 @@ void setClock(const String& text) {
   dirtyClock = true;
 }
 
-void setStatus(const String& text, uint16_t color, bool pulse) {
-  if (text == statusText && color == statusColor && pulse == statusPulse) return;
+void setStatus(const String& text, const Color& color, bool pulse) {
+  if (text == statusText && color.c == statusColor.c && pulse == statusPulse) return;
   statusText = text;
   statusColor = color;
   statusPulse = pulse;
@@ -271,21 +270,25 @@ void showPressed(Target t) {
 }
 
 void update(uint32_t now) {
-  if (pressed != Target::None && now >= pressedUntil) {
+  if (pressed != Target::None && (int32_t)(now - pressedUntil) >= 0) {
     pressed = Target::None;
     dirtyButtons = true;
   }
-  if (statusPulse && now >= nextPulseMs) {
+  if (statusPulse && (int32_t)(now - nextPulseMs) >= 0) {
     pulseOn = !pulseOn;
     nextPulseMs = now + 450;
     dirtyStatus = true;
   }
-  if (dirtyClock) { drawClock(); dirtyClock = false; }
-  if (dirtyStatus) { drawStatus(); dirtyStatus = false; }
-  if (dirtySub) { drawSubtitle(); dirtySub = false; }
-  if (dirtyText) { drawText(); dirtyText = false; }
-  if (dirtyButtons) { drawButtons(); dirtyButtons = false; }
-  if (dirtyVolume) { drawVolume(); dirtyVolume = false; }
+  if (dirtyClock) { redraw(CLOCK_AREA, BG, drawClock); dirtyClock = false; }
+  if (dirtyStatus) { redraw(STATUS_AREA, BG, drawStatus); dirtyStatus = false; }
+  if (dirtySub) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
+  if (dirtyBar) {  // the whole bar (first time): it also covers the parts below
+    redraw(BAR_AREA, BG, drawBar);
+    dirtyBar = dirtyText = dirtyButtons = dirtyVolume = false;
+  }
+  if (dirtyText) { redraw(TEXT_AREA, BG, drawBar); dirtyText = false; }
+  if (dirtyButtons) { redraw(BUTTON_AREA, BG, drawBar); dirtyButtons = false; }
+  if (dirtyVolume) { redraw(VOLUME_AREA, BG, drawBar); dirtyVolume = false; }
 }
 
 Target hitTest(int x, int y) {

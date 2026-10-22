@@ -64,8 +64,16 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/main.cpp` | Behaviour: touch, demo conversation, sleeping |
 | `src/face.cpp` | The face: expressions, blinking, looking around, talking mouth |
 | `src/ui.cpp` | Top bar, subtitles, media bar |
+| `src/gfx.cpp` | Smooth-edged drawing (circles, rounded boxes, icons, text) |
+| `src/display.cpp` | Draws in fast memory, strip by strip, then copies to the screen |
+| `src/gfont_data.cpp` | Smooth text, made from the Nunito font by `tools/make_fonts.py` |
 | `src/pclink.cpp` | Wi-Fi setup and the connection to Gorgi Helper |
 | `src/board.cpp` | Screen, touch and backlight drivers for this board |
 | `platformio.ini` | Board and library settings |
 
 To change an expression, edit the `MOODS` table at the top of `src/face.cpp`.
+
+## Credits
+
+Text uses the Nunito font, (c) The Nunito Project Authors, SIL Open Font License 1.1
+(`tools/Nunito-OFL.txt`).

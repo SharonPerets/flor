@@ -14,6 +14,7 @@
 #include <Arduino.h>
 
 #include "board.h"
+#include "display.h"
 #include "face.h"
 #include "pclink.h"
 #include "ui.h"
@@ -28,7 +29,8 @@ constexpr uint32_t SLEEPY_AFTER_MS = 60 * 1000;
 constexpr uint32_t ASLEEP_AFTER_MS = 3 * 60 * 1000;
 constexpr uint32_t LONG_PRESS_MS = 900;
 constexpr uint32_t FORGET_WIFI_PRESS_MS = 5000;
-constexpr uint32_t FRAME_MS = 33;  // ~30 frames per second
+constexpr uint32_t FRAME_MS = 33;        // ~30 frames per second
+constexpr uint32_t SLEEP_FRAME_MS = 90;  // ~11 frames per second while asleep
 constexpr uint32_t VOLUME_SEND_MS = 120;
 
 enum class Phase { Idle, Listening, Thinking, Talking, Sleepy, Asleep };
@@ -462,7 +464,8 @@ void setup() {
   lcd.fillScreen(TFT_BLACK);
 
   if (!psramFound()) fatal("PSRAM not found - check board settings");
-  if (!face.begin(lcd)) fatal("Not enough memory for the face");
+  if (!display::begin(lcd)) fatal("Not enough memory for the drawing buffer");
+  if (!face.begin(lcd)) fatal("Could not start the face");
 
   ui::begin(lcd);
   media.volume = 50;
@@ -474,7 +477,7 @@ void setup() {
   face.setMood(Mood::Thinking);
   ui::setSubtitle("Connecting to Wi-Fi...");
   showMediaPlaceholder();
-  for (int i = 0; i < 10; i++) drawFrame(millis());
+  drawFrame(millis());
 
   pclink::Handlers h;
   h.onMedia = onMedia;
@@ -497,24 +500,35 @@ void setup() {
 
 void loop() {
   static uint32_t lastFrame = 0;
-  static uint32_t frames = 0, fpsTimer = 0;
+  static uint32_t frames = 0, fpsTimer = 0, renderMicros = 0, renderMaxMicros = 0;
   uint32_t now = millis();
 
   pclink::loop();
   handleTouch(now);
   updatePhase(millis());
 
-  if (now - lastFrame >= FRAME_MS) {
+  // Gorgi barely moves while asleep, so it is redrawn less often (less load on the screen memory)
+  const uint32_t interval = phase == Phase::Asleep ? SLEEP_FRAME_MS : FRAME_MS;
+  if (now - lastFrame >= interval) {
     lastFrame = now;
+    const uint32_t t0 = micros();
     drawFrame(now);
+    const uint32_t spent = micros() - t0;
+    renderMicros += spent;
+    if (spent > renderMaxMicros) renderMaxMicros = spent;
     frames++;
   }
 
   if (now - fpsTimer >= 10000) {
-    Serial.printf("fps: %.1f  free heap: %u  free psram: %u  wifi: %d  pc: %d\n",
-                  frames / ((now - fpsTimer) / 1000.0f), ESP.getFreeHeap(), ESP.getFreePsram(),
+    const display::Stats st = display::takeStats();
+    Serial.printf("frames/s: %.1f  per frame: %.1f ms (max %.1f)  shapes %.0f ms, copy %.0f ms, %u px per s\n",
+                  frames / ((now - fpsTimer) / 1000.0f), frames ? renderMicros / 1000.0f / frames : 0.0f,
+                  renderMaxMicros / 1000.0f, st.drawUs / 10000.0f, st.pushUs / 10000.0f, st.pixels / 10);
+    Serial.printf("free heap: %u  free psram: %u  wifi: %d  pc: %d\n", ESP.getFreeHeap(), ESP.getFreePsram(),
                   (int)pclink::wifiState(), (int)pclink::helperConnected());
     frames = 0;
+    renderMicros = 0;
+    renderMaxMicros = 0;
     fpsTimer = now;
   }
   delay(2);

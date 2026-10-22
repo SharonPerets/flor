@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "board.h"
+#include "gfx.h"
 
 namespace ui {
 
@@ -20,10 +21,11 @@ struct MediaInfo {
   int volume = 50;  // 0..100
 };
 
+// Draws the empty screen background. Call once, after display::begin().
 void begin(LGFX& lcd);
 
 void setClock(const String& text);
-void setStatus(const String& text, uint16_t color, bool pulse);
+void setStatus(const String& text, const gfx::Color& color, bool pulse);
 void setSubtitle(const String& text);
 void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
@@ -37,16 +39,13 @@ Target hitTest(int x, int y);
 int volumeFromX(int x);
 
 // Converts UTF-8 text (curly quotes, dashes, emoji...) into plain ASCII
-// that the built-in fonts can show.
+// that the fonts can show.
 String toAscii(const String& utf8);
 
 // Status colours
-constexpr uint16_t rgb565(uint32_t hex) {
-  return ((hex >> 8) & 0xF800) | ((hex >> 5) & 0x07E0) | ((hex >> 3) & 0x001F);
-}
-constexpr uint16_t COLOR_TEXT_DIM = rgb565(0xC9D3DD);
-constexpr uint16_t COLOR_LISTEN = rgb565(0xFF7EB3);
-constexpr uint16_t COLOR_THINK = rgb565(0xFFD166);
-constexpr uint16_t COLOR_ACCENT = rgb565(0x4FE3D6);
+constexpr gfx::Color COLOR_TEXT_DIM = gfx::rgb(0xC9D3DD);
+constexpr gfx::Color COLOR_LISTEN = gfx::rgb(0xFF7EB3);
+constexpr gfx::Color COLOR_THINK = gfx::rgb(0xFFD166);
+constexpr gfx::Color COLOR_ACCENT = gfx::rgb(0x4FE3D6);
 
 }  // namespace ui

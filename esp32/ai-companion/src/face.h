@@ -1,8 +1,12 @@
 // Gorgi's animated face: eyes, eyelids and mouth, with smooth transitions
 // between moods, blinking, looking around and a talking mouth.
+//
+// Drawing is smooth-edged (see gfx.h) and only the parts of the face that
+// changed since the last frame are redrawn (see display.h).
 #pragma once
 
 #include "board.h"
+#include "gfx.h"
 
 enum class Mood : uint8_t {
   Neutral,
@@ -25,7 +29,7 @@ bool moodFromName(const char* name, Mood& out);
 
 class Face {
  public:
-  // Size of the face area (drawn in an off-screen buffer, then copied to the screen)
+  // The face is drawn inside this area of the screen
   static constexpr int WIDTH = 600;
   static constexpr int HEIGHT = 274;
 
@@ -33,16 +37,46 @@ class Face {
   void setMood(Mood m);
   Mood mood() const { return mood_; }
   void setTalking(bool on) { talking_ = on; }
+  bool talking() const { return talking_; }
   // Loudness of Gorgi's voice right now (0..1), sent by the PC while it speaks.
   // Makes the mouth follow the real voice instead of a made-up movement.
   void setTalkLevel(float level, uint32_t nowMs) {
     talkLevel_ = level;
-    talkLevelMs_ = nowMs;
+    talkLevelMs_ = nowMs ? nowMs : 1;
   }
-  bool talking() const { return talking_; }
 
-  // Advance the animation and draw the face at (x, y) on the screen
-  void render(LGFX& lcd, int x, int y, uint32_t nowMs);
+  // Forget what is on screen, so the whole face is drawn again next time.
+  void invalidate() { haveLast_ = false; }
+
+  // Advance the animation and draw what changed. (x, y) is where the face
+  // area starts on the screen. Returns true if anything was drawn.
+  bool render(LGFX& lcd, int x, int y, uint32_t nowMs);
+
+  // What gets drawn, in screen coordinates rounded to quarter pixels. Two
+  // frames with the same Pose look exactly the same, so nothing is redrawn.
+  // (Public only so the drawing helpers in face.cpp can use them.)
+  struct EyeKey {
+    uint8_t kind;  // 0 none, 1 round eye, 2 heart
+    int32_t cx, cy, w, h, r;
+    int16_t top, slant, bottom;
+    uint32_t color;
+  };
+  struct MouthKey {
+    uint8_t on;
+    int32_t cx, cy, halfW, depth, openH;
+    uint32_t color;
+  };
+  struct ZKey {
+    uint8_t on;
+    int16_t x[3], y[3];
+    uint8_t a[3];
+    uint32_t color;
+  };
+  struct Pose {
+    EyeKey eye[2];
+    MouthKey mouth;
+    ZKey z;
+  };
 
  private:
   // Every field is a float so the whole struct can be blended smoothly
@@ -60,12 +94,8 @@ class Face {
   };
 
   void update(uint32_t nowMs);
-  void drawEye(float cx, float cy, float scale, float slant, uint16_t col, uint16_t glow);
-  void drawHeart(float cx, float cy, float size, uint16_t col, uint16_t glow);
-  void drawMouth(float cx, float cy, uint16_t col);
-  void drawZzz(uint32_t nowMs, uint16_t col);
+  Pose buildPose(uint32_t nowMs, int faceX, int faceY) const;
 
-  LGFX_Sprite sprite_;
   Mood mood_ = Mood::Neutral;
   Params cur_{};
   Params target_{};
@@ -73,6 +103,9 @@ class Face {
   float talkOpen_ = 0;
   float talkLevel_ = 0;
   uint32_t talkLevelMs_ = 0;
+
+  Pose last_{};
+  bool haveLast_ = false;
 
   uint32_t lastMs_ = 0;
   // Blinking
