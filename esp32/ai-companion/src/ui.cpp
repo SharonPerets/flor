@@ -49,6 +49,7 @@ String statusText = "";
 Color statusColor = COLOR_TEXT_DIM;
 bool statusPulse = false;
 String subtitle = "";
+int progress = -1;  // progress bar under the subtitle, -1 = none
 MediaInfo media;
 Target pressed = Target::None;
 uint32_t pressedUntil = 0;
@@ -132,6 +133,14 @@ void drawStatus(Canvas& c) {
 }
 
 void drawSubtitle(Canvas& c) {
+  if (progress >= 0) {
+    const float w = Canvas::textWidth(gfont::SUBTITLE, subtitle.c_str());
+    c.text(gfont::SUBTITLE, subtitle.c_str(), SUB_X + (SUB_W - w) * 0.5f, SUB_Y + 24, TEXT);
+    const float bx = SUB_X + (SUB_W - 400) * 0.5f, by = SUB_Y + 38;
+    c.fillRRect(bx, by, 400, 10, 5, TRACK);
+    if (progress > 0) c.fillRRect(bx, by, 400 * gfx::imin(progress, 100) / 100.0f, 10, 5, ACCENT);
+    return;
+  }
   // Word wrap into at most two lines
   const float maxW = 700;
   String lines[2];
@@ -234,9 +243,17 @@ void setStatus(const String& text, const Color& color, bool pulse) {
 
 void setSubtitle(const String& text) {
   String t = toAscii(text);
-  if (t == subtitle) return;
+  if (t == subtitle && progress < 0) return;
   subtitle = t;
+  progress = -1;
   dirtySub = true;
+}
+
+void showProgress(const String& text, int percent) {
+  subtitle = toAscii(text);
+  progress = percent < 0 ? 0 : percent;
+  redraw(SUB_AREA, BG, drawSubtitle);
+  dirtySub = false;
 }
 
 void setMedia(const MediaInfo& info) {

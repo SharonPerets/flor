@@ -1,0 +1,75 @@
+name: Gorgi release
+
+# Publishes a release when esp32/VERSION changes (or when started by hand).
+# The release holds the helper installer and Gorgi's firmware; Gorgi Helper
+# finds it and offers the update.
+
+on:
+  push:
+    paths:
+      - "esp32/VERSION"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      exists: ${{ steps.v.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(tr -d '[:space:]' < esp32/VERSION)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if gh release view "gorgi-v$V" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "exists=yes" >> "$GITHUB_OUTPUT"; echo "Release gorgi-v$V already exists"
+          else
+            echo "exists=no" >> "$GITHUB_OUTPUT"
+          fi
+
+  firmware:
+    needs: check
+    if: needs.check.outputs.exists == 'no'
+    uses: ./.github/workflows/gorgi-firmware.yml
+
+  helper:
+    needs: check
+    if: needs.check.outputs.exists == 'no'
+    uses: ./.github/workflows/gorgi-helper.yml
+
+  publish:
+    needs: [check, firmware, helper]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gorgi-firmware
+          path: fw
+      - uses: actions/download-artifact@v4
+        with:
+          name: GorgiHelper-Setup
+          path: setup
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.check.outputs.version }}
+        run: |
+          mkdir out
+          cp "$(find fw -name gorgi-firmware.bin | head -1)" "out/gorgi-firmware-$V.bin"
+          cp "$(find fw -name gorgi-full.bin | head -1)" "out/gorgi-full-$V.bin"
+          cp setup/*.exe "out/"
+          ls -la out
+          cat > notes.md <<NOTES
+          **Updating:** Gorgi Helper offers this update by itself (right-click the Gorgi icon near the clock).
+
+          **First install:**
+          - PC: run \`GorgiHelper-Setup-$V.exe\`.
+          - Gorgi: flash \`gorgi-full-$V.bin\` at address 0x0 with https://espressif.github.io/esptool-js/
+          NOTES
+          gh release create "gorgi-v$V" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Gorgi $V" --notes-file notes.md

@@ -6,6 +6,7 @@ on:
       - "esp32/gorgi-helper/**"
       - ".github/workflows/gorgi-helper.yml"
   workflow_dispatch:
+  workflow_call:  # used by gorgi-release.yml
 
 jobs:
   build:
@@ -55,7 +56,25 @@ jobs:
           if (Test-Path selftest.crash.txt) { Write-Output "--- crash log ---"; Get-Content selftest.crash.txt }
           if (-not (Select-String -Path selftest.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
 
+      - name: Check the version matches esp32/VERSION
+        shell: pwsh
+        run: |
+          $v = (Get-Content ..\VERSION -Raw).Trim()
+          if (-not (Select-String -Path gorgi_helper.py -Pattern "VERSION = `"$v`"" -SimpleMatch -Quiet)) {
+            Write-Output "VERSION in gorgi_helper.py is not $v"; exit 1 }
+          "GORGI_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /DAppVersion=$env:GORGI_VERSION installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem installer-out
+
       - uses: actions/upload-artifact@v4
         with:
-          name: GorgiHelper
-          path: esp32/gorgi-helper/dist/
+          name: GorgiHelper-Setup
+          retention-days: 30
+          path: esp32/gorgi-helper/installer-out/*.exe

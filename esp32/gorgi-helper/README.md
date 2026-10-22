@@ -9,19 +9,30 @@ A small app that connects your PC to Gorgi over Wi-Fi:
 
 ## Install
 
-1. On GitHub open **Actions → Gorgi Helper (Windows) → latest run** and download **GorgiHelper** (a zip).
-2. Unzip it somewhere permanent, for example `Documents\Gorgi`. Keep the whole `GorgiHelper` folder together.
-3. Open the folder and double-click `GorgiHelper.exe`. Windows may say *"Windows protected your PC"* because the app isn't signed:
-   click **More info → Run anyway**.
-4. A small Gorgi face appears in the taskbar tray (click the **^** arrow near the clock if you don't see it).
+1. Open https://github.com/SharonPerets/flor/releases/latest and download `GorgiHelper-Setup-<version>.exe`.
+2. Run it. Windows may say *"Windows protected your PC"* because the app isn't signed:
+   click **More info → Run anyway**. It installs for your user only (no admin password).
+3. A small Gorgi face appears in the taskbar tray (click the **^** arrow near the clock if you don't see it).
    It turns teal when it's connected to Gorgi.
-5. The **Settings** window opens the first time: paste your **Ollama API key**
+4. The **Settings** window opens the first time: paste your **Ollama API key**
    (ollama.com → Settings → Keys), click **Test key / load models**, pick a model, and **Save**.
    You can reopen Settings any time by double-clicking the tray icon.
-6. Right-click the icon → **Start with Windows** so it runs automatically.
 
-The first time it starts, the helper downloads a speech-recognition model (~150 MB).
-Until that's done Gorgi says it's "still learning to hear".
+Gorgi and the PC must be on the same Wi-Fi network.
+
+## Updates
+
+The helper checks GitHub once a day. When a new version is out, a message pops up near the clock.
+Right-click the Gorgi icon and choose:
+
+- **Update Gorgi Helper to …** — downloads the new installer, updates itself quietly and restarts.
+- **Update Gorgi to …** — sends the new firmware to Gorgi over Wi-Fi. Gorgi shows a progress bar and restarts.
+
+**Check for updates** in the same menu checks right away.
+
+Gorgi only accepts updates from the helper it paired with (the first one that connected to it).
+To pair it with a different PC, hold Gorgi's clock for 5 seconds: it forgets its Wi-Fi and the
+paired helper, then set it up again.
 
 ## Talking to Gorgi
 

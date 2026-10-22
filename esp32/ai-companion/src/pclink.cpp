@@ -2,6 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
+#include <Preferences.h>
+#include <Update.h>
+#include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -12,7 +15,20 @@ namespace {
 
 WiFiManager wm;
 WebSocketsServer server(PORT);
+WebServer http(UPDATE_PORT);  // receives firmware updates
 Handlers handlers;
+
+// Pairing: the first helper that connects gives Gorgi a secret key. Only a
+// helper with that key may send firmware updates.
+Preferences prefs;
+String pairedKey;
+
+// Firmware update in progress
+bool updateRejected = false;
+String updateError;
+size_t updateSize = 0, updateWritten = 0;
+int updateLastPercent = -1;
+uint32_t restartAtMs = 0;
 
 WifiState state = WifiState::Connecting;
 bool serverStarted = false;
@@ -48,10 +64,18 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
   if (strcmp(type, "hello") == 0) {
     helperClient = client;
     String name = doc["name"] | "PC";
-    Serial.printf("pclink: helper connected (%s)\n", name.c_str());
+    String key = doc["key"] | "";
+    if (pairedKey.length() == 0 && key.length() >= 16) {
+      pairedKey = key;  // first helper ever: pair with it
+      prefs.putString("helperKey", pairedKey);
+      Serial.println("pclink: paired with this helper");
+    }
+    const bool paired = key.length() >= 16 && key == pairedKey;
+    Serial.printf("pclink: helper connected (%s)%s\n", name.c_str(), paired ? "" : " - not the paired helper");
     JsonDocument reply;
     reply["type"] = "hello";
     reply["version"] = GORGI_VERSION;
+    reply["paired"] = paired;
     sendJson(client, reply);
     if (handlers.onHelper) handlers.onHelper(true, name);
     return;
@@ -90,6 +114,74 @@ void onSocketEvent(uint8_t client, WStype_t type, uint8_t* payload, size_t lengt
   }
 }
 
+void report(int percent, const String& message) {
+  if (handlers.onUpdate) handlers.onUpdate(percent, message);
+}
+
+// Called again and again while the firmware file arrives, piece by piece
+void onUpdateUpload() {
+  HTTPUpload& up = http.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    updateError = "";
+    updateRejected = pairedKey.length() == 0 || http.arg("key") != pairedKey;
+    updateLastPercent = -1;
+    if (updateRejected) {
+      Serial.println("pclink: update refused (not from the paired helper)");
+      return;
+    }
+    updateSize = (size_t)http.arg("size").toInt();
+    updateWritten = 0;
+    Serial.printf("pclink: receiving firmware update (%u bytes)\n", (unsigned)updateSize);
+    if (!Update.begin(updateSize > 0 ? updateSize : UPDATE_SIZE_UNKNOWN)) {
+      updateError = Update.errorString();
+      return;
+    }
+    if (http.hasArg("md5")) Update.setMD5(http.arg("md5").c_str());
+    report(0, "Updating... 0%");
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (updateRejected || updateError.length()) return;
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+      updateError = Update.errorString();
+      return;
+    }
+    updateWritten += up.currentSize;
+    if (updateSize > 0) {
+      const int pct = (int)(updateWritten * 100 / updateSize);
+      if (pct != updateLastPercent && pct < 100) {
+        updateLastPercent = pct;
+        report(pct, String("Updating... ") + pct + "%");
+      }
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (!updateRejected && updateError.length() == 0 && !Update.end(true)) updateError = Update.errorString();
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    updateError = "the upload stopped";
+  }
+}
+
+// Called once the whole update has arrived
+void onUpdateDone() {
+  if (updateRejected) {
+    http.send(403, "text/plain", "Gorgi is paired with another helper");
+    return;
+  }
+  if (updateError.length() || !Update.isFinished()) {
+    Serial.printf("pclink: update failed: %s\n", updateError.c_str());
+    http.send(500, "text/plain", String("update failed: ") + updateError);
+    report(-1, String("Update failed: ") + updateError);
+    return;
+  }
+  Serial.println("pclink: update installed, restarting");
+  http.send(200, "text/plain", "ok");
+  report(100, "Update done! Restarting...");
+  restartAtMs = millis() + 1500;
+}
+
+void onInfo() {
+  http.send(200, "application/json", String("{\"name\":\"Gorgi\",\"version\":\"") + GORGI_VERSION + "\"}");
+}
+
 void goOnline() {
   setState(WifiState::Online);
   Serial.printf("pclink: Wi-Fi connected, IP %s\n", WiFi.localIP().toString().c_str());
@@ -103,6 +195,9 @@ void goOnline() {
     server.onEvent(onSocketEvent);
     // Notice a PC that went to sleep without saying goodbye
     server.enableHeartbeat(15000, 4000, 2);
+    http.on("/info", HTTP_GET, onInfo);
+    http.on("/update", HTTP_POST, onUpdateDone, onUpdateUpload);
+    http.begin();
     serverStarted = true;
   }
 }
@@ -111,6 +206,8 @@ void goOnline() {
 
 void begin(const Handlers& h) {
   handlers = h;
+  prefs.begin("gorgi", false);
+  pairedKey = prefs.getString("helperKey", "");
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // keeps replies to the helper snappy
   wm.setTitle("Gorgi");
@@ -142,7 +239,11 @@ void loop() {
     setState(WifiState::Connecting);  // the ESP32 reconnects on its own
   }
 
-  if (serverStarted) server.loop();
+  if (serverStarted) {
+    server.loop();
+    http.handleClient();
+  }
+  if (restartAtMs && (int32_t)(millis() - restartAtMs) >= 0) ESP.restart();
 }
 
 WifiState wifiState() { return state; }
@@ -166,7 +267,8 @@ void sendSimple(const char* type) {
 }
 
 void forgetWifi() {
-  Serial.println("pclink: forgetting Wi-Fi and restarting");
+  Serial.println("pclink: forgetting Wi-Fi and the paired helper, restarting");
+  prefs.remove("helperKey");
   wm.resetSettings();
   delay(300);
   ESP.restart();

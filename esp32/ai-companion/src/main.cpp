@@ -148,6 +148,35 @@ void endConversation() {
   moodHoldUntil = millis() + 4000;
 }
 
+// ---------- firmware update over Wi-Fi ----------
+
+bool updating = false;
+
+void drawFrame(uint32_t now);
+
+// While the new firmware arrives nothing else runs, so this draws right away.
+void onUpdate(int percent, const String& message) {
+  if (percent < 0) {
+    updating = false;
+    face.setMood(Mood::Sad);
+    ui::setSubtitle(message);
+    showIdleStatus();
+    setPhase(Phase::Idle);
+    moodHoldUntil = millis() + 6000;
+    return;
+  }
+  if (!updating) {
+    updating = true;
+    if (inConversation) endConversation();
+    face.setMood(Mood::Thinking);
+    face.setTalking(false);
+    ui::setStatus("Updating", ui::COLOR_THINK, false);
+  }
+  if (percent >= 100) face.setMood(Mood::Happy);
+  for (int i = 0; i < 3; ++i) drawFrame(millis());  // let the face settle a little
+  ui::showProgress(message, percent);
+}
+
 // ---------- conversation messages from the helper ----------
 
 void onVoice(const char* type, JsonObjectConst msg) {
@@ -485,6 +514,7 @@ void setup() {
   h.onHelper = onHelper;
   h.onWifi = onWifi;
   h.onVoice = onVoice;
+  h.onUpdate = onUpdate;
   pclink::begin(h);
 
   lastActivity = millis();

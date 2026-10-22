@@ -31,6 +31,9 @@ void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
 void showPressed(Target t);  // brief highlight on a button
+// Shows a line of text with a progress bar under the face, right away
+// (used while a firmware update arrives, when nothing else gets drawn).
+void showProgress(const String& text, int percent);
 
 // Redraws whatever changed. Call every frame.
 void update(uint32_t nowMs);

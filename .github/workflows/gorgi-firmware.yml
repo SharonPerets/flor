@@ -6,6 +6,7 @@ on:
       - "esp32/ai-companion/**"
       - ".github/workflows/gorgi-firmware.yml"
   workflow_dispatch:
+  workflow_call:  # used by gorgi-release.yml
 
 jobs:
   build:
@@ -38,10 +39,17 @@ jobs:
           python -m esptool --chip esp32s3 merge_bin -o gorgi-full.bin \
             --flash_mode keep --flash_freq keep --flash_size 8MB \
             0x0 $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 "$BOOT_APP0" 0x10000 $B/firmware.bin
+          cp $B/firmware.bin gorgi-firmware.bin  # the part sent over Wi-Fi for updates
+
+      - name: Check the version matches esp32/VERSION
+        run: |
+          V=$(tr -d '[:space:]' < ../VERSION)
+          grep -q "#define GORGI_VERSION \"$V\"" src/pclink.h || { echo "GORGI_VERSION in src/pclink.h is not $V"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:
           name: gorgi-firmware
+          retention-days: 30
           path: |
             esp32/ai-companion/gorgi-full.bin
-            esp32/ai-companion/.pio/build/waveshare-s3-lcd7/firmware.bin
+            esp32/ai-companion/gorgi-firmware.bin

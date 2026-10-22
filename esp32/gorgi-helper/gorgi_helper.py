@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import platform
+import secrets
 import socket
 import sys
 import threading
@@ -27,9 +28,13 @@ from pathlib import Path
 # without this Windows aborts the app when the second copy loads.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
+import httpx  # noqa: E402
 import websockets  # noqa: E402
 
+import updater  # noqa: E402
+
 APP_NAME = "Gorgi Helper"
+VERSION = "3.4"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -176,6 +181,15 @@ class Helper:
         self.refresh_event = asyncio.Event()
         self.ignore_volume_until = 0.0
         self.status = ("Starting...", False)
+        # updates
+        self.on_notify = lambda title, message: None  # pop-up message near the clock
+        self.on_changed = lambda: None                # menu needs refreshing
+        self.gorgi_address = None
+        self.gorgi_version = None
+        self.gorgi_paired = False
+        self.latest = None        # newest release on GitHub
+        self.updating = False
+        self._offered = set()     # versions we already told the user about
 
     def set_status(self, text, connected):
         if (text, connected) != self.status:
@@ -196,6 +210,7 @@ class Helper:
             try:
                 async with websockets.connect(uri, open_timeout=5, ping_interval=15, ping_timeout=10) as ws:
                     backoff = 2
+                    self.gorgi_address = address
                     self.set_status(f"Connected to Gorgi ({address})", True)
                     await self._session(ws)
             except (OSError, asyncio.TimeoutError, websockets.exceptions.WebSocketException) as e:
@@ -204,6 +219,103 @@ class Helper:
                 self.set_status("Gorgi disconnected, retrying...", False)
                 await self._sleep(backoff)
                 backoff = min(backoff * 2, 15)
+
+    # ------------------------------------------------------------ updates
+
+    @property
+    def helper_update_available(self):
+        return bool(self.latest and self.latest.helper_url and getattr(sys, "frozen", False)
+                    and updater.is_newer(self.latest.version, VERSION))
+
+    @property
+    def gorgi_update_available(self):
+        return bool(self.latest and self.latest.firmware_url and self.ws is not None and self.gorgi_version
+                    and updater.is_newer(self.latest.version, self.gorgi_version))
+
+    async def update_loop(self):
+        await self._sleep(20)  # let everything start first
+        while not self.stop_event.is_set():
+            await self.check_updates()
+            await self._sleep(24 * 3600)
+
+    async def check_updates(self, manual=False):
+        try:
+            async with httpx.AsyncClient() as client:
+                self.latest = await updater.fetch_latest(client)
+            log.info("newest release: %s", self.latest.version if self.latest else "none yet")
+        except Exception as e:
+            log.warning("update check failed: %s", e)
+            if manual:
+                self.on_notify("Couldn't check for updates", "Is the internet working?")
+            return
+        self.offer_updates(manual)
+
+    def offer_updates(self, manual=False):
+        """Tells the user about new versions (once per version, or every time when asked)."""
+        self.on_changed()
+        if not self.latest:
+            if manual:
+                self.on_notify("No updates yet", f"Gorgi Helper {VERSION}")
+            return
+        v = self.latest.version
+        parts = []
+        if self.helper_update_available:
+            parts.append("Gorgi Helper")
+        if self.gorgi_update_available:
+            parts.append("Gorgi")
+        if parts and (manual or v not in self._offered):
+            self._offered.add(v)
+            self.on_notify(f"Update {v} is ready",
+                           f"New version for {' and '.join(parts)}. Right-click the Gorgi icon to install.")
+        elif not parts and manual:
+            gorgi = f", Gorgi {self.gorgi_version}" if self.gorgi_version else ""
+            self.on_notify("Everything is up to date", f"Gorgi Helper {VERSION}{gorgi}")
+
+    async def update_gorgi(self):
+        if self.updating or not self.gorgi_update_available:
+            return
+        if not self.gorgi_paired:
+            self.on_notify("Can't update Gorgi",
+                           "Gorgi is paired with another helper. Hold Gorgi's clock for 5 seconds to reset it "
+                           "(this also forgets its Wi-Fi).")
+            return
+        self.updating = True
+        v = self.latest.version
+        self.set_status(f"Updating Gorgi to {v}...", True)
+        try:
+            async with httpx.AsyncClient() as client:
+                data = await updater.download(client, self.latest.firmware_url)
+                log.info("sending firmware %s (%d bytes) to Gorgi", v, len(data))
+                ok, message = await updater.send_firmware(client, self.gorgi_address,
+                                                          self.config.get("helper_key", ""), data)
+        except Exception as e:
+            ok, message = False, f"download failed ({e})"
+        self.updating = False
+        log.info("Gorgi update: %s", message)
+        if ok:
+            self.on_notify("Gorgi updated", f"Gorgi is restarting with version {v}.")
+        else:
+            self.on_notify("Gorgi update failed", message)
+        self.on_changed()
+
+    async def update_helper(self):
+        if self.updating or not self.helper_update_available:
+            return
+        self.updating = True
+        v = self.latest.version
+        self.set_status(f"Downloading Gorgi Helper {v}...", self.ws is not None)
+        try:
+            async with httpx.AsyncClient() as client:
+                data = await updater.download(client, self.latest.helper_url)
+            path = updater.save_installer(data, v)
+            log.info("starting installer %s", path)
+            updater.run_installer(path)
+        except Exception as e:
+            self.updating = False
+            log.warning("helper update failed: %s", e)
+            self.on_notify("Update failed", str(e))
+            return
+        self.stop_event.set()  # quit, so the installer can replace this app
 
     async def _sleep(self, seconds):
         try:
@@ -245,7 +357,8 @@ class Helper:
 
     async def _session(self, ws):
         self.ws = ws
-        await ws.send(json.dumps({"type": "hello", "name": platform.node() or "PC"}))
+        await ws.send(json.dumps({"type": "hello", "name": platform.node() or "PC",
+                                  "key": self.config.get("helper_key", "")}))
         sender = asyncio.create_task(self._send_loop(ws))
         stopper = asyncio.create_task(self.stop_event.wait())
         receiver = asyncio.create_task(self._receive_loop(ws))
@@ -256,6 +369,8 @@ class Helper:
                     raise task.exception()
         finally:
             self.ws = None
+            self.gorgi_version = None
+            self.on_changed()
             self.stop_conversation()
             for task in (sender, receiver, stopper):
                 task.cancel()
@@ -268,7 +383,11 @@ class Helper:
             except ValueError:
                 continue
             if msg.get("type") == "hello":
-                log.info("Gorgi firmware version: %s", msg.get("version", "?"))
+                self.gorgi_version = msg.get("version")
+                self.gorgi_paired = bool(msg.get("paired"))
+                log.info("Gorgi firmware version: %s (%s)", self.gorgi_version,
+                         "paired" if self.gorgi_paired else "paired with another helper")
+                self.offer_updates()
                 continue
             if msg.get("type") == "talk":
                 log.info("Gorgi was tapped: starting a conversation")
@@ -389,8 +508,21 @@ def start_tray(helper, loop):
     def open_settings_item(_icon, _item):
         show_settings(helper.config)
 
+    def run_async(coro):
+        asyncio.run_coroutine_threadsafe(coro, loop)
+
     menu = pystray.Menu(
         pystray.MenuItem(lambda _item: helper.status[0], None, enabled=False),
+        pystray.MenuItem(f"Version {VERSION}", None, enabled=False),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(lambda _item: f"Update Gorgi to {helper.latest.version}" if helper.latest else "Update Gorgi",
+                         lambda _icon, _item: run_async(helper.update_gorgi()),
+                         visible=lambda _item: helper.gorgi_update_available),
+        pystray.MenuItem(lambda _item: f"Update Gorgi Helper to {helper.latest.version}" if helper.latest
+                         else "Update Gorgi Helper",
+                         lambda _icon, _item: run_async(helper.update_helper()),
+                         visible=lambda _item: helper.helper_update_available),
+        pystray.MenuItem("Check for updates", lambda _icon, _item: run_async(helper.check_updates(manual=True))),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Settings...", open_settings_item, default=True),
         pystray.MenuItem("Start with Windows", toggle_autostart, checked=lambda _item: autostart_enabled()),
@@ -405,6 +537,15 @@ def start_tray(helper, loop):
         icon.update_menu()
 
     helper.on_status = lambda text, connected: on_status(text, connected)
+
+    def notify(title, message):
+        try:
+            icon.notify(message, title)
+        except Exception as e:  # not every Windows setup allows it
+            log.info("notification failed: %s", e)
+
+    helper.on_notify = notify
+    helper.on_changed = icon.update_menu
     icon.run_detached()
     return icon
 
@@ -512,6 +653,9 @@ def self_test(out_path):
         import conversation  # noqa: F401
         import settings_window  # noqa: F401
 
+        import updater as upd
+
+        assert upd.is_newer("3.10", "3.9") and not upd.is_newer("3.4", "3.4")
         lines.append("imports: ok")
 
         # Gorgi speaks a sentence, then Whisper listens to it: checks both ends
@@ -591,6 +735,9 @@ def main():
         return
 
     config = load_config()
+    if not config.get("helper_key"):
+        config["helper_key"] = secrets.token_hex(16)  # Gorgi pairs with the first helper it meets
+        save_config(config)
     if args.address:
         config["gorgi_address"] = args.address
 
@@ -607,7 +754,7 @@ def main():
             show_settings(config)  # first run: ask for the Ollama key
     log.info("%s started", APP_NAME)
     try:
-        loop.run_until_complete(helper.run())
+        loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop()))
     except KeyboardInterrupt:
         pass
     finally:

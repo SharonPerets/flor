@@ -4,3 +4,4 @@ dist/
 *.spec
 gorgi.ico
 selftest.txt
+installer-out/

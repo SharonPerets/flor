@@ -10,7 +10,17 @@ It shows expressions, reacts to touch, and has a media bar to control music on y
 | 3 | Voice: tap Gorgi, speak into the PC mic, Gorgi answers out loud (Ollama Cloud) | ✅ this version |
 | 4 | Polish: personality, clock, more idle behaviour | later |
 
-## Upload to the board (first time)
+## Easiest: install a release
+
+Download `gorgi-full-<version>.bin` from https://github.com/SharonPerets/flor/releases/latest, open
+https://espressif.github.io/esptool-js/ in Chrome or Edge, click **Connect**, choose the board, add the
+file at address **0x0**, and click **Program**. After that, Gorgi Helper installs new versions over Wi-Fi
+(see `esp32/gorgi-helper/README.md`).
+
+To publish a new version: change the version in `esp32/VERSION`, `GORGI_VERSION` in `src/pclink.h`
+and `VERSION` in `gorgi-helper/gorgi_helper.py`, and push. GitHub builds everything and publishes it.
+
+## Build it yourself (VS Code + PlatformIO)
 
 1. Install **VS Code**: https://code.visualstudio.com
 2. In VS Code open **Extensions** (Ctrl+Shift+X), search **PlatformIO IDE**, install it, and restart VS Code.
@@ -30,12 +40,6 @@ It shows expressions, reacts to touch, and has a media bar to control music on y
 The plug icon in the blue bar opens the **Serial Monitor**, where Gorgi prints
 messages (frames per second, memory) that help if something goes wrong.
 
-### Alternative: flash from the browser (no install)
-
-Every push to GitHub builds the firmware automatically
-(**Actions → Gorgi firmware → latest run → gorgi-firmware**).
-Download it, open https://espressif.github.io/esptool-js/ in Chrome or Edge, click **Connect**,
-choose the board, add `gorgi-full.bin` at address **0x0**, and click **Program**.
 
 ## Wi-Fi setup (once)
 
