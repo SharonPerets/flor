@@ -106,8 +106,10 @@ class Transcriber:
             log.info("Whisper model ready")
             self.error = None
         except Exception as e:
+            import traceback
+
             log.exception("could not load Whisper")
-            self.error = str(e)
+            self.error = f"{e!r}\n{traceback.format_exc()}"
         finally:
             self.loading = False
 

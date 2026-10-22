@@ -472,6 +472,9 @@ def self_test(out_path):
         lines.append(f"voice: {len(speech)} samples")
         audio16k = np.interp(np.arange(0, len(speech), 1.5), np.arange(len(speech)), speech).astype(np.float32)
         t = Transcriber("base.en", Path(out_path).resolve().parent / "models")
+        t.load()
+        if t.error:
+            raise RuntimeError(f"whisper failed to load: {t.error}")
         heard = t.transcribe(audio16k)
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
