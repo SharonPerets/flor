@@ -7,6 +7,7 @@
 - Volume is the PC's master volume.
 """
 
+import concurrent.futures
 import ctypes
 import logging
 import sys
@@ -32,6 +33,20 @@ KEYEVENTF_EXTENDEDKEY = 0x1
 KEYEVENTF_KEYUP = 0x2
 
 
+# COM objects that must never be garbage collected (see "volume" below)
+_keepalive = []
+
+
+def _init_com_thread():
+    """Gives the volume thread its own COM (multi-threaded) setup."""
+    import comtypes
+
+    try:
+        comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
+    except OSError:
+        pass  # already initialised
+
+
 def press_media_key(vk):
     user32 = ctypes.windll.user32
     user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
@@ -41,6 +56,9 @@ def press_media_key(vk):
 class WindowsMedia:
     def __init__(self):
         self._manager = None
+        self._ep = None
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="gorgi-volume", initializer=_init_com_thread)
 
     async def _session(self):
         if self._manager is None:
@@ -102,31 +120,61 @@ class WindowsMedia:
             press_media_key(VK_MEDIA_PLAY_PAUSE)
 
     # ----- volume -----
+    #
+    # The Windows volume objects (COM) are created ONCE, on one dedicated
+    # thread, and are never released. Creating them again every second and
+    # letting Python's garbage collector release them from whatever thread
+    # happened to run it crashed the whole app (access violation in Release).
 
     def _endpoint(self):
-        speakers = AudioUtilities.GetSpeakers()
-        endpoint = getattr(speakers, "EndpointVolume", None)  # newer pycaw versions
-        if endpoint is not None:
-            return endpoint
-        interface = speakers.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        return cast(interface, POINTER(IAudioEndpointVolume))
+        """Runs on the volume thread only."""
+        if self._ep is None:
+            speakers = AudioUtilities.GetSpeakers()
+            keep = [speakers]
+            ep = getattr(speakers, "EndpointVolume", None)  # newer pycaw versions
+            if ep is None:
+                interface = speakers.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                keep.append(interface)
+                ep = cast(interface, POINTER(IAudioEndpointVolume))
+            keep.append(ep)
+            _keepalive.append(keep)  # never let the garbage collector release these
+            self._ep = ep
+        return self._ep
+
+    def _on_volume_thread(self, fn):
+        """Runs fn(endpoint) on the volume thread and returns its result."""
+
+        def job():
+            try:
+                return fn(self._endpoint())
+            except Exception:
+                self._ep = None  # e.g. the default speakers changed: look them up again next time
+                raise
+
+        return self._pool.submit(job).result(timeout=3)
 
     def get_volume(self):
         """0..100, or 0 when muted."""
-        try:
-            ep = self._endpoint()
+
+        def read(ep):
             if ep.GetMute():
                 return 0
             return round(ep.GetMasterVolumeLevelScalar() * 100)
+
+        try:
+            return self._on_volume_thread(read)
         except Exception as e:
             log.debug("get volume failed: %s", e)
             return None
 
     def set_volume(self, value):
-        try:
-            ep = self._endpoint()
-            value = max(0, min(100, int(value)))
+        value = max(0, min(100, int(value)))
+
+        def write(ep):
             ep.SetMasterVolumeLevelScalar(value / 100.0, None)
             ep.SetMute(1 if value == 0 else 0, None)
+
+        try:
+            self._on_volume_thread(write)
         except Exception as e:
             log.warning("set volume failed: %s", e)
