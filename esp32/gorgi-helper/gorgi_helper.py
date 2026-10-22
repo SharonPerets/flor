@@ -443,6 +443,9 @@ def make_voice(config):
 def self_test(out_path):
     lines = []
     try:
+        import numpy  # first, so a problem here shows its real error
+
+        lines.append(f"numpy: {numpy.__version__}")
         media = make_media()
         lines.append(f"media backend: {type(media).__name__}")
         info = asyncio.run(media.get_info())
@@ -478,7 +481,10 @@ def self_test(out_path):
         lines.append("sound: ok")
         lines.append("SELFTEST OK")
     except Exception as e:
+        import traceback
+
         lines.append(f"SELFTEST FAILED: {e!r}")
+        lines.append(traceback.format_exc())
     Path(out_path).write_text("\n".join(lines), encoding="utf-8")
 
 
