@@ -58,9 +58,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
-- **Swipe sideways** in the middle of the screen to change screens. The screen follows your finger
-  and glides into place. Order: **Music ← Face → Weather**. After 45 seconds untouched, Gorgi
-  slides back to its face.
+- **Swipe sideways** in the middle of the screen to change screens. Order: **Music ← Face →
+  Weather**. After 45 seconds untouched, Gorgi goes back to its face.
 - **Music screen** (swipe right): album art, the song, and how far into it you are.
 - **Weather screen** (swipe left): now and the next 7 days. Tap the city name to pick another
   city in Israel (Nahariya is the default). The forecast comes from
@@ -75,7 +74,6 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/main.cpp` | Behaviour: touch, demo conversation, sleeping |
 | `src/face.cpp` | The face: expressions, blinking, looking around, talking mouth |
 | `src/ui.cpp` | Top bar, subtitles, media bar |
-| `src/slider.cpp` | Slides screens sideways when you swipe |
 | `src/music_screen.cpp` | The music screen: album art, song, progress |
 | `src/weather.cpp` | The weather screen: forecast, weather pictures, city picker |
 | `src/weather_net.cpp` | Downloads the forecast in the background |

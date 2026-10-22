@@ -18,17 +18,15 @@
 #include "board.h"
 #include "display.h"
 #include "face.h"
-#include "gfont.h"
 #include "music_screen.h"
 #include "pclink.h"
-#include "screen.h"
-#include "slider.h"
 #include "ui.h"
 #include "weather.h"
 #include "weather_net.h"
 
 namespace {
 
+LGFX lcd;
 Face face;
 
 // How long before Gorgi gets sleepy / falls asleep with nobody around
@@ -59,23 +57,8 @@ constexpr uint32_t PAGE_IDLE_MS = 45 * 1000;  // then back to the face
 bool musicDirty = true;      // the music screen needs drawing
 int musicProgressKey = -2;   // what the progress bar showed last
 
-// Sliding between screens (see slider.h)
-struct Slide {
-  bool on = false;         // the pictures are on screen; nothing else draws in the middle
-  int dir = 0;             // -1: the next screen comes in from the right, +1: the previous one from the left
-  Page to = Page::Face;    // the screen coming in
-  bool hasTo = false;      // false at the first/last screen: it only stretches a little
-  float offset = 0;        // how far it has moved (pixels)
-  int shown = 1 << 30;     // the offset on screen right now
-  bool gliding = false;    // finger lifted: moving on its own to `target`
-  float from = 0, target = 0;
-  uint32_t glideStart = 0, glideMs = 0;
-} slide;
-uint32_t slideFrames = 0, slideMicros = 0, slideMaxMicros = 0;  // for the log
-float dragVelocity = 0;  // pixels per ms, + = right
-int lastDragX = 0;
-uint32_t lastDragMs = 0;
-bool touchIgnored = false;  // a touch that landed while a screen was gliding
+constexpr int SWIPE_MIN_PX = 80;  // a sideways drag at least this long changes screens
+constexpr gfx::Rect MIDDLE{0, 44, 800, 332};  // the part of the screen that changes
 
 // Weather
 weather::Data wx;
@@ -98,7 +81,7 @@ bool touching = false;
 uint32_t touchStart = 0;
 ui::Target touchTarget = ui::Target::None;
 bool longPressDone = false;
-int touchX0 = 0, touchY0 = 0;
+int touchX0 = 0, touchY0 = 0, touchEndX = 0;
 bool swiping = false;  // the finger moved sideways: no tap, no long press
 int testMoodIndex = 0;
 
@@ -151,9 +134,6 @@ const char* musicEmptyTitle() {
 const char* musicEmptyHint() {
   return pclink::helperConnected() ? "Play some music on your PC" : "Run Gorgi Helper on your PC";
 }
-
-// Milliseconds since `since`, 0 if `since` is a moment in the future
-uint32_t msSinceSigned(uint32_t now, uint32_t since) { return (int32_t)(now - since) > 0 ? now - since : 0; }
 
 void setPhase(Phase p, uint32_t durationMs = 0) {
   phase = p;
@@ -211,23 +191,6 @@ void endConversation() {
 
 // ---------- screens ----------
 
-void drawFrame(uint32_t now);
-
-// Draws a whole screen into slider picture `which` (0 or 1)
-void drawPageInto(int which, Page p, uint32_t now) {
-  display::setTarget(slider::picture(which), slider::AREA);
-  display::render(slider::AREA, ui::BACKGROUND, [&](gfx::Canvas& c) {
-    if (p == Page::Weather) weather::draw(c, wx, wxCity, wxPicker, wxStatus.c_str());
-    if (p == Page::Music) music::draw(c, media, now, musicEmptyTitle(), musicEmptyHint());
-  });
-  if (p == Page::Face) {
-    face.invalidate();
-    face.render(ui::FACE_X, ui::FACE_Y, now);
-    ui::drawSubtitleNow();
-  }
-  display::setTarget(nullptr, slider::AREA);
-}
-
 // The screen's content will be drawn again in full on the next frame
 void markPageDirty(Page p) {
   if (p == Page::Face) face.invalidate();
@@ -235,103 +198,27 @@ void markPageDirty(Page p) {
   if (p == Page::Music) musicDirty = true;
 }
 
-void setSlideOffset(float offset) {
-  slide.offset = offset;
-  const int px = (int)lroundf(offset);
-  if (px != slide.shown) {
-    const uint32_t t0 = micros();
-    slider::show(px);
-    const uint32_t spent = micros() - t0;
-    slideFrames++;
-    slideMicros += spent;
-    if (spent > slideMaxMicros) slideMaxMicros = spent;
-    slide.shown = px;
-  }
-  float pos = (float)(int)page;
-  if (slide.hasTo) pos += fminf(1.0f, fabsf(offset) / slider::AREA.w) * ((int)slide.to - (int)page);
-  ui::setPagePosition(pos);
-}
+void drawFrame(uint32_t now);
 
-// Gets the two pictures ready. dir: -1 = the next screen (finger going left), +1 = the previous one.
-void startSlide(int dir, Page to, bool hasTo, uint32_t now) {
-  const uint32_t t0 = micros();
-  if (!slide.on) {
-    drawPageInto(0, page, now);
-    ui::setSubtitleVisible(false);
-    slide.on = true;
-  }
-  slide.dir = dir;
-  slide.to = to;
-  slide.hasTo = hasTo;
-  if (hasTo) {
-    if (to == Page::Weather) wxPicker = false;
-    drawPageInto(1, to, now);
-  } else {
-    slider::fill(1, ui::BACKGROUND);
-  }
-  Serial.printf("slide: screens drawn in %.1f ms\n", (micros() - t0) / 1000.0f);
-}
-
-void startSlideToward(int dir, uint32_t now) {
-  const int next = (int)page + (dir < 0 ? 1 : -1);
-  const bool ok = next >= 0 && next < (int)Page::Count;
-  startSlide(dir, ok ? (Page)next : page, ok, now);
-}
-
-void glideTo(float target, uint32_t now) {
-  slide.gliding = true;
-  slide.from = slide.offset;
-  slide.target = target;
-  slide.glideStart = now;
-  const float dist = fabsf(target - slide.offset);
-  slide.glideMs = (uint32_t)constrain(dist / slider::AREA.w * 340.0f, 120.0f, 320.0f);
-}
-
-void endSlide() {
-  const bool arrived = slide.hasTo && fabsf(slide.target) >= slider::AREA.w;
-  if (slideFrames)
-    Serial.printf("slide: %u frames, %.1f ms each (max %.1f)\n", slideFrames, slideMicros / 1000.0f / slideFrames,
-                  slideMaxMicros / 1000.0f);
-  slideFrames = slideMicros = slideMaxMicros = 0;
-  if (arrived) {
-    page = slide.to;
-    pageTouched = millis();
-  }
-  slide = Slide();
-  ui::setPagePosition((float)(int)page);
-  ui::setSubtitleVisible(page == Page::Face);
-  markPageDirty(page);  // the picture on screen already looks right; this makes it live again
-}
-
-// Moves a gliding screen along. Called every loop.
-void updateSlide(uint32_t now) {
-  if (!slide.on || !slide.gliding) return;
-  float t = slide.glideMs ? (float)msSinceSigned(now, slide.glideStart) / slide.glideMs : 1.0f;
-  if (t > 1) t = 1;
-  const float e = 1 - (1 - t) * (1 - t) * (1 - t);  // fast at first, then slows down
-  setSlideOffset(slide.from + (slide.target - slide.from) * e);
-  if (t >= 1) endSlide();
-}
-
-// Slides to another screen on its own (back to the face after a while, or when you talk)
-void goToPage(Page p) {
-  if (p == page || slide.on || touching) return;
-  const uint32_t now = millis();
-  const int dir = (int)p > (int)page ? -1 : 1;
-  startSlide(dir, p, true, now);
-  setSlideOffset(0);
-  glideTo(dir < 0 ? -slider::AREA.w : slider::AREA.w, now);
-}
-
-// Switches right away, without sliding
-void showPageNow(Page p) {
-  if (slide.on) slide = Slide();
+// Switches screens right away (no animation)
+void showPage(Page p) {
+  if (p == page) return;
   page = p;
+  pageTouched = millis();
   ui::setPagePosition((float)(int)p);
   ui::setSubtitleVisible(p == Page::Face);
-  display::render(slider::AREA, ui::BACKGROUND, [](gfx::Canvas&) {});
+  if (p == Page::Face) {
+    // clear around the face (the face and subtitle draw their own background)
+    display::render(gfx::Rect{0, 44, ui::FACE_X, 274}, ui::BACKGROUND, [](gfx::Canvas&) {});
+    display::render(gfx::Rect{ui::FACE_X + 600, 44, 800 - ui::FACE_X - 600, 274}, ui::BACKGROUND,
+                    [](gfx::Canvas&) {});
+  } else if (p == Page::Weather) {
+    wxPicker = false;
+  }
   markPageDirty(p);
+  drawFrame(millis());  // the new screen right away, in one go
 }
+
 
 // Gives the forecast to the helper, so Gorgi can talk about it
 void sendWeather() {
@@ -443,7 +330,7 @@ void onUpdate(int percent, const String& message) {
   if (!updating) {
     updating = true;
     if (inConversation) endConversation();
-    showPageNow(Page::Face);
+    showPage(Page::Face);
     face.setMood(Mood::Happy);
     face.setTalking(false);
     ui::setStatus("Updating", ui::COLOR_THINK, false);
@@ -464,7 +351,7 @@ void onVoice(const char* type, JsonObjectConst msg) {
   uint32_t now = millis();
   lastVoiceMsg = now;
   lastActivity = now;  // a conversation keeps Gorgi awake
-  if (page != Page::Face && strcmp(type, "level") != 0) goToPage(Page::Face);
+  if (page != Page::Face && strcmp(type, "level") != 0) showPage(Page::Face);
 
   if (strcmp(type, "level") == 0) {
     face.setTalkLevel(msg["value"] | 0.0f, now);
@@ -653,8 +540,6 @@ void handleTouch(uint32_t now) {
     touchX0 = tp.x;
     touchY0 = tp.y;
     swiping = false;
-    touchIgnored = slide.on;  // a screen is still gliding: let it finish
-    if (touchIgnored) touchTarget = ui::Target::None;
     if (page != Page::Face) pageTouched = now;
     ui::showPressed(touchTarget);
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
@@ -677,29 +562,14 @@ void handleTouch(uint32_t now) {
   if (tp.pressed && touching) {
     lastActivity = now;
     if (page != Page::Face) pageTouched = now;
-    if (touchIgnored) return;
     const int dx = tp.x - touchX0;
     // A sideways drag in the middle of the screen moves the screens
     if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(dx) > 16 &&
         abs(dx) * 5 > abs(tp.y - touchY0) * 6) {
       swiping = true;
-      startSlideToward(dx < 0 ? -1 : 1, now);
-      dragVelocity = 0;
-      lastDragX = tp.x;
-      lastDragMs = now;
     }
     if (swiping) {
-      const int dir = dx < 0 ? -1 : 1;
-      if (dx != 0 && dir != slide.dir) startSlideToward(dir, now);  // changed direction
-      if (now - lastDragMs >= 8) {
-        const float v = (float)(tp.x - lastDragX) / (now - lastDragMs);
-        dragVelocity = 0.6f * v + 0.4f * dragVelocity;
-        lastDragX = tp.x;
-        lastDragMs = now;
-      }
-      float offset = constrain((float)dx, -(float)slider::AREA.w, (float)slider::AREA.w);
-      if (!slide.hasTo) offset = dir * 110.0f * (1.0f - expf(-abs(dx) / 300.0f));  // stretch at the ends
-      setSlideOffset(offset);
+      touchEndX = tp.x;
       return;
     }
     if (touchTarget == ui::Target::Volume) {
@@ -716,9 +586,8 @@ void handleTouch(uint32_t now) {
       if (now - touchStart >= FORGET_WIFI_PRESS_MS) {
         longPressDone = true;
         say(Mood::Surprised, "Forgetting Wi-Fi and restarting...");
-        face.render(ui::FACE_X, ui::FACE_Y, now);
+        face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
         ui::update(now);
-        screen::present();
         delay(1500);
         pclink::forgetWifi();
       } else if (now - touchStart >= 1500) {
@@ -731,16 +600,12 @@ void handleTouch(uint32_t now) {
     touching = false;
     ui::Target released = touchTarget;
     touchTarget = ui::Target::None;
-    if (touchIgnored) return;
     if (swiping) {
       swiping = false;
-      // Far enough, or a quick flick that way: go. Otherwise slide back.
-      const float off = slide.offset;
-      const bool flick = fabsf(dragVelocity) > 0.45f && (dragVelocity < 0) == (off < 0) && fabsf(off) > 30;
-      if (slide.hasTo && (fabsf(off) > slider::AREA.w * 0.33f || flick))
-        glideTo(off < 0 ? -slider::AREA.w : slider::AREA.w, now);
-      else
-        glideTo(0, now);
+      // A long enough sideways swipe changes screens
+      const int dx = touchEndX - touchX0;
+      const int next = (int)page + (dx < 0 ? 1 : -1);  // swipe left -> the next screen
+      if (abs(dx) >= SWIPE_MIN_PX && next >= 0 && next < (int)Page::Count) showPage((Page)next);
       return;
     }
     if (released == ui::Target::Face && page != Page::Face) {
@@ -810,17 +675,15 @@ void updatePhase(uint32_t now) {
 
 void fatal(const char* msg) {
   Serial.println(msg);
-  display::render(gfx::Rect{0, 0, SCREEN_W, SCREEN_H}, ui::BACKGROUND,
-                  [&](gfx::Canvas& c) { c.text(gfont::SUBTITLE, msg, 20, 60, gfx::rgb(0xFF6B6B)); });
-  screen::present();
+  lcd.setTextColor(TFT_RED);
+  lcd.setFont(&fonts::FreeSansBold12pt7b);
+  lcd.drawString(msg, 20, 20);
   while (true) delay(1000);
 }
 
 void drawFrame(uint32_t now) {
-  if (slide.on) {
-    // the slider owns the middle of the screen
-  } else if (page == Page::Face) {
-    face.render(ui::FACE_X, ui::FACE_Y, now);
+  if (page == Page::Face) {
+    face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
   } else if (page == Page::Weather) {
     if (wxDirty) {
       wxDirty = false;
@@ -830,7 +693,7 @@ void drawFrame(uint32_t now) {
   } else if (page == Page::Music) {
     const int key = music::progressKey(media, now);
     if (musicDirty) {
-      display::render(slider::AREA, ui::BACKGROUND,
+      display::render(MIDDLE, ui::BACKGROUND,
                       [&](gfx::Canvas& c) { music::draw(c, media, now, musicEmptyTitle(), musicEmptyHint()); });
     } else if (key != musicProgressKey) {
       display::render(music::PROGRESS_AREA, ui::BACKGROUND,
@@ -840,7 +703,6 @@ void drawFrame(uint32_t now) {
     musicProgressKey = key;
   }
   ui::update(now);
-  screen::present();
 }
 
 }  // namespace
@@ -851,13 +713,15 @@ void setup() {
   Serial.printf("Gorgi %s starting...\n", GORGI_VERSION);
 
   board::begin();
-  if (!psramFound()) fatal("PSRAM not found - check board settings");
-  if (!screen::begin()) fatal("The screen didn't start");
-  if (!display::begin()) fatal("Not enough memory for the drawing buffer");
-  if (!face.begin()) fatal("Could not start the face");
-  if (!slider::begin() || !music::begin()) fatal("Not enough memory for the screens");
+  lcd.init();
+  lcd.fillScreen(TFT_BLACK);
 
-  ui::begin();
+  if (!psramFound()) fatal("PSRAM not found - check board settings");
+  if (!display::begin(lcd)) fatal("Not enough memory for the drawing buffer");
+  if (!face.begin(lcd)) fatal("Could not start the face");
+  if (!music::begin()) fatal("Not enough memory for the music screen");
+
+  ui::begin(lcd);
   media.volume = 50;
   ui::setClock("Gorgi");
   showIdleStatus();
@@ -904,8 +768,7 @@ void loop() {
   handleTouch(now);
   updatePhase(millis());
   updateWeather(millis());
-  updateSlide(millis());
-  if (page != Page::Face && !touching && msSince(millis(), pageTouched) > PAGE_IDLE_MS) goToPage(Page::Face);
+  if (page != Page::Face && !touching && msSince(millis(), pageTouched) > PAGE_IDLE_MS) showPage(Page::Face);
 
   // Gorgi barely moves while asleep, so it is redrawn less often (less load on the screen memory)
   const uint32_t interval = phase == Phase::Asleep ? SLEEP_FRAME_MS : FRAME_MS;
@@ -919,16 +782,11 @@ void loop() {
     frames++;
   }
 
-  screen::present();  // a slide step drawn above (does nothing if nothing changed)
-
   if (now - fpsTimer >= 10000) {
     const display::Stats st = display::takeStats();
     Serial.printf("frames/s: %.1f  per frame: %.1f ms (max %.1f)  shapes %.0f ms, copy %.0f ms, %u px per s\n",
                   frames / ((now - fpsTimer) / 1000.0f), frames ? renderMicros / 1000.0f / frames : 0.0f,
                   renderMaxMicros / 1000.0f, st.drawUs / 10000.0f, st.pushUs / 10000.0f, st.pixels / 10);
-    const screen::Stats sc = screen::takeStats();
-    Serial.printf("screen: %u pictures in 10 s, waited %.0f ms, sync %.0f ms\n", sc.frames, sc.waitUs / 1000.0f,
-                  sc.syncUs / 1000.0f);
     Serial.printf("free heap: %u  free psram: %u  wifi: %d  pc: %d\n", ESP.getFreeHeap(), ESP.getFreePsram(),
                   (int)pclink::wifiState(), (int)pclink::helperConnected());
     frames = 0;

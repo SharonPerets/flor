@@ -1,9 +1,10 @@
-// Puts gfx drawing on the screen.
+// Puts gfx drawing on the real screen.
 //
-// Shapes are drawn in a small buffer in the chip's fast internal RAM, one
-// horizontal strip at a time (drawing in slow PSRAM pixel by pixel would be
-// much slower), and each strip is copied into the screen's next picture
-// (see screen.h). Nothing shows until screen::present().
+// The screen's picture memory (in slow PSRAM) is also being read non-stop to
+// feed the display. Drawing straight into it makes the two fight, which can make
+// parts of the picture jump sideways. So drawing happens in a small buffer in
+// the chip's fast internal RAM, one horizontal strip at a time, and each strip
+// is copied over to the screen once.
 #pragma once
 
 #include <type_traits>
@@ -13,8 +14,8 @@
 
 namespace display {
 
-// Call once at startup, after screen::begin().
-bool begin();
+// Call once at startup, after the screen is initialised.
+bool begin(LGFX& lcd);
 
 namespace detail {
 using DrawFn = void (*)(gfx::Canvas&, void*);
@@ -35,9 +36,6 @@ Stats takeStats();
 // area is skipped. setTarget(nullptr, ...) goes back to drawing on the screen.
 void setTarget(uint16_t* picture, const gfx::Rect& area);
 bool drawingToPicture();
-
-// About to redraw all of `area` (see screen::willCover)
-void willCover(const gfx::Rect& area);
 
 // Copies a rectangle of a picture to the screen. picture is pictureW pixels
 // wide; (sx, sy) is where the rectangle starts in it.

@@ -1,7 +1,5 @@
 #include "display.h"
 
-#include "screen.h"
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,6 +10,7 @@
 namespace display {
 namespace {
 
+LGFX* lcd = nullptr;
 Stats stats;
 uint16_t* buffer = nullptr;
 size_t capacity = 0;  // in pixels
@@ -20,7 +19,9 @@ gfx::Rect targetArea{0, 0, 0, 0};
 
 }  // namespace
 
-bool begin() {
+bool begin(LGFX& l) {
+  lcd = &l;
+  lcd->setSwapBytes(true);  // our buffer holds plain RGB565
   const size_t sizes[] = {32768, 24576, 16384, 8192};
   for (size_t px : sizes) {
 #if defined(ESP_PLATFORM)
@@ -56,11 +57,13 @@ uint16_t* scratch(size_t& pixels) {
   return buffer;
 }
 
-void willCover(const gfx::Rect& area) { screen::willCover(area); }
-
 void copyToScreen(const uint16_t* picture, int pictureW, int sx, int sy, int x, int y, int w, int h) {
-  if (w <= 0 || h <= 0) return;
-  screen::write(x, y, w, h, picture + (size_t)sy * pictureW + sx, pictureW);
+  if (!lcd || w <= 0 || h <= 0) return;
+  if (w == pictureW) {  // whole rows: one copy
+    lcd->pushImage(x, y, w, h, picture + (size_t)sy * pictureW + sx);
+    return;
+  }
+  for (int r = 0; r < h; ++r) lcd->pushImage(x, y + r, w, 1, picture + (size_t)(sy + r) * pictureW + sx);
 }
 
 Stats takeStats() {
@@ -72,7 +75,7 @@ Stats takeStats() {
 namespace detail {
 
 void renderBands(const gfx::Rect& want, const gfx::Color& bg, DrawFn fn, void* ctx) {
-  if (!buffer) return;
+  if (!lcd || !buffer) return;
   const gfx::Rect area = gfx::intersect(want, target ? targetArea : gfx::Rect{0, 0, SCREEN_W, SCREEN_H});
   if (area.empty()) return;
   const int rowsPerBand = (int)(capacity / (size_t)area.w);
@@ -92,7 +95,7 @@ void renderBands(const gfx::Rect& want, const gfx::Color& bg, DrawFn fn, void* c
                buffer + (size_t)r * area.w, area.w * 2);
       continue;
     }
-    screen::write(area.x, y, area.w, h, buffer, area.w);
+    lcd->pushImage(area.x, y, area.w, h, buffer);
     stats.drawUs += t1 - t0;
     stats.pushUs += micros() - t1;
     stats.pixels += (uint32_t)area.w * h;
