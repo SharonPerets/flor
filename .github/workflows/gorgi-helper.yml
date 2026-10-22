@@ -44,6 +44,9 @@ jobs:
           --hidden-import requests --hidden-import faster_whisper --hidden-import pkg_resources
           gorgi_helper.py
 
+      - name: Bundle the Whisper speech model (so users don't download it)
+        run: python -c "from faster_whisper import download_model; download_model('base.en', output_dir='dist/GorgiHelper/models/base.en')"
+
       - name: Self-test (voice -> Whisper round trip, imports)
         shell: pwsh
         run: |

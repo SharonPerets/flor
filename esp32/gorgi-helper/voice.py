@@ -84,6 +84,16 @@ class Recorder:
         return np.concatenate(chunks)
 
 
+def bundled_model_dir(model_name):
+    """The Whisper model folder shipped next to GorgiHelper.exe, if there is one."""
+    import sys
+    from pathlib import Path
+
+    app_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+    folder = app_dir / "models" / model_name
+    return folder if (folder / "model.bin").exists() else None
+
+
 class Transcriber:
     def __init__(self, model_name, models_dir):
         self.model_name = model_name
@@ -100,8 +110,14 @@ class Transcriber:
         try:
             from faster_whisper import WhisperModel
 
-            log.info("loading Whisper model %s (downloads once, ~150 MB)...", self.model_name)
-            self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8",
+            model = self.model_name
+            bundled = bundled_model_dir(self.model_name)
+            if bundled:
+                model = str(bundled)  # shipped with the app: no download needed
+                log.info("loading bundled Whisper model from %s", bundled)
+            else:
+                log.info("loading Whisper model %s (downloads once, ~150 MB)...", self.model_name)
+            self._model = WhisperModel(model, device="cpu", compute_type="int8",
                                        download_root=str(self.models_dir))
             log.info("Whisper model ready")
             self.error = None

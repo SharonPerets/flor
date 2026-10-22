@@ -380,11 +380,15 @@ void handleTouch(uint32_t now) {
 
 // ---------- behaviour over time ----------
 
+// Milliseconds since `since`. Never "negative": if `since` was set a moment
+// after `now` was read, the answer is 0 instead of a huge wrapped-around number.
+uint32_t msSince(uint32_t now, uint32_t since) { return (int32_t)(now - since) > 0 ? now - since : 0; }
+
 void updatePhase(uint32_t now) {
   bool timeUp = phaseUntil && now >= phaseUntil;
 
   // Safety net: if the helper goes quiet in the middle of a conversation
-  if (inConversation && now - lastVoiceMsg > CONVERSATION_TIMEOUT_MS) {
+  if (inConversation && msSince(now, lastVoiceMsg) > CONVERSATION_TIMEOUT_MS) {
     Serial.println("conversation timed out");
     endConversation();
   }
@@ -407,14 +411,14 @@ void updatePhase(uint32_t now) {
         face.setMood(Mood::Neutral);
         ui::setSubtitle(restingSubtitle());
       }
-      if (now - lastActivity > SLEEPY_AFTER_MS && pclink::wifiState() != pclink::WifiState::SetupPortal) {
+      if (msSince(now, lastActivity) > SLEEPY_AFTER_MS && pclink::wifiState() != pclink::WifiState::SetupPortal) {
         face.setMood(Mood::Sleepy);
         ui::setSubtitle("Getting sleepy...");
         setPhase(Phase::Sleepy);
       }
       break;
     case Phase::Sleepy:
-      if (now - lastActivity > ASLEEP_AFTER_MS) {
+      if (msSince(now, lastActivity) > ASLEEP_AFTER_MS) {
         face.setMood(Mood::Asleep);
         ui::setSubtitle("");
         ui::setStatus("Tap to wake me", ui::COLOR_TEXT_DIM, false);
@@ -491,7 +495,7 @@ void loop() {
 
   pclink::loop();
   handleTouch(now);
-  updatePhase(now);
+  updatePhase(millis());
 
   if (now - lastFrame >= FRAME_MS) {
     lastFrame = now;

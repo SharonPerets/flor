@@ -487,7 +487,9 @@ def self_test(out_path):
         # Gorgi speaks a sentence, then Whisper listens to it: checks both ends
         import numpy as np
 
-        from voice import Speaker, Transcriber
+        from voice import Speaker, Transcriber, bundled_model_dir
+
+        lines.append(f"bundled whisper model: {bundled_model_dir('base.en')}")
 
         speech = asyncio.run(Speaker("en-US-AnaNeural").synthesize("Hello Gorgi, please play the next song."))
         lines.append(f"voice: {len(speech)} samples")
