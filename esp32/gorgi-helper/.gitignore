@@ -1,0 +1,6 @@
+__pycache__/
+build/
+dist/
+*.spec
+gorgi.ico
+selftest.txt
