@@ -23,7 +23,11 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-import websockets
+# Whisper and other libraries each bring their own copy of Intel's OpenMP;
+# without this Windows aborts the app when the second copy loads.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
+import websockets  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
 PORT = 81
@@ -440,8 +444,21 @@ def make_voice(config):
 # ---------------------------------------------------------------- self test (used by the build)
 
 
+class _Report(list):
+    """Lines of the self-test report, saved after every step (in case of a crash)."""
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = Path(path)
+
+    def append(self, line):
+        super().append(line)
+        self.path.write_text("\n".join(self), encoding="utf-8")
+
+
 def self_test(out_path):
-    lines = []
+    lines = _Report(out_path)
+    lines.append("starting")
     try:
         import numpy  # first, so a problem here shows its real error
 
@@ -472,9 +489,11 @@ def self_test(out_path):
         lines.append(f"voice: {len(speech)} samples")
         audio16k = np.interp(np.arange(0, len(speech), 1.5), np.arange(len(speech)), speech).astype(np.float32)
         t = Transcriber("base.en", Path(out_path).resolve().parent / "models")
+        lines.append("loading whisper...")
         t.load()
         if t.error:
             raise RuntimeError(f"whisper failed to load: {t.error}")
+        lines.append("whisper loaded, transcribing...")
         heard = t.transcribe(audio16k)
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
