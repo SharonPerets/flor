@@ -11,7 +11,7 @@ namespace ui {
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 44;
 
-enum class Target { None, Face, Prev, PlayPause, Next, Volume };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume };
 
 struct MediaInfo {
   String title;

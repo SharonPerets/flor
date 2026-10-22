@@ -1,18 +1,21 @@
 // Gorgi - an AI desk companion for the Waveshare ESP32-S3-Touch-LCD-7
 //
-// Step 1: face, touch and media bar. No Wi-Fi yet: tapping the face plays a
-// short demo conversation, and the media buttons only make Gorgi react.
-// Step 2 connects the media bar to the Gorgi Helper app on the PC.
+// Step 2: Gorgi joins your Wi-Fi and talks to the Gorgi Helper app on your
+// Windows PC. The media bar controls the PC (play/pause, next, previous,
+// volume) and shows the song that is playing. Tapping the face still plays a
+// demo conversation; real voice comes in step 3.
 //
 // Touch controls:
-//   tap face        -> demo: listening, thinking, talking
-//   hold face 1 s   -> show the next expression (handy for testing)
-//   media buttons   -> Gorgi reacts (real PC control comes in step 2)
+//   tap face          -> demo: listening, thinking, talking
+//   hold face 1 s     -> show the next expression (handy for testing)
+//   media buttons     -> control music on the PC
+//   hold clock 5 s    -> forget Wi-Fi and open the "Gorgi-Setup" network again
 
 #include <Arduino.h>
 
 #include "board.h"
 #include "face.h"
+#include "pclink.h"
 #include "ui.h"
 
 namespace {
@@ -24,7 +27,9 @@ Face face;
 constexpr uint32_t SLEEPY_AFTER_MS = 60 * 1000;
 constexpr uint32_t ASLEEP_AFTER_MS = 3 * 60 * 1000;
 constexpr uint32_t LONG_PRESS_MS = 900;
+constexpr uint32_t FORGET_WIFI_PRESS_MS = 5000;
 constexpr uint32_t FRAME_MS = 33;  // ~30 frames per second
+constexpr uint32_t VOLUME_SEND_MS = 120;
 
 enum class Phase { Idle, Listening, Thinking, Talking, Sleepy, Asleep };
 Phase phase = Phase::Idle;
@@ -33,6 +38,8 @@ uint32_t lastActivity = 0;   // last touch
 uint32_t moodHoldUntil = 0;  // keep the current mood until then, then go neutral
 
 ui::MediaInfo media;
+String pcName;
+bool gotMediaSinceConnect = false;
 
 // Touch tracking
 bool touching = false;
@@ -40,6 +47,11 @@ uint32_t touchStart = 0;
 ui::Target touchTarget = ui::Target::None;
 bool longPressDone = false;
 int testMoodIndex = 0;
+
+// Volume slider
+uint32_t lastVolumeSent = 0;
+int volumeSent = -1;
+uint32_t ignorePcVolumeUntil = 0;  // don't let the PC move the slider while you drag it
 
 struct Line {
   Mood mood;
@@ -54,12 +66,49 @@ const Line DEMO_ANSWERS[] = {
   {Mood::Surprised, "Whoa, hi! You scared me a little."},
 };
 
+// ---------- small helpers ----------
+
 void showIdleStatus() { ui::setStatus("Tap me to talk", ui::COLOR_TEXT_DIM, false); }
+
+// Text that stays under the face while nothing else is being said
+String restingSubtitle() {
+  if (pclink::wifiState() == pclink::WifiState::SetupPortal)
+    return String("Set me up: on your phone, join the Wi-Fi \"") + pclink::SETUP_NETWORK + "\"";
+  return "";
+}
+
+// What the media bar shows when there is no song info
+void showMediaPlaceholder() {
+  ui::MediaInfo m = media;
+  switch (pclink::wifiState()) {
+    case pclink::WifiState::Connecting:
+      m.title = "Connecting to Wi-Fi...";
+      m.artist = "";
+      break;
+    case pclink::WifiState::SetupPortal:
+      m.title = "Wi-Fi setup needed";
+      m.artist = String("Join \"") + pclink::SETUP_NETWORK + "\" from your phone";
+      break;
+    case pclink::WifiState::Online:
+      if (pclink::helperConnected()) {
+        m.title = "Nothing playing";
+        m.artist = String("Connected to ") + pcName;
+      } else {
+        m.title = "PC not connected";
+        m.artist = "Run Gorgi Helper on your PC";
+      }
+      break;
+  }
+  ui::setMedia(m);
+}
 
 void setPhase(Phase p, uint32_t durationMs = 0) {
   phase = p;
   phaseUntil = durationMs ? millis() + durationMs : 0;
 }
+
+bool isBusy() { return phase == Phase::Listening || phase == Phase::Thinking || phase == Phase::Talking; }
+bool isSleeping() { return phase == Phase::Sleepy || phase == Phase::Asleep; }
 
 // Make Gorgi say something with a mood. The mouth moves for roughly as long
 // as it would take to read the text out loud.
@@ -99,22 +148,95 @@ void startDemoConversation() {
   setPhase(Phase::Listening, 2200);
 }
 
+// ---------- messages from the PC ----------
+
+void onHelper(bool connected, const String& name) {
+  gotMediaSinceConnect = false;
+  if (connected) {
+    pcName = name;
+    showMediaPlaceholder();
+    if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
+  } else {
+    ui::setClock("Gorgi");
+    showMediaPlaceholder();
+    if (!isSleeping()) react(Mood::Sad, "I lost my connection to the PC.");
+  }
+}
+
+void onMedia(const ui::MediaInfo& m) {
+  String oldTitle = media.title;
+  bool first = !gotMediaSinceConnect;
+  gotMediaSinceConnect = true;
+
+  int keepVolume = media.volume;
+  media = m;
+  if (touchTarget == ui::Target::Volume || millis() < ignorePcVolumeUntil) media.volume = keepVolume;
+
+  if (media.title.length() == 0) {
+    showMediaPlaceholder();
+  } else {
+    ui::setMedia(media);
+  }
+
+  // A new song started: a little happy reaction (unless Gorgi is busy or asleep)
+  if (!first && media.title.length() && media.title != oldTitle && !isBusy() && !isSleeping()) {
+    react(Mood::Happy, String("Now playing: ") + media.title);
+  }
+}
+
+void onClock(const String& text) { ui::setClock(text); }
+
+void onWifi(pclink::WifiState s) {
+  showMediaPlaceholder();
+  switch (s) {
+    case pclink::WifiState::SetupPortal:
+      say(Mood::Confused, restingSubtitle());
+      break;
+    case pclink::WifiState::Online:
+      if (!isSleeping()) react(Mood::Happy, "I'm online! Now start Gorgi Helper on your PC.");
+      break;
+    case pclink::WifiState::Connecting:
+      break;
+  }
+}
+
+// ---------- touch ----------
+
+void sendVolume(bool force) {
+  uint32_t now = millis();
+  if (media.volume == volumeSent) return;
+  if (!force && now - lastVolumeSent < VOLUME_SEND_MS) return;
+  pclink::sendCommand("volume", media.volume);
+  volumeSent = media.volume;
+  lastVolumeSent = now;
+}
+
 void onTap(ui::Target target) {
+  bool pc = pclink::helperConnected();
+  bool mediaButton = target == ui::Target::PlayPause || target == ui::Target::Next || target == ui::Target::Prev;
+  if (mediaButton && !pc) {
+    react(Mood::Confused, "My PC helper isn't connected yet.");
+    return;
+  }
+
   switch (target) {
     case ui::Target::Face:
       if (phase == Phase::Listening || phase == Phase::Thinking) return;
       startDemoConversation();
       break;
     case ui::Target::PlayPause:
-      media.playing = !media.playing;
+      pclink::sendCommand("playpause");
+      media.playing = !media.playing;  // the PC confirms a moment later
       ui::setPlaying(media.playing);
-      react(media.playing ? Mood::Happy : Mood::Neutral, media.playing ? "Music on!" : "Paused. Enjoy the quiet.");
+      react(media.playing ? Mood::Happy : Mood::Neutral, media.playing ? "Music on!" : "Paused.");
       break;
     case ui::Target::Next:
-      react(Mood::Happy, "Next song! (I'll really skip it once my PC helper is ready.)");
+      pclink::sendCommand("next");
+      react(Mood::Happy, "Next song!");
       break;
     case ui::Target::Prev:
-      react(Mood::Surprised, "Back to the last one? Good choice!");
+      pclink::sendCommand("prev");
+      react(Mood::Happy, "Going back!");
       break;
     default:
       break;
@@ -122,9 +244,15 @@ void onTap(ui::Target target) {
 }
 
 void onVolumeReleased() {
+  ignorePcVolumeUntil = millis() + 1200;
+  if (!pclink::helperConnected()) {
+    react(Mood::Confused, "My PC helper isn't connected yet.");
+    return;
+  }
+  sendVolume(true);
   int v = media.volume;
-  if (v < 15)
-    react(Mood::Sad, "So quiet... I can barely hear it.");
+  if (v == 0)
+    react(Mood::Sad, "Muted. So quiet...");
   else if (v > 85)
     react(Mood::Surprised, "Whoa, that's loud!");
   else
@@ -152,7 +280,7 @@ void handleTouch(uint32_t now) {
     ui::showPressed(touchTarget);
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
-    bool wasAsleep = phase == Phase::Asleep || phase == Phase::Sleepy;
+    bool wasAsleep = isSleeping();
     lastActivity = now;
     if (wasAsleep) {
       wakeUp();
@@ -165,21 +293,40 @@ void handleTouch(uint32_t now) {
     if (touchTarget == ui::Target::Volume) {
       media.volume = ui::volumeFromX(tp.x);
       ui::setVolume(media.volume);
+      sendVolume(false);
     }
     if (touchTarget == ui::Target::Face && !longPressDone && now - touchStart >= LONG_PRESS_MS) {
       longPressDone = true;
       onLongPressFace();
     }
+    if (touchTarget == ui::Target::Clock && !longPressDone) {
+      if (now - touchStart >= FORGET_WIFI_PRESS_MS) {
+        longPressDone = true;
+        say(Mood::Surprised, "Forgetting Wi-Fi and restarting...");
+        face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+        ui::update(now);
+        delay(1500);
+        pclink::forgetWifi();
+      } else if (now - touchStart >= 1500) {
+        ui::setSubtitle("Keep holding to forget Wi-Fi...");
+      }
+    }
   }
 
   if (!tp.pressed && touching) {
     touching = false;
-    if (touchTarget == ui::Target::Volume)
+    ui::Target released = touchTarget;
+    touchTarget = ui::Target::None;
+    if (released == ui::Target::Volume)
       onVolumeReleased();
+    else if (released == ui::Target::Clock && !longPressDone)
+      ui::setSubtitle(restingSubtitle());
     else if (!longPressDone && now - touchStart < LONG_PRESS_MS)
-      onTap(touchTarget);
+      onTap(released);
   }
 }
+
+// ---------- behaviour over time ----------
 
 void updatePhase(uint32_t now) {
   bool timeUp = phaseUntil && now >= phaseUntil;
@@ -210,9 +357,9 @@ void updatePhase(uint32_t now) {
       if (moodHoldUntil && now >= moodHoldUntil) {
         moodHoldUntil = 0;
         face.setMood(Mood::Neutral);
-        ui::setSubtitle("");
+        ui::setSubtitle(restingSubtitle());
       }
-      if (now - lastActivity > SLEEPY_AFTER_MS) {
+      if (now - lastActivity > SLEEPY_AFTER_MS && pclink::wifiState() != pclink::WifiState::SetupPortal) {
         face.setMood(Mood::Sleepy);
         ui::setSubtitle("Getting sleepy...");
         setPhase(Phase::Sleepy);
@@ -239,6 +386,11 @@ void fatal(const char* msg) {
   while (true) delay(1000);
 }
 
+void drawFrame(uint32_t now) {
+  face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
+  ui::update(now);
+}
+
 }  // namespace
 
 void setup() {
@@ -254,20 +406,32 @@ void setup() {
   if (!face.begin(lcd)) fatal("Not enough memory for the face");
 
   ui::begin(lcd);
-  media.title = "No music info yet";
-  media.artist = "The PC helper connects in step 2";
-  media.playing = false;
   media.volume = 50;
-  ui::setMedia(media);
   ui::setClock("Gorgi");
   showIdleStatus();
-
   randomSeed(esp_random());
+
+  // Show something while Wi-Fi connects (can take a few seconds)
+  face.setMood(Mood::Thinking);
+  ui::setSubtitle("Connecting to Wi-Fi...");
+  showMediaPlaceholder();
+  for (int i = 0; i < 10; i++) drawFrame(millis());
+
+  pclink::Handlers h;
+  h.onMedia = onMedia;
+  h.onClock = onClock;
+  h.onHelper = onHelper;
+  h.onWifi = onWifi;
+  pclink::begin(h);
+
   lastActivity = millis();
-  if (board::touchFound())
-    say(Mood::Happy, "Hi, I'm Gorgi! Tap me to say hello.");
-  else
+  showMediaPlaceholder();
+  if (!board::touchFound())
     say(Mood::Confused, "I can't feel my touch screen... (touch chip not found)");
+  else if (pclink::wifiState() == pclink::WifiState::SetupPortal)
+    say(Mood::Confused, restingSubtitle());
+  else
+    say(Mood::Happy, "Hi, I'm Gorgi! Start Gorgi Helper on your PC to connect.");
   Serial.println("Gorgi ready");
 }
 
@@ -276,19 +440,20 @@ void loop() {
   static uint32_t frames = 0, fpsTimer = 0;
   uint32_t now = millis();
 
+  pclink::loop();
   handleTouch(now);
   updatePhase(now);
 
   if (now - lastFrame >= FRAME_MS) {
     lastFrame = now;
-    face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
-    ui::update(now);
+    drawFrame(now);
     frames++;
   }
 
   if (now - fpsTimer >= 10000) {
-    Serial.printf("fps: %.1f  free heap: %u  free psram: %u\n", frames / ((now - fpsTimer) / 1000.0f),
-                  ESP.getFreeHeap(), ESP.getFreePsram());
+    Serial.printf("fps: %.1f  free heap: %u  free psram: %u  wifi: %d  pc: %d\n",
+                  frames / ((now - fpsTimer) / 1000.0f), ESP.getFreeHeap(), ESP.getFreePsram(),
+                  (int)pclink::wifiState(), (int)pclink::helperConnected());
     frames = 0;
     fpsTimer = now;
   }

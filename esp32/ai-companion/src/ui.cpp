@@ -297,6 +297,7 @@ Target hitTest(int x, int y) {
     if (x >= VOL_X0 - 20 && x <= VOL_X1 + 20) return Target::Volume;
     return Target::None;
   }
+  if (y < FACE_Y && x < 240) return Target::Clock;
   if (y >= FACE_Y && y < SUB_Y + SUB_H) return Target::Face;
   return Target::None;
 }

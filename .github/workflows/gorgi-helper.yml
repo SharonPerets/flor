@@ -1,0 +1,45 @@
+name: Gorgi Helper (Windows)
+
+on:
+  push:
+    paths:
+      - "esp32/gorgi-helper/**"
+      - ".github/workflows/gorgi-helper.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: esp32/gorgi-helper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller==6.11.1
+
+      - name: Make icon
+        run: python icon.py
+
+      - name: Build GorgiHelper.exe
+        run: >
+          pyinstaller --onefile --noconsole --name GorgiHelper --icon gorgi.ico
+          --collect-all winrt --collect-submodules zeroconf --collect-submodules pycaw
+          gorgi_helper.py
+
+      - name: Self-test the .exe
+        shell: pwsh
+        run: |
+          Start-Process -FilePath dist\GorgiHelper.exe -ArgumentList "--selftest","selftest.txt" -Wait
+          Get-Content selftest.txt
+          if (-not (Select-String -Path selftest.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GorgiHelper
+          path: esp32/gorgi-helper/dist/GorgiHelper.exe

@@ -5,9 +5,9 @@ It shows expressions, reacts to touch, and has a media bar to control music on y
 
 | Step | What it does | Status |
 |---|---|---|
-| 1 | Face, expressions, touch, media bar (demo only) | ✅ this version |
-| 2 | Gorgi Helper on Windows: real play/pause/next/volume + song name | next |
-| 3 | Voice: tap Gorgi, speak into the PC mic, Gorgi answers out loud (Ollama Cloud) | later |
+| 1 | Face, expressions, touch, media bar | ✅ done |
+| 2 | Wi-Fi + Gorgi Helper on Windows: real play/pause/next/volume + song name | ✅ this version |
+| 3 | Voice: tap Gorgi, speak into the PC mic, Gorgi answers out loud (Ollama Cloud) | next |
 | 4 | Polish: personality, clock, more idle behaviour | later |
 
 ## Upload to the board (first time)
@@ -37,11 +37,23 @@ Every push to GitHub builds the firmware automatically
 Download it, open https://espressif.github.io/esptool-js/ in Chrome or Edge, click **Connect**,
 choose the board, add `gorgi-full.bin` at address **0x0**, and click **Program**.
 
-## What you can do in step 1
+## Wi-Fi setup (once)
+
+1. After flashing, Gorgi opens its own Wi-Fi network called **Gorgi-Setup**.
+2. On your phone, join **Gorgi-Setup**. A setup page opens (if not, browse to http://192.168.4.1).
+3. Tap **Configure WiFi**, pick your home Wi-Fi, enter the password, and **Save**.
+4. Gorgi joins your Wi-Fi and says it's online.
+
+To change networks later, **hold the clock (top left) for 5 seconds**: Gorgi forgets
+the Wi-Fi and opens **Gorgi-Setup** again.
+
+Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
+
+## What you can do
 
 - **Tap the face**: Gorgi listens, thinks, and answers (a demo answer for now).
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
-- **Media buttons and volume**: Gorgi reacts. They control the PC in step 2.
+- **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.
   Tap to wake it up.
 
@@ -52,6 +64,7 @@ choose the board, add `gorgi-full.bin` at address **0x0**, and click **Program**
 | `src/main.cpp` | Behaviour: touch, demo conversation, sleeping |
 | `src/face.cpp` | The face: expressions, blinking, looking around, talking mouth |
 | `src/ui.cpp` | Top bar, subtitles, media bar |
+| `src/pclink.cpp` | Wi-Fi setup and the connection to Gorgi Helper |
 | `src/board.cpp` | Screen, touch and backlight drivers for this board |
 | `platformio.ini` | Board and library settings |
 

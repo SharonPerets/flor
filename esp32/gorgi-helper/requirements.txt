@@ -1,0 +1,10 @@
+websockets==13.1
+zeroconf==0.136.0
+pystray==0.19.5
+Pillow==10.4.0
+pycaw==20240316 ; sys_platform == "win32"
+comtypes==1.4.8 ; sys_platform == "win32"
+winrt-runtime ; sys_platform == "win32"
+winrt-Windows.Foundation ; sys_platform == "win32"
+winrt-Windows.Foundation.Collections ; sys_platform == "win32"
+winrt-Windows.Media.Control ; sys_platform == "win32"
