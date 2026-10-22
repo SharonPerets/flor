@@ -203,4 +203,5 @@ class Speaker:
 
     async def say(self, text, on_level=None, cancel=None):
         audio = await self.synthesize(text)
+        log.info("voice ready (%.1f s of audio), playing", len(audio) / self.OUTPUT_RATE)
         await self.play(audio, on_level, cancel)

@@ -9,7 +9,6 @@
 namespace pclink {
 namespace {
 
-constexpr const char* FIRMWARE_VERSION = "step3";
 
 WiFiManager wm;
 WebSocketsServer server(PORT);
@@ -52,7 +51,7 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
     Serial.printf("pclink: helper connected (%s)\n", name.c_str());
     JsonDocument reply;
     reply["type"] = "hello";
-    reply["version"] = FIRMWARE_VERSION;
+    reply["version"] = GORGI_VERSION;
     sendJson(client, reply);
     if (handlers.onHelper) handlers.onHelper(true, name);
     return;

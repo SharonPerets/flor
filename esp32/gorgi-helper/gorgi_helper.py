@@ -267,6 +267,9 @@ class Helper:
                 msg = json.loads(raw)
             except ValueError:
                 continue
+            if msg.get("type") == "hello":
+                log.info("Gorgi firmware version: %s", msg.get("version", "?"))
+                continue
             if msg.get("type") == "talk":
                 log.info("Gorgi was tapped: starting a conversation")
                 self.start_conversation()
@@ -504,9 +507,23 @@ def self_test(out_path):
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
             raise RuntimeError("whisper did not understand the test sentence")
-        import sounddevice  # noqa: F401
+        # Talk to Ollama Cloud with a fake key: must come back as "key doesn't work"
+        from brain import Brain, BrainError
 
-        lines.append("sound: ok")
+        try:
+            asyncio.run(Brain({"ollama_api_key": "selftest-fake-key"}).ask("hello", "selftest"))
+            lines.append("ollama: unexpected success")
+        except BrainError as e:
+            lines.append(f"ollama: reached, answered as expected ({e.spoken})")
+
+        import sounddevice
+
+        try:
+            lines.append(f"sound devices: {len(sounddevice.query_devices())}")
+            asyncio.run(Speaker("en-US-AnaNeural").play(speech[:2400]))
+            lines.append("playback: ok")
+        except Exception as e:  # build machines have no speakers
+            lines.append(f"playback: no audio device here ({e!r})")
         lines.append("SELFTEST OK")
     except Exception as e:
         import traceback
@@ -531,6 +548,13 @@ def main():
         return
 
     setup_logging(console=args.no_tray or not getattr(sys, "frozen", False))
+    import faulthandler
+
+    # If the app ever crashes hard, crash.log in the settings folder says where
+    crash_file = open(data_dir() / "crash.log", "a", encoding="utf-8")
+    crash_file.write(f"\n--- started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    crash_file.flush()
+    faulthandler.enable(crash_file)
     if already_running():
         log.info("another Gorgi Helper is already running")
         return

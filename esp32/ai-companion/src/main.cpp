@@ -335,8 +335,15 @@ void handleTouch(uint32_t now) {
     bool wasAsleep = isSleeping();
     lastActivity = now;
     if (wasAsleep) {
-      wakeUp();
-      touchTarget = ui::Target::None;  // this touch only wakes Gorgi up
+      if (touchTarget == ui::Target::None || touchTarget == ui::Target::Clock) {
+        wakeUp();
+        touchTarget = ui::Target::None;  // a touch on nothing in particular just wakes Gorgi
+      } else {
+        // Wake up and do what was tapped (talk, next song...) in one go
+        face.setMood(Mood::Neutral);
+        showIdleStatus();
+        setPhase(Phase::Idle);
+      }
     }
   }
 
@@ -448,7 +455,7 @@ void drawFrame(uint32_t now) {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("Gorgi starting...");
+  Serial.printf("Gorgi %s starting...\n", GORGI_VERSION);
 
   board::begin();
   lcd.init();
@@ -484,7 +491,7 @@ void setup() {
   else if (pclink::wifiState() == pclink::WifiState::SetupPortal)
     say(Mood::Confused, restingSubtitle());
   else
-    say(Mood::Happy, "Hi, I'm Gorgi! Start Gorgi Helper on your PC, then tap me to talk.");
+    say(Mood::Happy, String("Hi, I'm Gorgi! (version ") + GORGI_VERSION + ") Tap me to talk.");
   Serial.println("Gorgi ready");
 }
 

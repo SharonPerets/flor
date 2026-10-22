@@ -60,11 +60,15 @@ class Conversation:
                     return
                 await self.send({"type": "heard", "text": text})
 
+                log.info("asking the AI...")
+                started = time.monotonic()
                 try:
                     mood, spoken, actions = await self.brain.ask(text, self._context(info, paused_music))
                 except BrainError as e:
+                    log.info("AI problem: %s", e.spoken)
                     await self._say(e.mood, e.spoken)
                     return
+                log.info("AI answered in %.1f s", time.monotonic() - started)
 
                 keep_talking, resume_music = await self._do_actions(actions, resume_music)
                 await self._say(mood, spoken)
@@ -87,8 +91,10 @@ class Conversation:
         def on_level(level):
             loop.create_task(self.send({"type": "level", "value": round(level, 2)}))
 
+        log.info("speaking (%s): %s", mood, text)
         try:
             await self.speaker.say(text, on_level=on_level)
+            log.info("done speaking")
         except asyncio.CancelledError:
             raise
         except Exception as e:  # no internet for the voice: still show the text for a while

@@ -29,6 +29,9 @@
 
 #include "ui.h"
 
+// Shown at startup and sent to the helper, so it's easy to see which version is running
+#define GORGI_VERSION "3.2"
+
 namespace pclink {
 
 constexpr const char* SETUP_NETWORK = "Gorgi-Setup";
