@@ -19,10 +19,13 @@ constexpr uint8_t EXIO_LCD_RST = 1 << 3;
 constexpr uint8_t EXIO_SD_CS = 1 << 4;
 constexpr uint8_t EXIO_USB_SEL = 1 << 5;
 
-// GT911 touch controller
-constexpr uint8_t GT911_ADDR = 0x5D;
+// GT911 touch controller. Its address is 0x5D after our reset sequence,
+// but some boards come up on 0x14, so both are tried.
+uint8_t gt911Addr = 0x5D;
+bool touchOk = false;
 constexpr uint16_t GT911_STATUS = 0x814E;
-constexpr uint16_t GT911_POINT1 = 0x8150;
+constexpr uint16_t GT911_POINT1 = 0x8150;  // X low, X high, Y low, Y high
+constexpr uint16_t GT911_PRODUCT_ID = 0x8140;
 
 uint8_t exioState = EXIO_LCD_RST | EXIO_BACKLIGHT | EXIO_USB_SEL | EXIO_SD_CS;
 
@@ -33,17 +36,17 @@ void writeExpander(uint8_t addr, uint8_t value) {
 }
 
 bool gt911Read(uint16_t reg, uint8_t* buf, size_t len) {
-  Wire.beginTransmission(GT911_ADDR);
+  Wire.beginTransmission(gt911Addr);
   Wire.write(reg >> 8);
   Wire.write(reg & 0xFF);
   if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom((int)GT911_ADDR, (int)len) != (int)len) return false;
+  if (Wire.requestFrom((int)gt911Addr, (int)len) != (int)len) return false;
   for (size_t i = 0; i < len; i++) buf[i] = Wire.read();
   return true;
 }
 
 void gt911Write(uint16_t reg, uint8_t value) {
-  Wire.beginTransmission(GT911_ADDR);
+  Wire.beginTransmission(gt911Addr);
   Wire.write(reg >> 8);
   Wire.write(reg & 0xFF);
   Wire.write(value);
@@ -71,7 +74,26 @@ void begin() {
   writeExpander(CH422G_OUTPUT, exioState);
   delay(200);
   pinMode(PIN_TOUCH_INT, INPUT);
+
+  // Find the touch chip
+  for (uint8_t addr : {(uint8_t)0x5D, (uint8_t)0x14}) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      gt911Addr = addr;
+      touchOk = true;
+      break;
+    }
+  }
+  if (touchOk) {
+    char id[5] = {0};
+    gt911Read(GT911_PRODUCT_ID, (uint8_t*)id, 4);
+    Serial.printf("Touch: GT%s found at 0x%02X\n", id, gt911Addr);
+  } else {
+    Serial.println("Touch: chip not found on I2C");
+  }
 }
+
+bool touchFound() { return touchOk; }
 
 void setBacklight(bool on) {
   if (on)
@@ -91,11 +113,11 @@ TouchPoint readTouch() {
   uint8_t count = status & 0x0F;
   TouchPoint tp;
   if (count > 0 && count <= 5) {
-    uint8_t data[6];
+    uint8_t data[4];
     if (gt911Read(GT911_POINT1, data, sizeof(data))) {
       tp.pressed = true;
-      tp.x = data[1] | (data[2] << 8);
-      tp.y = data[3] | (data[4] << 8);
+      tp.x = constrain(data[0] | (data[1] << 8), 0, SCREEN_W - 1);
+      tp.y = constrain(data[2] | (data[3] << 8), 0, SCREEN_H - 1);
     }
   }
   gt911Write(GT911_STATUS, 0);  // acknowledge

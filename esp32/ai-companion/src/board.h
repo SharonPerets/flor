@@ -102,4 +102,7 @@ void setBacklight(bool on);
 // Read the first touch point (non-blocking).
 TouchPoint readTouch();
 
+// True if the touch chip answered at startup.
+bool touchFound();
+
 }  // namespace board

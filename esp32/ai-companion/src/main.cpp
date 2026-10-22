@@ -150,6 +150,7 @@ void handleTouch(uint32_t now) {
     longPressDone = false;
     touchTarget = ui::hitTest(tp.x, tp.y);
     ui::showPressed(touchTarget);
+    Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
     bool wasAsleep = phase == Phase::Asleep || phase == Phase::Sleepy;
     lastActivity = now;
@@ -263,7 +264,10 @@ void setup() {
 
   randomSeed(esp_random());
   lastActivity = millis();
-  say(Mood::Happy, "Hi, I'm Gorgi! Tap me to say hello.");
+  if (board::touchFound())
+    say(Mood::Happy, "Hi, I'm Gorgi! Tap me to say hello.");
+  else
+    say(Mood::Confused, "I can't feel my touch screen... (touch chip not found)");
   Serial.println("Gorgi ready");
 }
 
