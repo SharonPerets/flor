@@ -10,12 +10,20 @@
 //   helper -> Gorgi  {"type":"hello","name":"MY-PC"}
 //                    {"type":"media","title":"..","artist":"..","playing":true,"volume":40}
 //                    {"type":"clock","text":"21:45"}
+//                    {"type":"voice","state":"listening"|"thinking"|"idle","followup":false}
+//                    {"type":"heard","text":"what you said"}
+//                    {"type":"say","text":"Gorgi's answer","mood":"happy"}
+//                    {"type":"level","value":0.4}       (voice loudness while speaking)
 //   Gorgi -> helper  {"type":"hello","version":".."}
 //                    {"type":"cmd","action":"playpause"|"next"|"prev"}
 //                    {"type":"cmd","action":"volume","value":40}
+//                    {"type":"talk"}     (face tapped: start a conversation)
+//                    {"type":"cancel"}   (face tapped again: stop it)
 #pragma once
 
 #include <Arduino.h>
+
+#include <ArduinoJson.h>
 
 #include <functional>
 
@@ -33,6 +41,8 @@ struct Handlers {
   std::function<void(const String&)> onClock;
   std::function<void(bool connected, const String& pcName)> onHelper;
   std::function<void(WifiState)> onWifi;
+  // Conversation messages: "voice", "heard", "say" and "level"
+  std::function<void(const char* type, JsonObjectConst msg)> onVoice;
 };
 
 void begin(const Handlers& handlers);
@@ -44,6 +54,9 @@ String ipAddress();
 
 // Send a command to the PC. Does nothing if the helper isn't connected.
 void sendCommand(const char* action, int value = -1);
+
+// Send a message with only a type, like "talk" or "cancel".
+void sendSimple(const char* type);
 
 // Forget the saved Wi-Fi network and restart into setup mode.
 void forgetWifi();

@@ -6,8 +6,8 @@ It shows expressions, reacts to touch, and has a media bar to control music on y
 | Step | What it does | Status |
 |---|---|---|
 | 1 | Face, expressions, touch, media bar | ✅ done |
-| 2 | Wi-Fi + Gorgi Helper on Windows: real play/pause/next/volume + song name | ✅ this version |
-| 3 | Voice: tap Gorgi, speak into the PC mic, Gorgi answers out loud (Ollama Cloud) | next |
+| 2 | Wi-Fi + Gorgi Helper on Windows: real play/pause/next/volume + song name | ✅ done |
+| 3 | Voice: tap Gorgi, speak into the PC mic, Gorgi answers out loud (Ollama Cloud) | ✅ this version |
 | 4 | Polish: personality, clock, more idle behaviour | later |
 
 ## Upload to the board (first time)
@@ -51,7 +51,7 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 
 ## What you can do
 
-- **Tap the face**: Gorgi listens, thinks, and answers (a demo answer for now).
+- **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.

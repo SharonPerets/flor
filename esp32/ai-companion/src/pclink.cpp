@@ -9,7 +9,7 @@
 namespace pclink {
 namespace {
 
-constexpr const char* FIRMWARE_VERSION = "step2";
+constexpr const char* FIRMWARE_VERSION = "step3";
 
 WiFiManager wm;
 WebSocketsServer server(PORT);
@@ -68,6 +68,9 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
     if (handlers.onMedia) handlers.onMedia(m);
   } else if (strcmp(type, "clock") == 0) {
     if (handlers.onClock) handlers.onClock(String((const char*)(doc["text"] | "")));
+  } else if (strcmp(type, "voice") == 0 || strcmp(type, "heard") == 0 || strcmp(type, "say") == 0 ||
+             strcmp(type, "level") == 0) {
+    if (handlers.onVoice) handlers.onVoice(type, doc.as<JsonObjectConst>());
   }
 }
 
@@ -153,6 +156,13 @@ void sendCommand(const char* action, int value) {
   doc["type"] = "cmd";
   doc["action"] = action;
   if (value >= 0) doc["value"] = value;
+  sendJson(helperClient, doc);
+}
+
+void sendSimple(const char* type) {
+  if (helperClient < 0) return;
+  JsonDocument doc;
+  doc["type"] = type;
   sendJson(helperClient, doc);
 }
 

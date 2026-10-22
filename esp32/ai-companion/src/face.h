@@ -33,6 +33,12 @@ class Face {
   void setMood(Mood m);
   Mood mood() const { return mood_; }
   void setTalking(bool on) { talking_ = on; }
+  // Loudness of Gorgi's voice right now (0..1), sent by the PC while it speaks.
+  // Makes the mouth follow the real voice instead of a made-up movement.
+  void setTalkLevel(float level, uint32_t nowMs) {
+    talkLevel_ = level;
+    talkLevelMs_ = nowMs;
+  }
   bool talking() const { return talking_; }
 
   // Advance the animation and draw the face at (x, y) on the screen
@@ -65,6 +71,8 @@ class Face {
   Params target_{};
   bool talking_ = false;
   float talkOpen_ = 0;
+  float talkLevel_ = 0;
+  uint32_t talkLevelMs_ = 0;
 
   uint32_t lastMs_ = 0;
   // Blinking

@@ -154,9 +154,13 @@ void Face::update(uint32_t now) {
   // Talking mouth: two mixed waves so it doesn't look mechanical
   float talkTarget = 0;
   if (talking_ && mood_ != Mood::Asleep) {
-    float a = 0.5f + 0.5f * sinf(now * 0.021f);
-    float b = 0.6f + 0.4f * sinf(now * 0.0073f);
-    talkTarget = 0.12f + 0.45f * a * b;
+    if (talkLevelMs_ && now - talkLevelMs_ < 400) {
+      talkTarget = clampf(talkLevel_, 0.0f, 1.0f) * 0.75f;  // follow the real voice
+    } else {
+      float a = 0.5f + 0.5f * sinf(now * 0.021f);
+      float b = 0.6f + 0.4f * sinf(now * 0.0073f);
+      talkTarget = 0.12f + 0.45f * a * b;
+    }
   }
   float kt = 1.0f - expf(-dt * 25.0f);
   talkOpen_ += (talkTarget - talkOpen_) * kt;

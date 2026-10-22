@@ -2,7 +2,8 @@
 
 Finds Gorgi on your Wi-Fi, sends it the song that's playing, the volume and
 the time, and carries out Gorgi's media buttons (play/pause, next, previous,
-volume). Lives as a small icon in the taskbar tray.
+volume). When you tap Gorgi's face it listens to the PC microphone, asks the AI
+and speaks the answer. Lives as a small icon in the taskbar tray.
 
 Run:  python gorgi_helper.py            (normal, with tray icon)
       python gorgi_helper.py --no-tray  (console only, for testing)
@@ -44,16 +45,31 @@ def data_dir():
     return path
 
 
+DEFAULT_CONFIG = {
+    "gorgi_address": "",          # leave empty to find Gorgi automatically
+    "ollama_api_key": "",
+    "ollama_url": "",             # empty = Ollama Cloud; or e.g. http://localhost:11434
+    "model": "gpt-oss:20b",
+    "voice": "en-US-AnaNeural",
+    "whisper_model": "base.en",   # "small.en" understands better but is slower
+}
+
+
 def load_config():
     path = data_dir() / "config.json"
-    config = {"gorgi_address": ""}
+    config = dict(DEFAULT_CONFIG)
     try:
         config.update(json.loads(path.read_text(encoding="utf-8")))
     except FileNotFoundError:
-        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        save_config(config)
     except Exception as e:
         log.warning("could not read %s: %s", path, e)
     return config
+
+
+def save_config(config):
+    path = data_dir() / "config.json"
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def setup_logging(console):
@@ -83,6 +99,10 @@ class FakeMedia:
             self.info["playing"] = not self.info["playing"]
         elif action == "next":
             self.info["title"] = "Next Song"
+
+    async def set_playing(self, play):
+        self.commands.append("play" if play else "pause")
+        self.info["playing"] = play
 
     def get_volume(self):
         return self.volume
@@ -140,10 +160,14 @@ async def find_gorgi(config_address):
 
 
 class Helper:
-    def __init__(self, media, config, on_status=None):
+    def __init__(self, media, config, on_status=None, make_conversation=None):
         self.media = media
         self.config = config
         self.on_status = on_status or (lambda text, connected: None)
+        # make_conversation(send) -> Conversation, or None when voice isn't available
+        self.make_conversation = make_conversation
+        self.ws = None
+        self.conversation_task = None
         self.stop_event = asyncio.Event()
         self.refresh_event = asyncio.Event()
         self.ignore_volume_until = 0.0
@@ -183,7 +207,40 @@ class Helper:
         except asyncio.TimeoutError:
             pass
 
+    async def send(self, msg):
+        ws = self.ws
+        if ws is None:
+            return
+        try:
+            await ws.send(json.dumps(msg))
+        except websockets.exceptions.WebSocketException:
+            pass
+
+    def stop_conversation(self):
+        if self.conversation_task and not self.conversation_task.done():
+            self.conversation_task.cancel()
+
+    def start_conversation(self):
+        if self.conversation_task and not self.conversation_task.done():
+            return
+        if self.make_conversation is None:
+            asyncio.get_running_loop().create_task(
+                self.send({"type": "say", "mood": "sad", "text": "My voice parts aren't installed on the PC."}))
+            return
+        conversation = self.make_conversation(self.send)
+        self.conversation_task = asyncio.get_running_loop().create_task(self._run_conversation(conversation))
+
+    async def _run_conversation(self, conversation):
+        try:
+            await conversation.run()
+        except asyncio.CancelledError:
+            log.info("conversation cancelled")
+        except Exception:
+            log.exception("conversation failed")
+            await self.send({"type": "voice", "state": "idle"})
+
     async def _session(self, ws):
+        self.ws = ws
         await ws.send(json.dumps({"type": "hello", "name": platform.node() or "PC"}))
         sender = asyncio.create_task(self._send_loop(ws))
         stopper = asyncio.create_task(self.stop_event.wait())
@@ -194,6 +251,8 @@ class Helper:
                 if task is not stopper and task.exception():
                     raise task.exception()
         finally:
+            self.ws = None
+            self.stop_conversation()
             for task in (sender, receiver, stopper):
                 task.cancel()
             await ws.close()
@@ -203,6 +262,14 @@ class Helper:
             try:
                 msg = json.loads(raw)
             except ValueError:
+                continue
+            if msg.get("type") == "talk":
+                log.info("Gorgi was tapped: starting a conversation")
+                self.start_conversation()
+                continue
+            if msg.get("type") == "cancel":
+                log.info("Gorgi was tapped again: stopping the conversation")
+                self.stop_conversation()
                 continue
             if msg.get("type") != "cmd":
                 continue
@@ -312,9 +379,13 @@ def start_tray(helper, loop):
     def open_folder(_icon, _item):
         os.startfile(data_dir())
 
+    def open_settings_item(_icon, _item):
+        show_settings(helper.config)
+
     menu = pystray.Menu(
         pystray.MenuItem(lambda _item: helper.status[0], None, enabled=False),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Settings...", open_settings_item, default=True),
         pystray.MenuItem("Start with Windows", toggle_autostart, checked=lambda _item: autostart_enabled()),
         pystray.MenuItem("Open settings folder", open_folder),
         pystray.MenuItem("Quit", quit_app),
@@ -329,6 +400,41 @@ def start_tray(helper, loop):
     helper.on_status = lambda text, connected: on_status(text, connected)
     icon.run_detached()
     return icon
+
+
+def show_settings(config):
+    from brain import Brain
+    from settings_window import open_settings
+
+    async def list_models(key):
+        return await Brain({**config, "ollama_api_key": key}).list_models()
+
+    open_settings(config, save_config, list_models)
+
+
+# ---------------------------------------------------------------- voice
+
+
+def make_voice(config):
+    """Builds the conversation parts. Returns a factory, or None if they can't load."""
+    try:
+        from brain import Brain
+        from conversation import Conversation
+        from voice import Recorder, Speaker, Transcriber
+    except Exception as e:
+        log.error("voice features unavailable: %s", e)
+        return None
+
+    brain = Brain(config)  # one brain, so Gorgi remembers between taps
+    transcriber = Transcriber(config.get("whisper_model") or "base.en", data_dir() / "models")
+    # Download/load Whisper in the background so the first chat is quick
+    threading.Thread(target=transcriber.load, daemon=True).start()
+
+    def factory(send, media):
+        voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
+        return Conversation(send, media, brain, Recorder(), transcriber, Speaker(voice, pitch="+5Hz"))
+
+    return factory
 
 
 # ---------------------------------------------------------------- self test (used by the build)
@@ -348,8 +454,28 @@ def self_test(out_path):
         lines.append("icon: ok")
         import pystray  # noqa: F401
         import zeroconf  # noqa: F401
+        import brain  # noqa: F401
+        import conversation  # noqa: F401
+        import settings_window  # noqa: F401
 
         lines.append("imports: ok")
+
+        # Gorgi speaks a sentence, then Whisper listens to it: checks both ends
+        import numpy as np
+
+        from voice import Speaker, Transcriber
+
+        speech = asyncio.run(Speaker("en-US-AnaNeural").synthesize("Hello Gorgi, please play the next song."))
+        lines.append(f"voice: {len(speech)} samples")
+        audio16k = np.interp(np.arange(0, len(speech), 1.5), np.arange(len(speech)), speech).astype(np.float32)
+        t = Transcriber("base.en", Path(out_path).resolve().parent / "models")
+        heard = t.transcribe(audio16k)
+        lines.append(f"whisper heard: {heard!r}")
+        if "next song" not in heard.lower():
+            raise RuntimeError("whisper did not understand the test sentence")
+        import sounddevice  # noqa: F401
+
+        lines.append("sound: ok")
         lines.append("SELFTEST OK")
     except Exception as e:
         lines.append(f"SELFTEST FAILED: {e!r}")
@@ -381,10 +507,15 @@ def main():
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    helper = Helper(make_media(), config)
+    media = make_media()
+    voice_factory = make_voice(config)
+    make_conversation = (lambda send: voice_factory(send, media)) if voice_factory else None
+    helper = Helper(media, config, make_conversation=make_conversation)
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)
+        if not config.get("ollama_api_key") and not config.get("ollama_url"):
+            show_settings(config)  # first run: ask for the Ollama key
     log.info("%s started", APP_NAME)
     try:
         loop.run_until_complete(helper.run())

@@ -1,12 +1,12 @@
 // Gorgi - an AI desk companion for the Waveshare ESP32-S3-Touch-LCD-7
 //
-// Step 2: Gorgi joins your Wi-Fi and talks to the Gorgi Helper app on your
-// Windows PC. The media bar controls the PC (play/pause, next, previous,
-// volume) and shows the song that is playing. Tapping the face still plays a
-// demo conversation; real voice comes in step 3.
+// Gorgi joins your Wi-Fi and talks to the Gorgi Helper app on your Windows PC.
+// The helper does the listening (PC mic), thinking (Ollama Cloud) and talking
+// (PC speakers); Gorgi shows it all with its face and subtitles. The media bar
+// controls music on the PC.
 //
 // Touch controls:
-//   tap face          -> demo: listening, thinking, talking
+//   tap face          -> talk to Gorgi (tap again to stop)
 //   hold face 1 s     -> show the next expression (handy for testing)
 //   media buttons     -> control music on the PC
 //   hold clock 5 s    -> forget Wi-Fi and open the "Gorgi-Setup" network again
@@ -36,6 +36,9 @@ Phase phase = Phase::Idle;
 uint32_t phaseUntil = 0;     // when the current phase ends (0 = never)
 uint32_t lastActivity = 0;   // last touch
 uint32_t moodHoldUntil = 0;  // keep the current mood until then, then go neutral
+bool inConversation = false;  // the helper is running a conversation
+uint32_t lastVoiceMsg = 0;    // last conversation message from the helper
+constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 
 ui::MediaInfo media;
 String pcName;
@@ -52,19 +55,6 @@ int testMoodIndex = 0;
 uint32_t lastVolumeSent = 0;
 int volumeSent = -1;
 uint32_t ignorePcVolumeUntil = 0;  // don't let the PC move the slider while you drag it
-
-struct Line {
-  Mood mood;
-  const char* text;
-};
-
-const Line DEMO_ANSWERS[] = {
-  {Mood::Happy, "I'm doing great! Want me to put on something upbeat?"},
-  {Mood::Excited, "Ooh, I love chatting with you! Soon I'll really hear you through your PC mic."},
-  {Mood::Thinking, "Hmm... I don't have a brain yet. Step 3 gives me one!"},
-  {Mood::Love, "You tapped me! That's my favorite thing."},
-  {Mood::Surprised, "Whoa, hi! You scared me a little."},
-};
 
 // ---------- small helpers ----------
 
@@ -122,7 +112,7 @@ void say(Mood mood, const String& text) {
 
 // A short reaction without the full talking animation
 void react(Mood mood, const String& text) {
-  if (phase == Phase::Listening || phase == Phase::Thinking) return;
+  if (inConversation) return;  // don't interrupt a conversation
   face.setMood(mood);
   face.setTalking(false);
   ui::setSubtitle(text);
@@ -140,18 +130,70 @@ void wakeUp() {
   moodHoldUntil = millis() + 1500;
 }
 
-void startDemoConversation() {
+void showListening(bool followUp) {
   face.setMood(Mood::Listening);
   face.setTalking(false);
-  ui::setSubtitle("I'm listening...");
+  ui::setSubtitle(followUp ? "Anything else?" : "I'm listening...");
   ui::setStatus("Listening...", ui::COLOR_LISTEN, true);
-  setPhase(Phase::Listening, 2200);
+  setPhase(Phase::Listening);
+}
+
+void endConversation() {
+  inConversation = false;
+  face.setTalking(false);
+  showIdleStatus();
+  setPhase(Phase::Idle);
+  moodHoldUntil = millis() + 4000;
+}
+
+// ---------- conversation messages from the helper ----------
+
+void onVoice(const char* type, JsonObjectConst msg) {
+  uint32_t now = millis();
+  lastVoiceMsg = now;
+  lastActivity = now;  // a conversation keeps Gorgi awake
+
+  if (strcmp(type, "level") == 0) {
+    face.setTalkLevel(msg["value"] | 0.0f, now);
+    return;
+  }
+  if (strcmp(type, "voice") == 0) {
+    const char* state = msg["state"] | "idle";
+    if (strcmp(state, "listening") == 0) {
+      inConversation = true;
+      showListening(msg["followup"] | false);
+    } else if (strcmp(state, "thinking") == 0) {
+      inConversation = true;
+      face.setMood(Mood::Thinking);
+      face.setTalking(false);
+      ui::setStatus("Thinking...", ui::COLOR_THINK, false);
+      setPhase(Phase::Thinking);
+    } else {  // idle
+      if (inConversation) endConversation();
+    }
+    return;
+  }
+  if (strcmp(type, "heard") == 0) {
+    ui::setSubtitle(String("You: ") + (const char*)(msg["text"] | ""));
+    return;
+  }
+  if (strcmp(type, "say") == 0) {
+    inConversation = true;
+    Mood mood = Mood::Happy;
+    moodFromName(msg["mood"] | "happy", mood);
+    face.setMood(mood);
+    face.setTalking(true);
+    ui::setSubtitle(String((const char*)(msg["text"] | "")));
+    showIdleStatus();
+    setPhase(Phase::Talking);  // lasts until the helper says listening/idle
+  }
 }
 
 // ---------- messages from the PC ----------
 
 void onHelper(bool connected, const String& name) {
   gotMediaSinceConnect = false;
+  if (inConversation) endConversation();
   if (connected) {
     pcName = name;
     showMediaPlaceholder();
@@ -221,8 +263,18 @@ void onTap(ui::Target target) {
 
   switch (target) {
     case ui::Target::Face:
-      if (phase == Phase::Listening || phase == Phase::Thinking) return;
-      startDemoConversation();
+      if (!pc) {
+        react(Mood::Confused, "Start Gorgi Helper on your PC so I can hear you.");
+      } else if (inConversation) {
+        pclink::sendSimple("cancel");
+        endConversation();
+        react(Mood::Neutral, "Okay, never mind.");
+      } else {
+        pclink::sendSimple("talk");
+        inConversation = true;
+        lastVoiceMsg = millis();
+        showListening(false);
+      }
       break;
     case ui::Target::PlayPause:
       pclink::sendCommand("playpause");
@@ -331,22 +383,18 @@ void handleTouch(uint32_t now) {
 void updatePhase(uint32_t now) {
   bool timeUp = phaseUntil && now >= phaseUntil;
 
+  // Safety net: if the helper goes quiet in the middle of a conversation
+  if (inConversation && now - lastVoiceMsg > CONVERSATION_TIMEOUT_MS) {
+    Serial.println("conversation timed out");
+    endConversation();
+  }
+
   switch (phase) {
     case Phase::Listening:
-      if (timeUp) {
-        face.setMood(Mood::Thinking);
-        ui::setSubtitle("Hmm, let me think...");
-        ui::setStatus("Thinking...", ui::COLOR_THINK, false);
-        setPhase(Phase::Thinking, 1600);
-      }
-      break;
     case Phase::Thinking:
-      if (timeUp) {
-        const Line& l = DEMO_ANSWERS[random(sizeof(DEMO_ANSWERS) / sizeof(DEMO_ANSWERS[0]))];
-        say(l.mood, l.text);
-      }
-      break;
+      break;  // the helper moves the conversation along
     case Phase::Talking:
+      if (inConversation) break;  // ends when the helper says so
       if (timeUp) {
         face.setTalking(false);
         setPhase(Phase::Idle);
@@ -422,6 +470,7 @@ void setup() {
   h.onClock = onClock;
   h.onHelper = onHelper;
   h.onWifi = onWifi;
+  h.onVoice = onVoice;
   pclink::begin(h);
 
   lastActivity = millis();
@@ -431,7 +480,7 @@ void setup() {
   else if (pclink::wifiState() == pclink::WifiState::SetupPortal)
     say(Mood::Confused, restingSubtitle());
   else
-    say(Mood::Happy, "Hi, I'm Gorgi! Start Gorgi Helper on your PC to connect.");
+    say(Mood::Happy, "Hi, I'm Gorgi! Start Gorgi Helper on your PC, then tap me to talk.");
   Serial.println("Gorgi ready");
 }
 

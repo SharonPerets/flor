@@ -86,6 +86,21 @@ class WindowsMedia:
         key = {"playpause": VK_MEDIA_PLAY_PAUSE, "next": VK_MEDIA_NEXT_TRACK, "prev": VK_MEDIA_PREV_TRACK}[action]
         press_media_key(key)
 
+    async def set_playing(self, play):
+        """Explicit play or pause (used to pause music while you talk to Gorgi)."""
+        try:
+            session = await self._session()
+            if session is not None:
+                ok = await (session.try_play_async() if play else session.try_pause_async())
+                if ok:
+                    return
+        except Exception as e:
+            log.debug("play/pause failed: %s", e)
+            self._manager = None
+        info = await self.get_info()
+        if info["playing"] != play:
+            press_media_key(VK_MEDIA_PLAY_PAUSE)
+
     # ----- volume -----
 
     def _endpoint(self):
