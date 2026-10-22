@@ -1,12 +1,19 @@
 // The panel driver for the Waveshare ESP32-S3-Touch-LCD-7, using ESP-IDF's
-// RGB LCD driver with two frame buffers in PSRAM and bounce buffers in SRAM.
+// RGB LCD driver with two frame buffers in PSRAM that the LCD hardware reads
+// directly (DMA). Swapping pictures is timed with the panel's VSYNC.
+//
+// (The driver's "bounce buffer" mode was tried first: the CPU then copies every
+// picture to the panel ~40 times a second, which on this board starved Wi-Fi
+// and couldn't keep up - the screen flickered and showed garbage.)
 #if defined(ESP_PLATFORM)
 
 #include "screen.h"
 
 #include <Arduino.h>
+#include <esp_cache.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_rgb.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <string.h>
@@ -23,9 +30,12 @@ esp_lcd_panel_handle_t panel = nullptr;
 uint16_t* fb[2] = {nullptr, nullptr};
 int shown = 0;    // the picture on the panel
 int drawing = 1;  // the picture being prepared
-SemaphoreHandle_t flipDone = nullptr;
-volatile bool flipWanted = false;  // a swap was asked for and hasn't happened yet
-bool waitFlip = false;             // must wait for that swap before drawing again
+// The panel's refreshes: counted in the VSYNC interrupt
+volatile uint32_t vsyncCount = 0;
+volatile int64_t lastVsyncUs = 0;
+volatile int64_t periodUs = 29000;  // measured; about 34 refreshes a second at 14 MHz
+uint32_t safeAfterVsync = 0;        // the old picture is free once vsyncCount reaches this
+bool waitFlip = false;
 
 // What changed in each frame, so the other picture can catch up
 struct RectList {
@@ -49,13 +59,22 @@ bool haveCover = false;
 gfx::Rect cover{0, 0, 0, 0};
 Stats stats;
 
-// Called by the driver (in an interrupt) when the panel starts reading a new picture
-bool IRAM_ATTR onFrameStart(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
-  if (!flipWanted) return false;
-  flipWanted = false;
-  BaseType_t woke = pdFALSE;
-  xSemaphoreGiveFromISR(flipDone, &woke);
-  return woke == pdTRUE;
+// Called by the driver (in an interrupt) at every VSYNC: a new refresh starts
+bool IRAM_ATTR onVsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*, void*) {
+  const int64_t now = esp_timer_get_time();
+  const int64_t p = now - lastVsyncUs;
+  if (p > 5000 && p < 100000) periodUs = (periodUs * 7 + p) / 8;
+  lastVsyncUs = now;
+  vsyncCount = vsyncCount + 1;
+  return false;
+}
+
+// The LCD hardware reads PSRAM directly, past the CPU's cache: written pixels
+// must be pushed out of the cache first.
+void flushRows(const uint16_t* buf, const gfx::Rect& r) {
+  const uint8_t* start = (const uint8_t*)(buf + (size_t)r.y * W + r.x);
+  const uint8_t* end = (const uint8_t*)(buf + (size_t)(r.bottom() - 1) * W + r.right());
+  esp_cache_msync((void*)start, end - start, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
 bool contains(const gfx::Rect& outer, const gfx::Rect& in) {
@@ -64,6 +83,7 @@ bool contains(const gfx::Rect& outer, const gfx::Rect& in) {
 
 void copyRect(uint16_t* to, const uint16_t* from, const gfx::Rect& r) {
   for (int y = r.y; y < r.bottom(); ++y) memcpy(to + (size_t)y * W + r.x, from + (size_t)y * W + r.x, r.w * 2);
+  flushRows(to, r);
 }
 
 // Before drawing a new frame: wait until the last swap happened, then copy what
@@ -72,7 +92,7 @@ void openFrame() {
   if (frameOpen) return;
   if (waitFlip) {
     const uint32_t t0 = micros();
-    xSemaphoreTake(flipDone, pdMS_TO_TICKS(100));
+    while ((int32_t)(vsyncCount - safeAfterVsync) < 0 && micros() - t0 < 100000) vTaskDelay(1);
     stats.waitUs += micros() - t0;
     waitFlip = false;
   }
@@ -93,7 +113,7 @@ bool createPanel() {
   esp_lcd_rgb_panel_config_t cfg;
   memset(&cfg, 0, sizeof cfg);
   cfg.clk_src = LCD_CLK_SRC_DEFAULT;
-  cfg.timings.pclk_hz = 16 * 1000 * 1000;
+  cfg.timings.pclk_hz = 14 * 1000 * 1000;  // like 3.7: stable while Wi-Fi is busy
   cfg.timings.h_res = W;
   cfg.timings.v_res = H;
   cfg.timings.hsync_pulse_width = 4;
@@ -106,7 +126,6 @@ bool createPanel() {
   cfg.data_width = 16;
   cfg.bits_per_pixel = 16;
   cfg.num_fbs = 2;
-  cfg.bounce_buffer_size_px = W * 10;  // two buffers of 10 lines in fast RAM
   cfg.dma_burst_size = 64;
   cfg.hsync_gpio_num = 46;
   cfg.vsync_gpio_num = 3;
@@ -121,7 +140,7 @@ bool createPanel() {
   if (esp_lcd_new_rgb_panel(&cfg, &panel) != ESP_OK) return false;
   esp_lcd_rgb_panel_event_callbacks_t cbs;
   memset(&cbs, 0, sizeof cbs);
-  cbs.on_frame_buf_complete = onFrameStart;
+  cbs.on_vsync = onVsync;
   if (esp_lcd_rgb_panel_register_event_callbacks(panel, &cbs, nullptr) != ESP_OK) return false;
   if (esp_lcd_panel_reset(panel) != ESP_OK || esp_lcd_panel_init(panel) != ESP_OK) return false;
   void* a = nullptr;
@@ -131,6 +150,8 @@ bool createPanel() {
   fb[1] = (uint16_t*)b;
   memset(fb[0], 0, (size_t)W * H * 2);
   memset(fb[1], 0, (size_t)W * H * 2);
+  flushRows(fb[0], gfx::Rect{0, 0, W, H});
+  flushRows(fb[1], gfx::Rect{0, 0, W, H});
   return true;
 }
 
@@ -144,9 +165,7 @@ void initTask(void* arg) {
 }  // namespace
 
 bool begin() {
-  flipDone = xSemaphoreCreateBinary();
-  // The driver's interrupt (which keeps the panel fed) runs on the core that
-  // creates it. Core 0 is used, so it doesn't slow down Gorgi's drawing on core 1.
+  // The driver's interrupt runs on the core that creates it: core 0, next to Wi-Fi.
   InitResult r;
   r.done = xSemaphoreCreateBinary();
   xTaskCreatePinnedToCore(initTask, "screen", 4096, &r, 5, nullptr, 0);
@@ -173,15 +192,27 @@ void write(int x, int y, int w, int h, const uint16_t* px, int stride) {
   px += (size_t)(r.y - y) * stride + (r.x - x);
   for (int row = 0; row < r.h; ++row)
     memcpy(fb[drawing] + (size_t)(r.y + row) * W + r.x, px + (size_t)row * stride, r.w * 2);
+  flushRows(fb[drawing], r);
   thisFrame.add(r);
 }
 
 void present() {
   if (!panel || !frameOpen) return;
-  // Giving the driver one of its own frame buffers makes it switch to that
-  // one at the start of the next refresh (it copies nothing).
-  esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, fb[drawing]);
-  flipWanted = true;  // set after: if the switch just happened, we wait one extra refresh (safe)
+  // Giving the driver one of its own frame buffers makes the LCD hardware jump
+  // to it after the picture it's reading now (nothing is copied). If that
+  // picture is nearly done, the hardware may already have read past the jump,
+  // so it shows the old one once more: then the old one is only free after
+  // two refreshes instead of one.
+  esp_lcd_panel_draw_bitmap(panel, 0, 0, 1, 1, fb[drawing]);
+  // Where the panel is now (read after asking, so a VSYNC in between only makes us wait longer)
+  uint32_t count;
+  int64_t last;
+  do {
+    count = vsyncCount;
+    last = lastVsyncUs;
+  } while (count != vsyncCount);
+  const int64_t into = esp_timer_get_time() - last;
+  safeAfterVsync = count + (into < periodUs * 80 / 100 ? 1 : 2);
   waitFlip = true;
   shown = drawing;
   drawing = 1 - drawing;
