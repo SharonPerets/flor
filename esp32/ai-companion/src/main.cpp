@@ -10,11 +10,13 @@
 //   hold face 1 s     -> show the next expression (handy for testing)
 //   media buttons     -> control music on the PC
 //   hold clock 5 s    -> forget Wi-Fi and open the "Gorgi-Setup" network again
-//   swipe sideways    -> other screens: music (swipe right), weather and time (swipe left)
+//   swipe sideways    -> other screens: music (swipe right), weather, time, sketch (swipe left)
+//                        (on the sketch screen: swipe on the toolbar, the paper is for drawing)
 //   when a timer or reminder goes off: tap anywhere to stop it
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 
 #include "alarms.h"
 #include "board.h"
@@ -22,6 +24,8 @@
 #include "face.h"
 #include "music_screen.h"
 #include "pclink.h"
+#include "sketch.h"
+#include "sketch_store.h"
 #include "time_screen.h"
 #include "ui.h"
 #include "weather.h"
@@ -54,10 +58,8 @@ constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 // ---------- screens ----------
 // Swipe left/right in the middle of the screen to switch, in this order.
 // More screens can be added to this list later.
-enum class Page { Music, Face, Weather, Time, Count };
+enum class Page { Music, Face, Weather, Time, Sketch, Count };
 Page page = Page::Face;
-uint32_t pageTouched = 0;  // last touch on a page other than the face
-constexpr uint32_t PAGE_IDLE_MS = 45 * 1000;  // then back to the face
 bool musicDirty = true;      // the music screen needs drawing
 int musicProgressKey = -2;   // what the progress bar showed last
 
@@ -218,16 +220,20 @@ void markPageDirty(Page p) {
   if (p == Page::Weather) wxDirty = true;
   if (p == Page::Music) musicDirty = true;
   if (p == Page::Time) timeDirty = true;
+  if (p == Page::Sketch) sketchFull = true;
 }
 
 void drawFrame(uint32_t now);
 void sendTimeList();
+void sketchShown();
+void sketchHidden();
+bool sketchFull = true;  // the sketch screen needs drawing in full
 
 // Switches screens right away (no animation)
 void showPage(Page p) {
   if (p == page) return;
+  if (page == Page::Sketch) sketchHidden();
   page = p;
-  pageTouched = millis();
   ui::setPagePosition((float)(int)p);
   ui::setSubtitleVisible(p == Page::Face);
   if (p == Page::Face) {
@@ -239,6 +245,8 @@ void showPage(Page p) {
     wxPicker = false;
   } else if (p == Page::Time) {
     timeConfirm = -1;
+  } else if (p == Page::Sketch) {
+    sketchShown();
   }
   markPageDirty(p);
   drawFrame(millis());  // the new screen right away, in one go
@@ -692,6 +700,244 @@ void onTime(const char* type, JsonObjectConst msg) {
   }
 }
 
+// ---------- sketch pad ----------
+
+uint16_t* skPic = nullptr;  // the drawing (PSRAM)
+constexpr int UNDO_STEPS = 5;
+uint16_t* skUndo[UNDO_STEPS] = {};
+int skUndoSlots = 0;          // how many undo pictures could be made
+int skUndoCount = 0, skUndoNext = 0;
+uint16_t* skThumbs = nullptr;  // gallery pictures
+sketch::Tools skTools;
+sketch::Gallery skGallery;
+Preferences skPrefs;
+uint32_t skCurrent = 1, skNextId = 2;
+bool skLoaded = false;     // the current sketch was read from flash
+bool skChanged = false;    // drawn on since the last save
+bool skToolbarDirty = false;
+uint32_t skLastStroke = 0;
+bool sketchStroking = false;
+float skLastX = 0, skLastY = 0;
+constexpr uint32_t SKETCH_SAVE_AFTER_MS = 20 * 1000;  // save after a pause in drawing
+constexpr size_t SKETCH_PIXELS = (size_t)sketch::PAPER_W * sketch::PAPER_H;
+
+void sketchMove(int x, int y);
+
+void sketchSetup() {
+  skPic = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
+  skThumbs = (uint16_t*)heap_caps_malloc((size_t)sketch::MAX_SKETCHES * sketch::THUMB_W * sketch::THUMB_H * 2,
+                                         MALLOC_CAP_SPIRAM);
+  for (int i = 0; i < UNDO_STEPS; ++i) {
+    skUndo[i] = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
+    if (!skUndo[i]) break;
+    skUndoSlots = i + 1;
+  }
+  skPrefs.begin("sketch", false);
+  skCurrent = skPrefs.getUInt("cur", 1);
+  skNextId = skPrefs.getUInt("next", skCurrent + 1);
+  sketchstore::begin();
+  Serial.printf("sketch: ready, %d undo steps, free psram %u\n", skUndoSlots, ESP.getFreePsram());
+}
+
+void sketchClear() {
+  if (!skPic) return;
+  for (size_t i = 0; i < SKETCH_PIXELS; ++i) skPic[i] = sketch::PAPER_COLOR.c;
+}
+
+void sketchForgetUndo() {
+  skUndoCount = 0;
+  skTools.canUndo = false;
+}
+
+void sketchSave() {
+  if (!skChanged || !skPic) return;
+  skChanged = false;
+  sketchstore::save(skCurrent, skPic);
+}
+
+void sketchLoadCurrent() {
+  skLoaded = true;
+  if (!skPic) return;
+  if (!sketchstore::load(skCurrent, skPic)) sketchClear();
+  sketchForgetUndo();
+}
+
+void sketchStartNew() {
+  sketchSave();
+  skCurrent = skNextId++;
+  skPrefs.putUInt("cur", skCurrent);
+  skPrefs.putUInt("next", skNextId);
+  sketchClear();
+  sketchForgetUndo();
+}
+
+void sketchShown() {
+  if (!skLoaded) sketchLoadCurrent();
+  skTools.gallery = false;
+  sketchFull = true;
+}
+
+void sketchHidden() {
+  sketchStroking = false;
+  skTools.gallery = false;
+  sketchSave();
+}
+
+void sketchFillGallery() {
+  uint32_t ids[sketch::MAX_SKETCHES];
+  skGallery.count = sketchstore::list(ids, sketch::MAX_SKETCHES);
+  skGallery.current = skCurrent;
+  skGallery.confirm = -1;
+  for (int i = 0; i < skGallery.count; ++i) {
+    uint16_t* thumb = skThumbs ? skThumbs + (size_t)i * sketch::THUMB_W * sketch::THUMB_H : nullptr;
+    if (thumb && !sketchstore::loadThumb(ids[i], thumb)) thumb = nullptr;
+    skGallery.items[i] = sketch::GalleryItem{ids[i], thumb};
+  }
+}
+
+void sketchRenderRect(const gfx::Rect& r) {
+  display::render(r, sketch::PAPER_COLOR, [](gfx::Canvas& c) { sketch::drawPaper(c, skPic); });
+}
+
+// Finger down on the paper: start a stroke (a dot so far)
+void sketchBegin(int x, int y) {
+  if (skTools.gallery || !skPic || x < sketch::PAPER_X || y < sketch::PAPER_Y ||
+      x >= sketch::PAPER_X + sketch::PAPER_W || y >= sketch::PAPER_Y + sketch::PAPER_H)
+    return;
+  if (skUndoSlots) {  // remember the picture before this stroke
+    memcpy(skUndo[skUndoNext], skPic, SKETCH_PIXELS * 2);
+    skUndoNext = (skUndoNext + 1) % skUndoSlots;
+    if (skUndoCount < skUndoSlots) ++skUndoCount;
+    if (!skTools.canUndo) skToolbarDirty = true;
+    skTools.canUndo = true;
+  }
+  sketchStroking = true;
+  skLastX = x;
+  skLastY = y;
+  sketchMove(x, y);
+}
+
+void sketchMove(int x, int y) {
+  const float dx = x - skLastX, dy = y - skLastY;
+  if (dx * dx + dy * dy < 4 && skChanged && (x != skLastX || y != skLastY)) return;  // wait for a bigger move
+  const gfx::Color& col = skTools.eraser ? sketch::PAPER_COLOR : sketch::COLORS[skTools.color];
+  const float r = sketch::SIZES[skTools.size] * (skTools.eraser ? 2.5f : 1.0f);
+  sketchRenderRect(sketch::stroke(skPic, skLastX, skLastY, x, y, col, r));
+  skLastX = x;
+  skLastY = y;
+  skChanged = true;
+}
+
+void sketchEnd(uint32_t now) {
+  sketchStroking = false;
+  skLastStroke = now;
+}
+
+void sketchUndo() {
+  if (!skUndoCount) return;
+  skUndoNext = (skUndoNext + skUndoSlots - 1) % skUndoSlots;
+  memcpy(skPic, skUndo[skUndoNext], SKETCH_PIXELS * 2);
+  --skUndoCount;
+  skTools.canUndo = skUndoCount > 0;
+  skChanged = true;
+  skLastStroke = millis();
+  sketchFull = true;
+}
+
+void onSketchTap(int x, int y) {
+  if (x < sketch::TOOLBAR_RIGHT) {
+    const sketch::ToolTap t = sketch::toolbarTap(x, y);
+    switch (t.what) {
+      case sketch::Tool::Color:
+        skTools.color = t.index;
+        skTools.eraser = false;
+        break;
+      case sketch::Tool::Eraser:
+        skTools.eraser = !skTools.eraser;
+        break;
+      case sketch::Tool::Size:
+        skTools.size = (skTools.size + 1) % sketch::SIZE_COUNT;
+        break;
+      case sketch::Tool::Undo:
+        if (!skTools.gallery) sketchUndo();
+        break;
+      case sketch::Tool::Gallery:
+        skTools.gallery = !skTools.gallery;
+        if (skTools.gallery) {
+          sketchSave();
+          sketchFillGallery();
+        }
+        sketchFull = true;
+        break;
+      case sketch::Tool::None:
+        return;
+    }
+    if (skTools.gallery && t.what != sketch::Tool::Gallery) {  // picking a colour closes the gallery
+      skTools.gallery = false;
+      sketchFull = true;
+    }
+    skToolbarDirty = true;
+    return;
+  }
+  if (!skTools.gallery) return;
+  const sketch::GalleryTap g = sketch::galleryTap(x, y, skGallery);
+  switch (g.what) {
+    case sketch::GTap::New:
+      sketchStartNew();
+      skTools.gallery = false;
+      break;
+    case sketch::GTap::Open:
+      sketchSave();
+      skCurrent = skGallery.items[g.index].id;
+      skPrefs.putUInt("cur", skCurrent);
+      sketchLoadCurrent();
+      skTools.gallery = false;
+      break;
+    case sketch::GTap::AskDelete:
+      skGallery.confirm = g.index;
+      break;
+    case sketch::GTap::Delete: {
+      const uint32_t id = skGallery.items[g.index].id;
+      sketchstore::remove(id);
+      if (id == skCurrent) {  // the one on the paper: start a fresh page
+        skChanged = false;
+        sketchStartNew();
+      }
+      sketchFillGallery();
+      break;
+    }
+    case sketch::GTap::Keep:
+      skGallery.confirm = -1;
+      break;
+    case sketch::GTap::Close:
+      skTools.gallery = false;
+      break;
+    case sketch::GTap::None:
+      return;
+  }
+  sketchFull = true;
+}
+
+void drawSketch() {
+  if (sketchFull) {
+    sketchFull = skToolbarDirty = false;
+    display::render(sketch::AREA, ui::BACKGROUND, [](gfx::Canvas& c) {
+      sketch::drawToolbar(c, skTools);
+      if (skTools.gallery) sketch::drawGallery(c, skGallery);
+      else sketch::drawPaper(c, skPic);
+    });
+  } else if (skToolbarDirty) {
+    skToolbarDirty = false;
+    display::render(sketch::TOOLBAR, ui::BACKGROUND, [](gfx::Canvas& c) { sketch::drawToolbar(c, skTools); });
+  }
+}
+
+// Saves after a pause in drawing (writing to flash can make the screen jump
+// for a moment, so not while the finger is drawing)
+void updateSketch(uint32_t now) {
+  if (skChanged && !touching && msSince(now, skLastStroke) > SKETCH_SAVE_AFTER_MS) sketchSave();
+}
+
 // ---------- touch ----------
 
 void sendVolume(bool force) {
@@ -798,9 +1044,10 @@ void handleTouch(uint32_t now) {
     touchX0 = tp.x;
     touchY0 = tp.y;
     swiping = false;
-    if (page != Page::Face) pageTouched = now;
     ui::showPressed(touchTarget);
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
+
+    if (page == Page::Sketch && touchTarget == ui::Target::Face) sketchBegin(tp.x, tp.y);
 
     bool wasAsleep = isSleeping();
     lastActivity = now;
@@ -819,11 +1066,14 @@ void handleTouch(uint32_t now) {
 
   if (tp.pressed && touching) {
     lastActivity = now;
-    if (page != Page::Face) pageTouched = now;
+    if (sketchStroking) {  // drawing with the finger
+      sketchMove(tp.x, tp.y);
+      return;
+    }
     const int dx = tp.x - touchX0;
     // A sideways drag in the middle of the screen moves the screens
     if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(dx) > 16 &&
-        abs(dx) * 5 > abs(tp.y - touchY0) * 6) {
+        abs(dx) * 5 > abs(tp.y - touchY0) * 6 && !(page == Page::Sketch && touchX0 >= sketch::TOOLBAR_RIGHT)) {
       swiping = true;
     }
     if (swiping) {
@@ -858,6 +1108,10 @@ void handleTouch(uint32_t now) {
     touching = false;
     ui::Target released = touchTarget;
     touchTarget = ui::Target::None;
+    if (sketchStroking) {
+      sketchEnd(now);
+      return;
+    }
     if (swiping) {
       swiping = false;
       // A long enough sideways swipe changes screens
@@ -869,6 +1123,7 @@ void handleTouch(uint32_t now) {
     if (released == ui::Target::Face && page != Page::Face) {
       if (!longPressDone && page == Page::Weather) onWeatherTap(touchX0, touchY0);
       if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
+      if (page == Page::Sketch) onSketchTap(touchX0, touchY0);
       return;
     }
     if (released == ui::Target::Volume)
@@ -954,6 +1209,8 @@ void drawFrame(uint32_t now) {
     }
   } else if (page == Page::Time) {
     drawTime(now);
+  } else if (page == Page::Sketch) {
+    drawSketch();
   } else if (page == Page::Music) {
     const int key = music::progressKey(media, now);
     if (musicDirty) {
@@ -1009,6 +1266,7 @@ void setup() {
   pclink::begin(h);
   wallclock::begin();
   alarms::begin();
+  sketchSetup();
 
   wxPrefs.begin("weather", false);
   wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
@@ -1036,7 +1294,7 @@ void loop() {
   updatePhase(millis());
   updateWeather(millis());
   updateTime(millis());
-  if (page != Page::Face && !touching && msSince(millis(), pageTouched) > PAGE_IDLE_MS) showPage(Page::Face);
+  updateSketch(millis());
 
   // Gorgi barely moves while asleep, so it is redrawn less often (less load on the screen memory)
   const uint32_t interval = phase == Phase::Asleep ? SLEEP_FRAME_MS : FRAME_MS;
