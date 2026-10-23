@@ -65,8 +65,11 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - Windows volume COM objects are created once on one thread (crashes otherwise).
 - `millis()` comparisons must be wrap-safe (`msSince`).
 - Names: `pclink` (not `link`, clashes with POSIX), `gfont` (not `fonts`, clashes with LovyanGFX).
+- The backlight is only on/off (CH422G pin), it can't be dimmed in hardware: "dim" means darker drawing.
+- 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
+  it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
 
-## Where things stand (4.0 released: Sketch pad, waiting for the user to test it; 3.9 confirmed)
+## Where things stand (4.0 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -92,7 +95,7 @@ Done and confirmed:
   changed rectangle is redrawn. Saves after 20 s pause / leaving / gallery. User choices: swipe only on the
   toolbar on this screen; **no automatic return to the face on any screen** (removed in 4.0);
   no "what did I draw?" AI guess.
-  Watch for: screen jump while saving to flash, first-boot LittleFS format time.
+  Confirmed working on the device ("works great").
 - Screens now: **Music ← Face → Weather → Time → Sketch**.
 
 Lessons from 3.9 (keep for future screens):
