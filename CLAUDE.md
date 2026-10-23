@@ -74,7 +74,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.1 in progress: helper quit/update fix; 4.3 released but not installed; 4.2 confirmed)
+## Where things stand (4.3.1 released: helper quit/update fix + everything from 4.2.1 and 4.3, waiting for the user to test; 4.2 confirmed)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
