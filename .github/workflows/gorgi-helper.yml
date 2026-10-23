@@ -1,0 +1,80 @@
+name: Gorgi Helper (Windows)
+
+on:
+  push:
+    paths:
+      - "esp32/gorgi-helper/**"
+      - ".github/workflows/gorgi-helper.yml"
+  workflow_dispatch:
+  workflow_call:  # used by gorgi-release.yml
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: esp32/gorgi-helper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller==6.11.1
+
+      - name: Self-test with plain Python (before packaging)
+        continue-on-error: true
+        run: |
+          python gorgi_helper.py --selftest plain.txt
+          type plain.txt
+          if exist plain.crash.txt type plain.crash.txt
+        shell: cmd
+
+      - name: Make icon
+        run: python icon.py
+
+      - name: Build GorgiHelper
+        run: >
+          pyinstaller --onedir --noconsole --name GorgiHelper --icon gorgi.ico
+          --collect-all winrt --collect-submodules zeroconf --collect-submodules pycaw
+          --collect-all faster_whisper --collect-all ctranslate2 --collect-all edge_tts
+          --collect-all sounddevice --collect-all _sounddevice_data
+          --collect-all huggingface_hub --collect-all tokenizers --collect-all onnxruntime --collect-all av
+          --hidden-import requests --hidden-import faster_whisper --hidden-import pkg_resources --hidden-import winrt.windows.storage.streams
+          gorgi_helper.py
+
+      - name: Bundle the Whisper speech model (so users don't download it)
+        run: python -c "from faster_whisper import download_model; download_model('base.en', output_dir='dist/GorgiHelper/models/base.en')"
+
+      - name: Self-test (voice -> Whisper round trip, imports)
+        shell: pwsh
+        run: |
+          Start-Process -FilePath dist\GorgiHelper\GorgiHelper.exe -ArgumentList "--selftest","$PWD\selftest.txt" -Wait
+          if (Test-Path selftest.txt) { Get-Content selftest.txt } else { Write-Output "no report written" }
+          if (Test-Path selftest.crash.txt) { Write-Output "--- crash log ---"; Get-Content selftest.crash.txt }
+          if (-not (Select-String -Path selftest.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
+
+      - name: Check the version matches esp32/VERSION
+        shell: pwsh
+        run: |
+          $v = (Get-Content ..\VERSION -Raw).Trim()
+          if (-not (Select-String -Path gorgi_helper.py -Pattern "VERSION = `"$v`"" -SimpleMatch -Quiet)) {
+            Write-Output "VERSION in gorgi_helper.py is not $v"; exit 1 }
+          "GORGI_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /DAppVersion=$env:GORGI_VERSION installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem installer-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GorgiHelper-Setup
+          retention-days: 30
+          path: esp32/gorgi-helper/installer-out/*.exe

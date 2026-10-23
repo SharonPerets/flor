@@ -1,0 +1,47 @@
+name: Gorgi test build
+
+# Publishes a test version of Gorgi's firmware as a GitHub *pre-release* when
+# esp32/TEST_VERSION changes. Pre-releases are never offered by Gorgi Helper;
+# they're flashed by USB to try something out first.
+
+on:
+  push:
+    paths:
+      - "esp32/TEST_VERSION"
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    uses: ./.github/workflows/gorgi-firmware.yml
+
+  publish:
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gorgi-firmware
+          path: fw
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(tr -d '[:space:]' < esp32/TEST_VERSION)
+          grep -q "#define GORGI_VERSION \"$V\"" esp32/ai-companion/src/pclink.h || { echo "GORGI_VERSION is not $V"; exit 1; }
+          mkdir out
+          cp "$(find fw -name gorgi-full.bin | head -1)" "out/gorgi-test-full-$V.bin"
+          cp "$(find fw -name gorgi-firmware.bin | head -1)" "out/gorgi-test-firmware-$V.bin"
+          cat > notes.md <<NOTES
+          **Test version - not offered by Gorgi Helper.**
+
+          Flash \`gorgi-test-full-$V.bin\` at address 0x0 with https://espressif.github.io/esptool-js/
+          (Gorgi forgets its Wi-Fi, so set it up again from the "Gorgi-Setup" network).
+
+          To go back: flash \`gorgi-full-<version>.bin\` from the latest normal release the same way.
+          NOTES
+          gh release delete "gorgi-test-$V" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "gorgi-test-$V" out/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "Gorgi test $V" --notes-file notes.md
