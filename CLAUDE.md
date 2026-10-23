@@ -69,7 +69,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
 
-## Where things stand (4.2.1 in progress: Claude usage for the desktop app; 4.2 confirmed, merged to main)
+## Where things stand (4.2.1 released: Claude usage for the desktop app - waiting for the user to test; 4.2 confirmed, merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
