@@ -11,7 +11,13 @@
 //                    {"type":"media","title":"..","artist":"..","album":"..","playing":true,"volume":40,
 //                     "pos":63.5,"dur":215.0,"art":7}   (pos/dur in seconds, art = album art id)
 //                    binary "GART" + id + total + offset + RGB565 data   (album art, in pieces)
-//                    {"type":"clock","text":"21:45"}
+//                    {"type":"clock","text":"21:45","epoch":1761245100}  (epoch: seconds since 1970)
+//                    {"type":"time_add","kind":"timer","seconds":600,"label":"pasta"}
+//                    {"type":"time_add","kind":"focus","seconds":1500}
+//                    {"type":"time_add","kind":"remind","text":"call mom","at":1761245100}
+//                    {"type":"time_add","kind":"remind","text":"vitamins","minute":480,"days":127}
+//                                                 (repeating: minute of the day, days bit 0 = Sunday)
+//                    {"type":"time_cancel","id":12}
 //                    {"type":"voice","state":"listening"|"thinking"|"idle","followup":false}
 //                    {"type":"heard","text":"what you said"}
 //                    {"type":"say","text":"Gorgi's answer","mood":"happy"}
@@ -22,6 +28,8 @@
 //                    {"type":"talk"}     (face tapped: start a conversation)
 //                    {"type":"cancel"}   (face tapped again: stop it)
 //                    {"type":"weather","city":"Nahariya","now":{...},"days":[...]}
+//                    {"type":"time_list","timers":[...],"reminders":[...],"focus_today":2}
+//                    {"type":"due","kind":"timer"|"focus"|"reminder"|"missed","text":"Ding! ..."}
 #pragma once
 
 #include <Arduino.h>
@@ -45,11 +53,14 @@ enum class WifiState { Connecting, SetupPortal, Online };
 
 struct Handlers {
   std::function<void(const ui::MediaInfo&)> onMedia;
-  std::function<void(const String&)> onClock;
+  // The PC's clock: "21:45" and seconds since 1970 (0 if the helper is older)
+  std::function<void(const String& text, uint32_t epoch)> onClock;
   std::function<void(bool connected, const String& pcName)> onHelper;
   std::function<void(WifiState)> onWifi;
   // Conversation messages: "voice", "heard", "say" and "level"
   std::function<void(const char* type, JsonObjectConst msg)> onVoice;
+  // Timers and reminders set by voice: "time_add" and "time_cancel"
+  std::function<void(const char* type, JsonObjectConst msg)> onTime;
   // A piece of album art (see music_screen.h)
   std::function<void(uint32_t id, uint32_t total, uint32_t offset, const uint8_t* data, size_t len)> onArt;
   // Firmware update over Wi-Fi: percent 0..100, or -1 if it failed

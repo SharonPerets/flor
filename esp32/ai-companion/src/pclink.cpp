@@ -96,7 +96,9 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
     m.artId = doc["art"] | 0u;
     if (handlers.onMedia) handlers.onMedia(m);
   } else if (strcmp(type, "clock") == 0) {
-    if (handlers.onClock) handlers.onClock(String((const char*)(doc["text"] | "")));
+    if (handlers.onClock) handlers.onClock(String((const char*)(doc["text"] | "")), doc["epoch"] | 0u);
+  } else if (strcmp(type, "time_add") == 0 || strcmp(type, "time_cancel") == 0) {
+    if (handlers.onTime) handlers.onTime(type, doc.as<JsonObjectConst>());
   } else if (strcmp(type, "voice") == 0 || strcmp(type, "heard") == 0 || strcmp(type, "say") == 0 ||
              strcmp(type, "level") == 0) {
     if (handlers.onVoice) handlers.onVoice(type, doc.as<JsonObjectConst>());
