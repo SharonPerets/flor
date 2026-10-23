@@ -66,33 +66,37 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - `millis()` comparisons must be wrap-safe (`msSince`).
 - Names: `pclink` (not `link`, clashes with POSIX), `gfont` (not `fonts`, clashes with LovyanGFX).
 
-## Where things stand (version 3.9 released: the Time screen; waiting for the user to test it)
+## Where things stand (version 3.9 released and confirmed by the user on the device)
 
-3.9 = the Time screen (step 1 below): `wallclock` (internet time, Israel TZ, PC time as backup),
-`alarms` (timers/focus/reminders saved in NVS namespace "alarms", due list, missed after restart),
-`time_screen` (drawing + taps), helper `timekeeper.py` (AI tags -> `time_add`/`time_cancel`, list in the
-AI context, `due` -> pop-up + spoken on the PC). Screens: **Music ← Face → Weather → Time**.
+Done and confirmed:
+- 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
+  volume, long-term memory (`memory.json` on the PC), Wi-Fi updates with progress window on the PC, screens
+  by swiping sideways (instant switch). Music screen: album art (helper sends 240x240 RGB565) and song
+  progress. Weather from Open-Meteo for 16 Israeli cities (Nahariya default), also given to the AI.
+  Screens return to the face after 45 s.
+- **3.9 - Time screen** (step 1 of the plan, done): one screen for timers, focus sessions and reminders.
+  - Firmware: `wallclock` (internet time, Israel TZ, PC time as backup), `alarms` (up to 3 timers + 1 focus
+    + 20 reminders, saved in NVS namespace "alarms", survive restarts, "While I was off, I missed: ..."),
+    `time_screen` (rings, 1/5/10 min buttons, focus length 15/25/45/60, "Next up" list, tap a reminder to
+    delete it, **Ask me** button that jumps to the face and starts listening). Countdown chip next to the
+    clock on every screen. When due: Gorgi wakes, shows it, nudges every 30 s, tap anywhere to stop
+    (gives up after 10 min). No "Now playing" reactions during focus.
+  - Helper: `timekeeper.py` turns AI tags (`[timer: 10m | pasta]`, `[focus: 25m]`, `[remind: at 17:00 | ...]`,
+    `[remind: daily 08:00 | ...]`, `[cancel: ...]`) into `time_add` / `time_cancel`; Gorgi's `time_list`
+    goes into the AI context; `due` -> Windows pop-up + spoken on the PC (music paused for a moment).
+    If a tag can't be done (limit reached, old firmware) the problem is spoken instead of a fake "done".
+  - 3.8.90 was a USB test build; after it the user asked for **Wi-Fi releases only**.
+- Screens now: **Music ← Face → Weather → Time**.
 
-
-Done: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control + volume,
-long-term memory (`memory.json` on the PC), Wi-Fi updates with progress window on the PC, screens by
-swiping sideways, instant switch: **Music ← Face → Weather**. Music screen shows album art (helper sends
-240x240 RGB565) and song progress. Weather from Open-Meteo for 16 Israeli cities (Nahariya default),
-also given to the AI. Screens return to the face after 45 s.
+Lessons from 3.9 (keep for future screens):
+- Every screen that needs voice should have its own talk button (the user didn't know where to tap).
+- Test pure-C++ drawing and logic on the PC first (`tools/pc-tests`), then let GitHub compile.
 
 ## Next steps (chosen by the user, in this order; plan each one with the user before coding)
 
 Planned screen order when all exist: **Music ← Face → Weather → Time → Sketch** (dots in the top bar).
 
-1. **Time screen** - ONE screen for both (the user chose this over two screens):
-   - **Timers** ("set a timer for 10 minutes", or by touch) with big countdown rings.
-   - **Focus sessions** (e.g. 25 minutes), Gorgi cheers when one ends.
-   - **Reminders**: "remind me in 20 minutes to take the laundry out", "every day at 8 remind me...".
-     A list of what's coming up; add/delete by touch too.
-   - Set by voice through the AI (tags like the memory tags, e.g. `[timer: ...]`, `[remind: ...]`).
-   - Gorgi has no speaker: when something is due, Gorgi wakes up, the face reacts and the screen shows it;
-     the PC says it out loud if the helper is connected. Decide with the user where reminders are stored
-     (on Gorgi so they fire without the PC, or on the PC).
+1. ~~**Time screen**~~ - done in 3.9 (see above).
 2. **Sketch pad** screen: draw with a finger, a few colours, eraser, save ~10 sketches.
    Optional bonus: "Gorgi, what did I draw?" - the AI guesses (needs a model that can see pictures; check first).
 3. **Night clock**: at night Gorgi shows a big dim clock instead of just sleeping.
