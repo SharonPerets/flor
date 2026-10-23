@@ -69,7 +69,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
 
-## Where things stand (4.0 released and confirmed by the user; merged to main)
+## Where things stand (4.1 in progress: tabs, Claude screen, Teams call mode; 4.0 confirmed, merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -96,7 +96,21 @@ Done and confirmed:
   toolbar on this screen; **no automatic return to the face on any screen** (removed in 4.0);
   no "what did I draw?" AI guess.
   Confirmed working on the device ("works great").
-- Screens now: **Music ← Face → Weather → Time → Sketch**.
+- **4.1 - work features** (user is a software dev: Claude Code all day, Teams meetings, lots of music):
+  - **Icon tabs** in the top bar replace the dots (`tabs.cpp`; tap to jump, swipe still works; orange badge dot).
+  - **Claude screen** (`claude_screen.cpp`): sessions (working/waiting/done) + usage (5-hour, weekly, resets).
+    Helper `claude_setup.py` ("Connect Claude Code" in Settings) adds hooks (SessionStart, UserPromptSubmit,
+    PostToolUse, Notification, Stop, SessionEnd) + a status line to `~/.claude/settings.json` (merge, backup);
+    they run `curl.exe ... http://127.0.0.1:47811/claude/hook|status`. `claude_watch.py` = that tiny server,
+    session states, alerts ("needs you" always, "finished" only after >= 20 s of work), usage from the status
+    line's `rate_limits` (semi-official; the unofficial OAuth usage endpoint was NOT used). The user has one
+    account and runs Claude Code on Windows directly.
+  - **On a call** (`call_watch.py`): Teams = an app with "teams" in its name using the mic (registry
+    CapabilityAccessManager, LastUsedTimeStop == 0). Red "On a call" status, music paused/resumed, no spoken
+    alerts or pop-ups, red mute button next to the face -> `cmd teams_mute` -> Ctrl+Shift+M sent to the Teams
+    window. Mute is a "try" (no mute state shown). Better later: Teams' third-party device API
+    (ws://127.0.0.1:8124, needs enabling in Teams) gives real mute state and in-meeting status.
+- Screens now: **Music ← Face → Weather → Time → Sketch → Claude** (icon tabs at the top).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
@@ -117,11 +131,11 @@ Planned screen order when all exist: **Music ← Face → Weather → Time → S
 - **Petting reactions**: rub the face = happy, poke = grumpy.
 - **PC status screen**: CPU, memory, temperature, network speed as live gauges (from the helper).
 - **Photo frame**: photos from a PC folder when Gorgi is idle/asleep.
-- **Calendar**: today's events from the PC calendar; Gorgi mentions what's next.
 - **Games**: e.g. tic-tac-toe against Gorgi, with happy/sad faces when it wins/loses.
-- **Claude Code usage screen** (usage of a couple of Claude Code accounts): **shelved** - the user said
-  "forget about this for now". Notes if it comes back: token/cost totals are reliable from local
-  Claude Code logs on that PC; plan-limit percentages (like /usage) would need an unofficial API.
+- **Next meeting countdown** (Outlook calendar, "Join" button) - suggested with 4.1, a good next step.
+- **Gorgi dances** to the music beat; **focus music** (playlist starts with a focus session);
+  **build/PR watcher** (GitHub CI results) - suggested with 4.1.
+- **Pull-down panel** (swipe down): quiet mode, screen off, lock/sleep PC, big volume, status + "Update now".
 - **Smooth sliding between screens**: tried twice (3.7 slide, 3.7.9x new driver) and dropped; see lessons.
 
 Not wanted (don't suggest again): greetings, break reminders.

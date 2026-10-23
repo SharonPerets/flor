@@ -75,6 +75,23 @@ They're kept on Gorgi itself, so they go off even when the PC is off. When one i
 and if the helper is running, a pop-up appears and Gorgi's voice says it on the PC (music pauses for a moment).
 You can see, pause and delete them on Gorgi's **Time** screen too.
 
+## Claude Code
+
+Gorgi can show your Claude Code sessions (working / waiting for you / done) and your plan usage.
+Open **Settings** and click **Connect Claude Code**. This adds small "hooks" and a status line to
+Claude Code's settings (`%USERPROFILE%\.claude\settings.json`; your own settings are kept and a backup is
+made). Restart open Claude Code sessions afterwards. **Disconnect** in the same place removes them.
+
+- When a session needs your OK or answer, or finishes after working a while, Gorgi shows it and says it.
+- Claude Code's status line shows the model and usage (e.g. `Opus | 5h 62% | week 23%`).
+- Ask Gorgi "how much Claude usage do I have left?" or "is Claude done?".
+
+## Teams calls
+
+When Teams uses your microphone, Gorgi shows **On a call**, pauses your music (and resumes it after
+the call), and doesn't speak alerts or show pop-ups. The red button on Gorgi presses Teams' mute
+shortcut (Ctrl+Shift+M) for you.
+
 ## If it doesn't connect
 
 - Right-click the tray icon to see the status.
