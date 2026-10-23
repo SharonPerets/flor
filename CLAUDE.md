@@ -66,14 +66,14 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - `millis()` comparisons must be wrap-safe (`msSince`).
 - Names: `pclink` (not `link`, clashes with POSIX), `gfont` (not `fonts`, clashes with LovyanGFX).
 
-## Where things stand (version 3.9 released and confirmed by the user on the device)
+## Where things stand (4.0 released: Sketch pad, waiting for the user to test it; 3.9 confirmed)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
   volume, long-term memory (`memory.json` on the PC), Wi-Fi updates with progress window on the PC, screens
   by swiping sideways (instant switch). Music screen: album art (helper sends 240x240 RGB565) and song
   progress. Weather from Open-Meteo for 16 Israeli cities (Nahariya default), also given to the AI.
-  Screens return to the face after 45 s.
+  Screens returned to the face after 45 s (removed in 4.0 at the user's request).
 - **3.9 - Time screen** (step 1 of the plan, done): one screen for timers, focus sessions and reminders.
   - Firmware: `wallclock` (internet time, Israel TZ, PC time as backup), `alarms` (up to 3 timers + 1 focus
     + 20 reminders, saved in NVS namespace "alarms", survive restarts, "While I was off, I missed: ..."),
@@ -86,7 +86,14 @@ Done and confirmed:
     goes into the AI context; `due` -> Windows pop-up + spoken on the PC (music paused for a moment).
     If a tag can't be done (limit reached, old firmware) the problem is spoken instead of a fake "done".
   - 3.8.90 was a USB test build; after it the user asked for **Wi-Fi releases only**.
-- Screens now: **Music ← Face → Weather → Time**.
+- **4.0 - Sketch pad** (step 2): `sketch` (toolbar 8 colours/eraser/3 sizes/undo/gallery, paper 680x320 at
+  (112,50), packed RLE files, thumbnails) + `sketch_store` (LittleFS on the "spiffs" partition, /sketch/<id>.gsk,
+  newest 10 kept, NVS "sketch": cur/next ids). Drawing goes into a PSRAM picture (+5 undo copies) and only the
+  changed rectangle is redrawn. Saves after 20 s pause / leaving / gallery. User choices: swipe only on the
+  toolbar on this screen; **no automatic return to the face on any screen** (removed in 4.0);
+  no "what did I draw?" AI guess.
+  Watch for: screen jump while saving to flash, first-boot LittleFS format time.
+- Screens now: **Music ← Face → Weather → Time → Sketch**.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
@@ -97,8 +104,7 @@ Lessons from 3.9 (keep for future screens):
 Planned screen order when all exist: **Music ← Face → Weather → Time → Sketch** (dots in the top bar).
 
 1. ~~**Time screen**~~ - done in 3.9 (see above).
-2. **Sketch pad** screen: draw with a finger, a few colours, eraser, save ~10 sketches.
-   Optional bonus: "Gorgi, what did I draw?" - the AI guesses (needs a model that can see pictures; check first).
+2. ~~**Sketch pad**~~ - done in 4.0 (the AI-guess bonus was declined).
 3. **Night clock**: at night Gorgi shows a big dim clock instead of just sleeping.
 4. **"Hey Gorgi" wake word**: talk without tapping. Local on the PC (voice detection + Whisper checking
    for the name and sound-alikes), with an on/off setting.
