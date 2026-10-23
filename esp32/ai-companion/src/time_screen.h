@@ -60,8 +60,9 @@ void formatLeft(uint32_t seconds, char* out, int size);
 
 enum class Tap { None, Ring, RingClose, QuickTimer, FocusLength, FocusStart, Row, Delete, Keep };
 struct TapResult {
-  Tap what = Tap::None;
-  int index = 0;  // ring / row number, or minutes for QuickTimer
+  Tap what;
+  int index;  // ring / row number, or minutes for QuickTimer
+  TapResult(Tap w = Tap::None, int i = 0) : what(w), index(i) {}
 };
 TapResult tap(int x, int y, const View& v);
 
