@@ -69,7 +69,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
 
-## Where things stand (4.1 released: tabs, Claude screen, Teams call mode - waiting for the user to test; 4.0 confirmed)
+## Where things stand (4.2 in progress: pull-down panel; 4.1 released, not yet confirmed; 4.0 confirmed)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -110,6 +110,16 @@ Done and confirmed:
     alerts or pop-ups, red mute button next to the face -> `cmd teams_mute` -> Ctrl+Shift+M sent to the Teams
     window. Mute is a "try" (no mute state shown). Better later: Teams' third-party device API
     (ws://127.0.0.1:8124, needs enabling in Teams) gives real mute state and in-meeting status.
+- **4.2 - pull-down panel** (`panel.cpp`): swipe down from the top bar (drag > 50 px down from y < 44), close by
+  pushing up or tapping outside; drawn over the page (page drawing paused, page marked dirty on close).
+  - **Sleep**: backlight off, phase Asleep; any touch wakes (consumed). Timer/reminder/Claude alerts turn the screen
+    on and it goes back to sleep after the alert is dismissed (`sleepAfterAlert`).
+  - **Update**: helper sends `update_info` (available, version, busy); panel open -> `cmd check_updates` (helper
+    checks GitHub at most every 10 min); tap -> `cmd update` -> helper `update_all()`: helper first (sets
+    `pending_gorgi_update` in config.json, installer restarts it), the new helper's `offer_updates()` then sends
+    the firmware to Gorgi by itself. Orange dot on the top handle when an update is waiting.
+  - Status line: version, Wi-Fi signal (RSSI), PC name.
+  - The pull-down panel from the ideas list is partly done; still open: quiet mode, lock/sleep PC, big volume.
 - Screens now: **Music ← Face → Weather → Time → Sketch → Claude** (icon tabs at the top).
 
 Lessons from 3.9 (keep for future screens):
@@ -135,7 +145,7 @@ Planned screen order when all exist: **Music ← Face → Weather → Time → S
 - **Next meeting countdown** (Outlook calendar, "Join" button) - suggested with 4.1, a good next step.
 - **Gorgi dances** to the music beat; **focus music** (playlist starts with a focus session);
   **build/PR watcher** (GitHub CI results) - suggested with 4.1.
-- **Pull-down panel** (swipe down): quiet mode, screen off, lock/sleep PC, big volume, status + "Update now".
+- **More for the pull-down panel**: quiet mode, lock/sleep PC, big volume.
 - **Smooth sliding between screens**: tried twice (3.7 slide, 3.7.9x new driver) and dropped; see lessons.
 
 Not wanted (don't suggest again): greetings, break reminders.

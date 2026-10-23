@@ -92,6 +92,13 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **On a call**: when Teams uses your microphone, the top bar shows **On a call** in red, music pauses
   (and resumes after), Gorgi stays quiet (no spoken alerts), and a red **Mute / unmute** button next to
   the face toggles your Teams mic (Teams' Ctrl+Shift+M shortcut).
+- **Pull-down panel**: swipe down from the top bar (a tap there still switches screens). Push it back up or
+  tap outside to close it.
+  - **Sleep** turns the screen off. Any touch wakes Gorgi (that first touch only wakes it). A timer, reminder or
+    "Claude needs you" turns the screen on to show it, and it goes back to sleep once you tap it.
+  - **Update** (when a new version is out; a small orange dot at the top means one is waiting): one tap updates
+    the PC helper first, then Gorgi, by itself.
+  - A status line: Gorgi's version, Wi-Fi signal, and which PC is connected.
 - **The clock** comes from the internet (Israel time, summer/winter time automatic), or from the PC
   until the internet answers.
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.

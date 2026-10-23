@@ -33,6 +33,9 @@ Right-click the Gorgi icon and choose:
 
 **Check for updates** in the same menu checks right away.
 
+Or update from Gorgi itself: swipe down from Gorgi's top bar and tap **Update**. The helper updates first,
+restarts, then sends the new version to Gorgi by itself.
+
 Gorgi only accepts updates from the helper it paired with (the first one that connected to it).
 To pair it with a different PC, hold Gorgi's clock for 5 seconds: it forgets its Wi-Fi and the
 paired helper, then set it up again.
