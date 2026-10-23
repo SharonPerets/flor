@@ -20,12 +20,14 @@
 
 #include "alarms.h"
 #include "board.h"
+#include "claude_screen.h"
 #include "display.h"
 #include "face.h"
 #include "music_screen.h"
 #include "pclink.h"
 #include "sketch.h"
 #include "sketch_store.h"
+#include "tabs.h"
 #include "time_screen.h"
 #include "ui.h"
 #include "weather.h"
@@ -58,7 +60,8 @@ constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 // ---------- screens ----------
 // Swipe left/right in the middle of the screen to switch, in this order.
 // More screens can be added to this list later.
-enum class Page { Music, Face, Weather, Time, Sketch, Count };
+enum class Page { Music, Face, Weather, Time, Sketch, Claude, Count };
+const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
 Page page = Page::Face;
 bool musicDirty = true;      // the music screen needs drawing
 int musicProgressKey = -2;   // what the progress bar showed last
@@ -89,6 +92,18 @@ uint32_t timeNoteUntil = 0;
 
 bool sketchFull = true;  // the sketch screen needs drawing in full
 
+// Claude Code on the PC (sessions and usage, sent by the helper)
+claudescreen::View claudeView;
+int32_t claudeSince[claudescreen::MAX_SESSIONS];  // when each session's state changed (seconds since 1970)
+int32_t claudeUsageAt = 0;
+bool claudeDirty = true;
+uint32_t claudeDrawnAt = 0;
+bool alertClaude = false;  // the alert on screen is from Claude Code
+String alertSession;       // ...for this session
+
+// A Teams call is going on (the helper notices the microphone)
+bool callOn = false;
+
 // Something is due: Gorgi shows it until tapped (or for 10 minutes)
 bool alertOn = false;
 uint32_t alertStart = 0, alertNudge = 0, alertMoodBack = 0;
@@ -117,7 +132,11 @@ uint32_t ignorePcVolumeUntil = 0;  // don't let the PC move the slider while you
 
 // ---------- small helpers ----------
 
-void showIdleStatus() { ui::setStatus("Tap me to talk", ui::COLOR_TEXT_DIM, false); }
+const gfx::Color CALL_RED = gfx::rgb(0xFF6B6B);
+void showIdleStatus() {
+  if (callOn) ui::setStatus("On a call", CALL_RED, false);
+  else ui::setStatus("Tap me to talk", ui::COLOR_TEXT_DIM, false);
+}
 
 // Text that stays under the face while nothing else is being said
 String restingSubtitle() {
@@ -223,19 +242,21 @@ void markPageDirty(Page p) {
   if (p == Page::Music) musicDirty = true;
   if (p == Page::Time) timeDirty = true;
   if (p == Page::Sketch) sketchFull = true;
+  if (p == Page::Claude) claudeDirty = true;
 }
 
 void drawFrame(uint32_t now);
 void sendTimeList();
 void sketchShown();
 void sketchHidden();
+void drawClaude(uint32_t now);
 
 // Switches screens right away (no animation)
 void showPage(Page p) {
   if (p == page) return;
   if (page == Page::Sketch) sketchHidden();
   page = p;
-  ui::setPagePosition((float)(int)p);
+  ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
@@ -437,6 +458,12 @@ void onHelper(bool connected, const String& name) {
     if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
   } else {
     if (!wallclock::valid()) ui::setClock("Gorgi");
+    callOn = false;  // without the PC there's no call to show
+    ui::setCallButton(false);
+    showIdleStatus();
+    claudeView.count = 0;
+    claudeDirty = true;
+    ui::setTabBadges(0);
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Sad, "I lost my connection to the PC.");
   }
@@ -462,7 +489,7 @@ void onMedia(const ui::MediaInfo& m) {
 
   // A new song started: a little happy reaction (unless Gorgi is busy or asleep)
   if (!first && media.title.length() && media.title != oldTitle && !isBusy() && !isSleeping() && !alertOn &&
-      !alarms::focusRunning()) {
+      !alarms::focusRunning() && !callOn) {
     react(Mood::Happy, String("Now playing: ") + media.title);
   }
 }
@@ -523,6 +550,7 @@ void showAlert(const alarms::Due& d) {
   alertOn = true;
   alertStart = alertNudge = now;
   alertMoodBack = now + 2000;
+  alertClaude = false;
   alertMood = d.kind == alarms::Due::Focus ? Mood::Excited : (d.kind == alarms::Due::Missed ? Mood::Sad : Mood::Happy);
   lastActivity = now;  // wakes Gorgi up
   moodHoldUntil = 0;
@@ -542,6 +570,7 @@ void showAlert(const alarms::Due& d) {
 
 void endAlert(bool tapped) {
   alertOn = false;
+  alertClaude = false;
   face.setTalking(false);
   showIdleStatus();
   setPhase(Phase::Idle);
@@ -564,7 +593,7 @@ void updateAlert(uint32_t now) {
     alertMoodBack = 0;
     face.setMood(alertMood);
   }
-  if (msSince(now, alertNudge) > ALERT_NUDGE_MS) {  // a little jump every 30 s until tapped
+  if (!alertClaude && msSince(now, alertNudge) > ALERT_NUDGE_MS) {  // a little jump every 30 s until tapped
     alertNudge = now;
     face.setMood(Mood::Surprised);
     alertMoodBack = now + 1500;
@@ -939,6 +968,101 @@ void updateSketch(uint32_t now) {
   if (skChanged && !touching && msSince(now, skLastStroke) > SKETCH_SAVE_AFTER_MS) sketchSave();
 }
 
+// ---------- Claude Code and calls (from the helper) ----------
+
+uint8_t claudeState(const char* s) {
+  if (strcmp(s, "working") == 0) return claudescreen::WORKING;
+  if (strcmp(s, "waiting") == 0) return claudescreen::WAITING;
+  if (strcmp(s, "done") == 0) return claudescreen::DONE;
+  return claudescreen::IDLE;
+}
+
+// "18:40" today, else "Fri 09:00"
+void formatWhen(int32_t epoch, char* out, int size) {
+  out[0] = 0;
+  if (epoch <= 0) return;
+  const time_t t = epoch;
+  struct tm lt;
+  localtime_r(&t, &lt);
+  const bool soon = wallclock::valid() && epoch - (int32_t)wallclock::now() < 20 * 3600;
+  strftime(out, size, soon ? "%H:%M" : "%a %H:%M", &lt);
+}
+
+void updateClaudeBadge() {
+  bool waiting = false;
+  for (int i = 0; i < claudeView.count; ++i) waiting |= claudeView.sessions[i].state == claudescreen::WAITING;
+  ui::setTabBadges(waiting ? 1u << (int)Page::Claude : 0);
+}
+
+void showClaudeAlert(const String& name, bool waiting, const String& text) {
+  const uint32_t now = millis();
+  alertOn = true;
+  alertClaude = true;
+  alertSession = name;
+  alertStart = alertNudge = now;
+  alertMoodBack = now + 2000;
+  alertMood = waiting ? Mood::Surprised : Mood::Excited;
+  lastActivity = now;
+  moodHoldUntil = 0;
+  showPage(Page::Face);
+  face.setTalking(false);
+  face.setMood(Mood::Surprised);
+  ui::setSubtitle(text);
+  ui::setStatus("Tap to dismiss", ui::COLOR_ACCENT, true);
+  setPhase(Phase::Alert);
+}
+
+void onOther(const char* type, JsonObjectConst msg) {
+  if (strcmp(type, "claude") == 0) {
+    claudeView.hooked = msg["hooked"] | false;
+    claudeView.count = 0;
+    for (JsonObjectConst s : msg["sessions"].as<JsonArrayConst>()) {
+      if (claudeView.count >= claudescreen::MAX_SESSIONS) break;
+      const int i = claudeView.count++;
+      claudescreen::Session& out = claudeView.sessions[i];
+      snprintf(out.name, sizeof out.name, "%s", ui::toAscii(String((const char*)(s["name"] | "?"))).c_str());
+      snprintf(out.text, sizeof out.text, "%s", ui::toAscii(String((const char*)(s["text"] | ""))).c_str());
+      out.state = claudeState(s["state"] | "idle");
+      claudeSince[i] = s["since"] | 0;
+      formatWhen(claudeSince[i], out.at, sizeof out.at);
+      // the alert is about a session that is busy again (answered on the PC): put it away
+      if (alertOn && alertClaude && alertSession == out.name && out.state == claudescreen::WORKING) endAlert(false);
+    }
+    JsonObjectConst u = msg["usage"];
+    claudeView.usage.known = !u.isNull() && u["five"].is<float>();
+    if (claudeView.usage.known) {
+      claudeView.usage.five = u["five"] | 0.0f;
+      claudeView.usage.week = u["week"] | 0.0f;
+      formatWhen(u["five_reset"] | 0, claudeView.usage.fiveReset, sizeof claudeView.usage.fiveReset);
+      formatWhen(u["week_reset"] | 0, claudeView.usage.weekReset, sizeof claudeView.usage.weekReset);
+      claudeUsageAt = u["at"] | 0;
+    }
+    claudeDirty = true;
+    updateClaudeBadge();
+  } else if (strcmp(type, "claude_alert") == 0) {
+    if (inConversation || updating || (alertOn && !alertClaude)) return;  // the badge still shows it
+    const bool waiting = strcmp(msg["kind"] | "done", "waiting") == 0;
+    showClaudeAlert(String((const char*)(msg["name"] | "")), waiting, String((const char*)(msg["text"] | "")));
+  } else if (strcmp(type, "call") == 0) {
+    callOn = msg["on"] | false;
+    ui::setCallButton(callOn);
+    if (phase == Phase::Idle || phase == Phase::Sleepy || phase == Phase::Asleep) showIdleStatus();
+    Serial.printf("call: %s\n", callOn ? "started" : "ended");
+  }
+}
+
+void drawClaude(uint32_t now) {
+  if (!claudeDirty && msSince(now, claudeDrawnAt) < 30000) return;  // "4 min ago" changes slowly
+  claudeDirty = false;
+  claudeDrawnAt = now;
+  claudeView.pc = pclink::helperConnected();
+  const int32_t t = wallclock::valid() ? (int32_t)wallclock::now() : 0;
+  for (int i = 0; i < claudeView.count; ++i)
+    claudeView.sessions[i].ago = t && claudeSince[i] ? t - claudeSince[i] : -1;
+  claudeView.usage.age = t && claudeUsageAt ? t - claudeUsageAt : -1;
+  display::render(claudescreen::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { claudescreen::draw(c, claudeView); });
+}
+
 // ---------- touch ----------
 
 void sendVolume(bool force) {
@@ -1121,6 +1245,15 @@ void handleTouch(uint32_t now) {
       if (abs(dx) >= SWIPE_MIN_PX && next >= 0 && next < (int)Page::Count) showPage((Page)next);
       return;
     }
+    if (released == ui::Target::Tab) {
+      const int t = ui::tabAt(touchX0, touchY0);
+      if (t >= 0 && t < (int)Page::Count) showPage((Page)t);
+      return;
+    }
+    if (released == ui::Target::CallMute) {
+      pclink::sendCommand("teams_mute");
+      return;
+    }
     if (released == ui::Target::Face && page != Page::Face) {
       if (!longPressDone && page == Page::Weather) onWeatherTap(touchX0, touchY0);
       if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
@@ -1212,6 +1345,8 @@ void drawFrame(uint32_t now) {
     drawTime(now);
   } else if (page == Page::Sketch) {
     drawSketch();
+  } else if (page == Page::Claude) {
+    drawClaude(now);
   } else if (page == Page::Music) {
     const int key = music::progressKey(media, now);
     if (musicDirty) {
@@ -1264,6 +1399,7 @@ void setup() {
   h.onUpdate = onUpdate;
   h.onArt = onArt;
   h.onTime = onTime;
+  h.onOther = onOther;
   pclink::begin(h);
   wallclock::begin();
   alarms::begin();
@@ -1271,7 +1407,8 @@ void setup() {
 
   wxPrefs.begin("weather", false);
   wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
-  ui::setPages((int)Page::Count, (float)(int)page);
+  ui::setTabs(TAB_ICONS, (int)Page::Count);
+  ui::setTab((int)page);
   weather::beginFetching();
 
   lastActivity = millis();

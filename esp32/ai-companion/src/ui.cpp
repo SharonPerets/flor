@@ -4,6 +4,7 @@
 
 #include "display.h"
 #include "gfont.h"
+#include "tabs.h"
 
 namespace ui {
 namespace {
@@ -23,7 +24,6 @@ const Color TEXT = gfx::rgb(0xE8EEF4);
 const Color TEXT_TITLE = gfx::rgb(0xF2F6FA);
 const Color TEXT_MUTED = gfx::rgb(0x9AA7B5);
 const Color TRACK = gfx::rgb(0x2A3441);
-const Color DOT = gfx::rgb(0x55616E);
 const Color PLAY_ICON = gfx::rgb(0x05201E);
 const Color ACCENT = gfx::rgb(0x4FE3D6);
 const Color ACCENT_PRESSED = gfx::rgb(0x8FF0E8);
@@ -38,8 +38,7 @@ constexpr int PREV_X = 396, PLAY_X = 462, NEXT_X = 528;
 constexpr int VOL_X0 = 598, VOL_X1 = 738;
 
 constexpr Rect CLOCK_AREA{0, 0, 300, 44};
-constexpr Rect STATUS_AREA{420, 0, 380, 44};
-constexpr Rect DOTS_AREA{340, 0, 120, 44};
+constexpr Rect STATUS_AREA{540, 0, 260, 44};
 constexpr Rect SUB_AREA{SUB_X, SUB_Y, SUB_W, SUB_H};
 constexpr Rect BAR_AREA{BAR_X, BAR_Y, BAR_W, BAR_H};
 constexpr Rect TEXT_AREA{TEXT_X - 8, BAR_Y + 4, TEXT_W + 16, BAR_H - 8};
@@ -59,10 +58,12 @@ MediaInfo media;
 Target pressed = Target::None;
 uint32_t pressedUntil = 0;
 
-float pagePos = 0;
-int pageCount = 1;
+uint8_t tabIcons[tabs::MAX_TABS];
+int tabCount = 0, tabCurrent = 0;
+uint32_t tabBadges = 0;
+bool callVisible = false, callShown = false, dirtyCall = false;
 bool subtitleVisible = true;
-bool dirtyDots = true;
+bool dirtyTabs = true;
 bool dirtyClock = true, dirtyStatus = true, dirtySub = true;
 bool dirtyBar = true, dirtyText = true, dirtyButtons = true, dirtyVolume = true;
 bool pulseOn = true;
@@ -145,21 +146,19 @@ void drawClock(Canvas& c) {
 
 void drawStatus(Canvas& c) {
   if (statusText.length() == 0) return;
-  const float tw = Canvas::textWidth(gfont::SMALL, statusText.c_str());
+  const String text = fit(gfont::SMALL, statusText, 190);
+  const float tw = Canvas::textWidth(gfont::SMALL, text.c_str());
   const float w = tw + 52, x = 780 - w;
   c.fillRRect(x, 8, w, 32, 16, BORDER);
   c.fillRRect(x + 1, 9, w - 2, 30, 15, PANEL);
   iconMic(c, x + 21, 24, (statusPulse && !pulseOn) ? BORDER : statusColor);
-  c.text(gfont::SMALL, statusText.c_str(), x + 38, 29, statusColor);
+  c.text(gfont::SMALL, text.c_str(), x + 38, 29, statusColor);
 }
 
-void drawDots(Canvas& c) {
-  if (pageCount < 2) return;
-  const float gap = 18, cx = 400 - gap * (pageCount - 1) * 0.5f;
-  for (int i = 0; i < pageCount; ++i) c.fillCircle(cx + i * gap, 22, 3.5f, DOT);
-  // the current screen: a short bar that slides along with the screens
-  const float x = cx + pagePos * gap;
-  c.fillRRect(x - 9, 19, 18, 6, 3, ACCENT);
+void drawTabs(Canvas& c) { tabs::draw(c, tabIcons, tabCount, tabCurrent, tabBadges); }
+
+void drawCall(Canvas& c) {
+  if (callVisible) tabs::drawCallButton(c, pressed == Target::CallMute);
 }
 
 void drawSubtitle(Canvas& c) {
@@ -254,19 +253,33 @@ void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
 
 void begin(LGFX&) {
   display::render(Rect{0, 0, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
-  dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = dirtyDots = true;
+  dirtyClock = dirtyStatus = dirtySub = dirtyBar = dirtyText = dirtyButtons = dirtyVolume = dirtyTabs = true;
 }
 
-void setPages(int count, float position) {
-  pageCount = count;
-  pagePos = position;
-  dirtyDots = true;
+void setTabs(const uint8_t* icons, int count) {
+  tabCount = count < tabs::MAX_TABS ? count : tabs::MAX_TABS;
+  for (int i = 0; i < tabCount; ++i) tabIcons[i] = icons[i];
+  dirtyTabs = true;
 }
 
-void setPagePosition(float position) {
-  if (fabsf(position - pagePos) < 0.01f) return;
-  pagePos = position;
-  dirtyDots = true;
+void setTab(int current) {
+  if (current == tabCurrent) return;
+  tabCurrent = current;
+  dirtyTabs = true;
+}
+
+void setTabBadges(uint32_t badges) {
+  if (badges == tabBadges) return;
+  tabBadges = badges;
+  dirtyTabs = true;
+}
+
+int tabAt(int x, int y) { return tabs::at(x, y, tabCount); }
+
+void setCallButton(bool visible) {
+  if (visible == callVisible) return;
+  callVisible = visible;
+  dirtyCall = true;
 }
 
 void drawSubtitleNow() {
@@ -279,7 +292,7 @@ void drawSubtitleNow() {
 void setSubtitleVisible(bool visible) {
   if (visible == subtitleVisible) return;
   subtitleVisible = visible;
-  if (visible) dirtySub = true;  // when hidden, the other screen draws over it
+  if (visible) dirtySub = dirtyCall = true;  // when hidden, the other screen draws over it
 }
 
 void setClock(const String& text) {
@@ -343,16 +356,18 @@ void setVolume(int volume) {
 }
 
 void showPressed(Target t) {
-  if (t != Target::Prev && t != Target::PlayPause && t != Target::Next) return;
+  if (t != Target::Prev && t != Target::PlayPause && t != Target::Next && t != Target::CallMute) return;
   pressed = t;
   pressedUntil = millis() + 180;
-  dirtyButtons = true;
+  if (t == Target::CallMute) dirtyCall = true;
+  else dirtyButtons = true;
 }
 
 void update(uint32_t now) {
   if (pressed != Target::None && (int32_t)(now - pressedUntil) >= 0) {
+    if (pressed == Target::CallMute) dirtyCall = true;
+    else dirtyButtons = true;
     pressed = Target::None;
-    dirtyButtons = true;
   }
   if (statusPulse && (int32_t)(now - nextPulseMs) >= 0) {
     pulseOn = !pulseOn;
@@ -361,7 +376,13 @@ void update(uint32_t now) {
   }
   if (dirtyClock) { redraw(CLOCK_AREA, BG, drawClock); dirtyClock = false; }
   if (dirtyStatus) { redraw(STATUS_AREA, BG, drawStatus); dirtyStatus = false; }
-  if (dirtyDots) { redraw(DOTS_AREA, BG, drawDots); dirtyDots = false; }
+  if (dirtyTabs) { redraw(tabs::AREA, BG, drawTabs); dirtyTabs = false; }
+  // the call button sits next to the face, so only on the face screen
+  if (dirtyCall && subtitleVisible && (callVisible || callShown)) {
+    redraw(tabs::CALL_AREA, BG, drawCall);
+    callShown = callVisible;
+  }
+  if (subtitleVisible) dirtyCall = false;
   if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
   if (dirtyBar) {  // the whole bar (first time): it also covers the parts below
     redraw(BAR_AREA, BG, drawBar);
@@ -382,6 +403,8 @@ Target hitTest(int x, int y) {
     return Target::None;
   }
   if (y < FACE_Y && x < 240) return Target::Clock;
+  if (y < FACE_Y && tabAt(x, y) >= 0) return Target::Tab;
+  if (callVisible && subtitleVisible && tabs::onCallButton(x, y)) return Target::CallMute;
   if (y >= FACE_Y && y < SUB_Y + SUB_H) return Target::Face;
   return Target::None;
 }
