@@ -14,10 +14,12 @@ FIRST_WAIT_SECONDS = 7.0  # how long to wait for you to start talking after a ta
 
 
 class Conversation:
-    def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0, timekeeper=None):
+    def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0, timekeeper=None,
+                 extra_context=None):
         self.send = send  # async fn(dict): message to Gorgi
         self.media = media
         self.timekeeper = timekeeper  # timers and reminders (see timekeeper.py)
+        self.extra_context = extra_context  # fn() -> more lines for the AI (Claude Code, calls)
         self.brain = brain
         self.recorder = recorder
         self.transcriber = transcriber
@@ -156,4 +158,11 @@ class Conversation:
             lines.append(forecast)
         if self.timekeeper is not None:
             lines.append(self.timekeeper.prompt_block())
+        if self.extra_context is not None:
+            try:
+                extra = self.extra_context()
+                if extra:
+                    lines.append(extra)
+            except Exception as e:
+                log.warning("extra context failed: %s", e)
         return "\n".join(lines)

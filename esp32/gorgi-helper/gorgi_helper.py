@@ -32,12 +32,15 @@ import httpx  # noqa: E402
 import websockets  # noqa: E402
 
 import album_art  # noqa: E402
+import call_watch  # noqa: E402
+import claude_setup  # noqa: E402
+from claude_watch import ClaudeWatch  # noqa: E402
 from timekeeper import TimeKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.0"  # must match esp32/VERSION
+VERSION = "4.2"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -204,6 +207,10 @@ class Helper:
         self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
         self.speak = speak  # async fn(text): says something on the PC speakers (None = no voice)
         self._announcing = asyncio.Lock()
+        # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
+        self.claude = ClaudeWatch(on_change=self._claude_changed, on_alert=self._claude_alert)
+        self.on_call = False
+        self._paused_for_call = False
         self.on_status = on_status or (lambda text, connected: None)
         # make_conversation(send) -> Conversation, or None when voice isn't available
         self.make_conversation = make_conversation
@@ -283,9 +290,57 @@ class Helper:
             return
         self.offer_updates(manual)
 
+    def _send_soon(self, msg):
+        try:
+            asyncio.get_running_loop().create_task(self.send(msg))
+        except RuntimeError:  # not in the event loop (tray thread)
+            pass
+
+    def update_info(self):
+        """For Gorgi's pull-down panel: is there something to update?"""
+        return {"type": "update_info", "available": self.helper_update_available or self.gorgi_update_available,
+                "version": self.latest.version if self.latest else "", "busy": self.updating}
+
+    async def update_all(self):
+        """Gorgi's "Update" button: the helper first (it restarts), then Gorgi."""
+        if self.updating:
+            return
+        if self.helper_update_available:
+            # after the restart, the new helper carries on with Gorgi (see offer_updates)
+            self.config["pending_gorgi_update"] = True
+            save_config(self.config)
+            await self.send({"type": "update_status", "text": "Updating the PC helper..."})
+            await self.update_helper()
+        elif self.gorgi_update_available:
+            await self.send({"type": "update_status", "text": "Sending the update to Gorgi..."})
+            await self.update_gorgi()
+        await self.send(self.update_info())  # done (or failed): Gorgi stops showing "Updating"
+
+    async def check_updates_soon(self):
+        """Gorgi's panel was opened: check again, at most every 10 minutes."""
+        if time.monotonic() - getattr(self, "_last_check", -1e9) > 600:
+            self._last_check = time.monotonic()
+            await self.check_updates()
+        else:
+            await self.send(self.update_info())
+
     def offer_updates(self, manual=False):
         """Tells the user about new versions (once per version, or every time when asked)."""
         self.on_changed()
+        self._send_soon(self.update_info())
+        if self.config.pop("pending_gorgi_update", False):  # the helper was just updated from Gorgi's panel
+            save_config(self.config)
+            if self.gorgi_update_available:
+                log.info("carrying on with Gorgi's update")
+                self._send_soon({"type": "update_status", "text": "Sending the update to Gorgi..."})
+                try:
+                    asyncio.get_running_loop().create_task(self.update_gorgi())
+                except RuntimeError:
+                    pass
+                return
+            if not self.latest:  # not checked yet: try again on the next offer
+                self.config["pending_gorgi_update"] = True
+                save_config(self.config)
         if not self.latest:
             if manual:
                 self.on_notify("No updates yet", f"Gorgi Helper {VERSION}")
@@ -400,6 +455,9 @@ class Helper:
         self.ws = ws
         await ws.send(json.dumps({"type": "hello", "name": platform.node() or "PC",
                                   "key": self.config.get("helper_key", "")}))
+        await ws.send(json.dumps(self.claude_message()))
+        if self.on_call:
+            await ws.send(json.dumps({"type": "call", "on": True}))
         sender = asyncio.create_task(self._send_loop(ws))
         stopper = asyncio.create_task(self.stop_event.wait())
         receiver = asyncio.create_task(self._receive_loop(ws))
@@ -454,6 +512,15 @@ class Helper:
                 continue
             action = msg.get("action")
             log.info("command from Gorgi: %s %s", action, msg.get("value", ""))
+            if action == "teams_mute":
+                asyncio.get_running_loop().create_task(asyncio.to_thread(call_watch.teams_mute))
+                continue
+            if action == "update":
+                asyncio.get_running_loop().create_task(self.update_all())
+                continue
+            if action == "check_updates":
+                asyncio.get_running_loop().create_task(self.check_updates_soon())
+                continue
             if action in ("playpause", "next", "prev"):
                 await self.media.command(action)
             elif action == "volume" and isinstance(msg.get("value"), (int, float)):
@@ -462,9 +529,55 @@ class Helper:
             # Report the new state soon, once the media app has reacted
             asyncio.get_running_loop().call_later(0.4, self.refresh_event.set)
 
+    # ------------------------------------------------------------ Claude Code and calls
+
+    def claude_message(self):
+        return self.claude.message(hooked=self.claude.hooked or claude_setup.status()[0])
+
+    def _claude_changed(self):
+        asyncio.get_running_loop().create_task(self.send(self.claude_message()))
+
+    def _claude_alert(self, kind, name, text):
+        log.info("claude alert (%s): %s", kind, text)
+        loop = asyncio.get_running_loop()
+        loop.create_task(self.send({"type": "claude_alert", "kind": kind, "name": name, "text": text}))
+        loop.create_task(self.announce(text))
+
+    async def call_loop(self):
+        """Every 2 s: is Teams using the microphone?"""
+        if not call_watch.IS_WINDOWS:
+            return
+        while not self.stop_event.is_set():
+            try:
+                on = call_watch.in_call(await asyncio.to_thread(call_watch.apps_using_mic))
+                if on != self.on_call:
+                    await self._set_call(on)
+            except Exception as e:
+                log.warning("call check failed: %s", e)
+            await self._sleep(2)
+
+    async def _set_call(self, on):
+        self.on_call = on
+        log.info("Teams call %s", "started" if on else "ended")
+        await self.send({"type": "call", "on": on})
+        try:
+            if on:
+                info = await self.media.get_info()
+                if info.get("playing"):
+                    await self.media.set_playing(False)
+                    self._paused_for_call = True
+            elif self._paused_for_call:
+                self._paused_for_call = False
+                await self.media.set_playing(True)
+        except Exception as e:
+            log.warning("music during call: %s", e)
+
     async def announce(self, text):
         """Something on Gorgi is due: a pop-up, and Gorgi's voice says it."""
         if not text:
+            return
+        if self.on_call:  # quiet during calls: Gorgi's screen shows it
+            log.info("on a call, not saying: %s", text)
             return
         self.on_notify("Gorgi", text)
         if self.speak is None:
@@ -755,8 +868,9 @@ def make_voice(config):
         voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
         return Speaker(voice, pitch="+5Hz")
 
-    def factory(send, media, timekeeper):
-        return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper)
+    def factory(send, media, timekeeper, extra_context=None):
+        return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper,
+                            extra_context=extra_context)
 
     async def speak(text):
         await speaker().say(text)
@@ -806,6 +920,12 @@ def self_test(out_path):
         import progress_window  # noqa: F401
         import conversation  # noqa: F401
         import timekeeper  # noqa: F401
+        import claude_watch  # noqa: F401
+        import claude_setup as cs
+        import call_watch as cw
+
+        lines.append(f"mic in use by: {cw.apps_using_mic()}")
+        lines.append(f"claude code connected: {cs.status()}")
         import settings_window  # noqa: F401
 
         import updater as upd
@@ -907,7 +1027,16 @@ def main():
     media = make_media()
     voice_factory, speak = make_voice(config)
     timekeeper = TimeKeeper()
-    make_conversation = (lambda send: voice_factory(send, media, timekeeper)) if voice_factory else None
+    helper = None
+
+    def extra_context():
+        lines = [helper.claude.summary()] if helper else []
+        if helper and helper.on_call:
+            lines.append("Your friend is on a Teams call right now.")
+        return "\n".join(x for x in lines if x)
+
+    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context))
+                         if voice_factory else None)
     helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak)
     icon = None
     if not args.no_tray:
@@ -916,7 +1045,8 @@ def main():
             show_settings(config)  # first run: ask for the Ollama key
     log.info("%s started", APP_NAME)
     try:
-        loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop()))
+        loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(), helper.claude.serve(),
+                                               helper.call_loop()))
     except KeyboardInterrupt:
         pass
     finally:

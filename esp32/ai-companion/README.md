@@ -58,8 +58,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
-- **Swipe sideways** in the middle of the screen to change screens. Order: **Music ← Face →
-  Weather → Time → Sketch**. Gorgi stays on the screen you leave it on (it switches to its face
+- **Change screens**: tap an icon at the top (♪ music, face, weather, time, sketch, Claude), or swipe
+  sideways in the middle of the screen. Order: **Music ← Face → Weather → Time → Sketch → Claude**. Gorgi stays on the screen you leave it on (it switches to its face
   when you talk to it or when a timer or reminder goes off).
 - **Music screen** (swipe right): album art, the song, and how far into it you are.
 - **Weather screen** (swipe left): now and the next 7 days. Tap the city name to pick another
@@ -84,6 +84,21 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
     last 10: tap one to open it, **New page** for a fresh one, the small **x** to delete one. When there
     are more than 10, the oldest is removed.
   - The first start after installing 4.0 takes a few seconds longer: Gorgi prepares its storage once.
+- **Claude screen** (the spark icon): your Claude Code sessions on the PC (working, waiting for you,
+  done) and your plan usage (5-hour and weekly, with reset times). Needs Gorgi Helper with
+  **Settings → Connect Claude Code**. When a session needs you, or finishes after working a while,
+  Gorgi shows it on any screen and the PC says it; tap to dismiss. An orange dot on the icon means
+  a session is waiting for you.
+- **On a call**: when Teams uses your microphone, the top bar shows **On a call** in red, music pauses
+  (and resumes after), Gorgi stays quiet (no spoken alerts), and a red **Mute / unmute** button next to
+  the face toggles your Teams mic (Teams' Ctrl+Shift+M shortcut).
+- **Pull-down panel**: swipe down from the top bar (a tap there still switches screens). Push it back up or
+  tap outside to close it.
+  - **Sleep** turns the screen off. Any touch wakes Gorgi (that first touch only wakes it). A timer, reminder or
+    "Claude needs you" turns the screen on to show it, and it goes back to sleep once you tap it.
+  - **Update** (when a new version is out; a small orange dot at the top means one is waiting): one tap updates
+    the PC helper first, then Gorgi, by itself.
+  - A status line: Gorgi's version, Wi-Fi signal, and which PC is connected.
 - **The clock** comes from the internet (Israel time, summer/winter time automatic), or from the PC
   until the internet answers.
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.
@@ -104,6 +119,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/wallclock.cpp` | The time of day from the internet (Israel time zone) |
 | `src/sketch.cpp` | The Sketch screen: toolbar, paper, gallery, packing drawings small |
 | `src/sketch_store.cpp` | Saves and loads sketches in flash (LittleFS) |
+| `src/tabs.cpp` | The screen icons in the top bar, and the Teams mute button |
+| `src/claude_screen.cpp` | The Claude screen: sessions and usage |
 | `src/gfx.cpp` | Smooth-edged drawing (circles, rounded boxes, icons, text) |
 | `src/display.cpp` | Draws in fast memory, strip by strip, then copies to the screen |
 | `src/gfont_data.cpp` | Smooth text, made from the Nunito font by `tools/make_fonts.py` |

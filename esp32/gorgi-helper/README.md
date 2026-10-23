@@ -33,6 +33,9 @@ Right-click the Gorgi icon and choose:
 
 **Check for updates** in the same menu checks right away.
 
+Or update from Gorgi itself: swipe down from Gorgi's top bar and tap **Update**. The helper updates first,
+restarts, then sends the new version to Gorgi by itself.
+
 Gorgi only accepts updates from the helper it paired with (the first one that connected to it).
 To pair it with a different PC, hold Gorgi's clock for 5 seconds: it forgets its Wi-Fi and the
 paired helper, then set it up again.
@@ -74,6 +77,23 @@ Ask Gorgi, for example:
 They're kept on Gorgi itself, so they go off even when the PC is off. When one is due, Gorgi shows it,
 and if the helper is running, a pop-up appears and Gorgi's voice says it on the PC (music pauses for a moment).
 You can see, pause and delete them on Gorgi's **Time** screen too.
+
+## Claude Code
+
+Gorgi can show your Claude Code sessions (working / waiting for you / done) and your plan usage.
+Open **Settings** and click **Connect Claude Code**. This adds small "hooks" and a status line to
+Claude Code's settings (`%USERPROFILE%\.claude\settings.json`; your own settings are kept and a backup is
+made). Restart open Claude Code sessions afterwards. **Disconnect** in the same place removes them.
+
+- When a session needs your OK or answer, or finishes after working a while, Gorgi shows it and says it.
+- Claude Code's status line shows the model and usage (e.g. `Opus | 5h 62% | week 23%`).
+- Ask Gorgi "how much Claude usage do I have left?" or "is Claude done?".
+
+## Teams calls
+
+When Teams uses your microphone, Gorgi shows **On a call**, pauses your music (and resumes it after
+the call), and doesn't speak alerts or show pop-ups. The red button on Gorgi presses Teams' mute
+shortcut (Ctrl+Shift+M) for you.
 
 ## If it doesn't connect
 

@@ -12,7 +12,7 @@ namespace ui {
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 44;
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute };
 
 struct MediaInfo {
   String title;
@@ -40,10 +40,15 @@ void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
 void showPressed(Target t);  // brief highlight on a button
-// Screens: dots in the top bar show which one is on. position is the screen's
-// number (0..count-1); in between while sliding.
-void setPages(int count, float position);
-void setPagePosition(float position);
+// Screens: icons in the top bar (tabs.h), tap one to go there.
+void setTabs(const uint8_t* icons, int count);
+void setTab(int current);
+void setTabBadges(uint32_t badges);  // bit i: a small dot on tab i
+int tabAt(int x, int y);             // -1 if none
+// The big Teams mute button next to the face (only during a call)
+void setCallButton(bool visible);
+// The small handle at the top (pull down for the panel); dot = an update is waiting
+void setUpdateDot(bool on);
 // Draws the subtitle right away (used to draw the face screen into a picture)
 void drawSubtitleNow();
 // The subtitle only shows on the face screen
