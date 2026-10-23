@@ -87,6 +87,8 @@ int timeConfirm = -1;        // reminder row asking "Delete?"
 String timeNote;             // short message at the top of the Time screen
 uint32_t timeNoteUntil = 0;
 
+bool sketchFull = true;  // the sketch screen needs drawing in full
+
 // Something is due: Gorgi shows it until tapped (or for 10 minutes)
 bool alertOn = false;
 uint32_t alertStart = 0, alertNudge = 0, alertMoodBack = 0;
@@ -227,7 +229,6 @@ void drawFrame(uint32_t now);
 void sendTimeList();
 void sketchShown();
 void sketchHidden();
-bool sketchFull = true;  // the sketch screen needs drawing in full
 
 // Switches screens right away (no animation)
 void showPage(Page p) {
