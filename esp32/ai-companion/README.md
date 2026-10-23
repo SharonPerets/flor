@@ -69,8 +69,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
     tap its small **x** to cancel it.
   - Tap the **25 min** button to change the focus length (15, 25, 45, 60), then **Start focus**.
     Gorgi doesn't comment on new songs while you focus, and cheers when the session ends.
-  - **Coming up** lists the next reminders. Tap one to delete it. Reminders are added by voice
-    ("remind me at 5 to call mom"; see the helper's README).
+  - **Next up** lists the next reminders. Tap one to delete it. To add one, tap **Ask me** and say it
+    ("remind me at 5 to call mom"; see the helper's README). Ask me works for timers too.
   - While something counts down, a small countdown shows next to the clock on every screen.
   - When something is due, Gorgi wakes up, shows it and bounces every 30 s. **Tap anywhere** to stop it.
     The PC says it out loud if Gorgi Helper is running.

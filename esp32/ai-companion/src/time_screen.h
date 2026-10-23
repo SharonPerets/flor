@@ -58,7 +58,7 @@ void draw(gfx::Canvas& c, const View& v);
 // Seconds as "9:41" or "1:05:00"
 void formatLeft(uint32_t seconds, char* out, int size);
 
-enum class Tap { None, Ring, RingClose, QuickTimer, FocusLength, FocusStart, Row, Delete, Keep };
+enum class Tap { None, Ring, RingClose, QuickTimer, FocusLength, FocusStart, Row, Delete, Keep, AskMe };
 struct TapResult {
   Tap what;
   int index;  // ring / row number, or minutes for QuickTimer

@@ -20,6 +20,8 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - **Plan first, get approval, then code.** The user asked for full plans before any code is written,
   and likes to choose between options (give a recommendation). Step by step, one release per step.
 - The user is not a programmer: explain in plain language, short, outcome first. Mobile app.
+- **Updates go over Wi-Fi only** (the user asked, after 3.8.90): ship every change as a normal release
+  (3.9, 3.9.1, ...), not a USB test build.
 - The user tests on the real device and reports back. You can't see the device: ask for photos or
   the Serial log when something's off.
 - Personality: Gorgi is a cheerful buddy, English. The user does **not** want greetings or break reminders.
@@ -45,7 +47,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   Updates go over Wi-Fi; no cable.
 - **Test builds** (`gorgi-test.yml`, triggered by `esp32/TEST_VERSION`) publish a GitHub *pre-release*
   that the helper never offers; flashed by USB. Use a version between releases (e.g. 3.8.90) so the next
-  real release is still "newer". Only with the user's OK.
+  real release is still "newer". Only with the user's OK (they prefer Wi-Fi releases now).
 - Commit trailer: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and the session link.
   Develop on branch `claude/esp32-touch-screen-software-emaips` (or what the session says).
 

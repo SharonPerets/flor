@@ -485,6 +485,7 @@ void onWifi(pclink::WifiState s) {
 // ---------- time: timers, focus sessions, reminders ----------
 
 uint32_t msSince(uint32_t now, uint32_t since);
+void onTap(ui::Target target);
 
 void showTimeNote(const String& text) {
   timeNote = text;
@@ -636,6 +637,10 @@ void onTimeTap(int x, int y) {
     case timescreen::Tap::Keep:
       timeConfirm = -1;
       timeDirty = true;
+      break;
+    case timescreen::Tap::AskMe:  // talk right from here: back to the face, listening
+      showPage(Page::Face);
+      if (!inConversation) onTap(ui::Target::Face);
       break;
     case timescreen::Tap::None:
       break;

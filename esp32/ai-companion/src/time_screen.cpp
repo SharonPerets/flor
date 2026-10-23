@@ -34,6 +34,8 @@ constexpr float FSTART_X = FLEN_X + FLEN_W + BTN_GAP, FSTART_W = 528 - FSTART_X;
 // Right side: reminders
 constexpr float PANEL_X = 544, PANEL_Y = 56, PANEL_W = 240, PANEL_H = 308;
 constexpr float ROW_Y = 102, ROW_H = 56;
+// "Ask me" button (starts talking) next to the "Coming up" title
+constexpr float ASK_X = 672, ASK_Y = 64, ASK_W = 98, ASK_H = 36;
 
 struct Geo {
   float cx, cy, r, thick;
@@ -137,6 +139,18 @@ void cycleIcon(Canvas& c, float cx, float cy, float r, const Color& col) {
   c.fillPolygon(b, 3, col);
 }
 
+void micIcon(Canvas& c, float cx, float cy, const Color& col) {
+  c.fillCapsule(cx, cy - 5.5f, cx, cy - 1.0f, 3.2f, col);
+  c.strokeArc(cx, cy - 1.0f, 6.2f, 1.8f, 15, 165, col);
+  c.fillCapsule(cx, cy + 5.2f, cx, cy + 7.5f, 0.9f, col);
+}
+
+void askButton(Canvas& c) {
+  c.fillRRect(ASK_X, ASK_Y, ASK_W, ASK_H, ASK_H / 2, ACCENT);
+  micIcon(c, ASK_X + 22, ASK_Y + ASK_H / 2, DARK_TEXT);
+  c.text(gfont::SMALL, "Ask me", ASK_X + 36, (int)(ASK_Y + 23), DARK_TEXT);
+}
+
 void ring(Canvas& c, const Ring& rg, const Geo& g) {
   const Color& col = rg.paused ? PAUSED_C : (rg.kind == FOCUS ? FOCUS_C : ACCENT);
   c.strokeArc(g.cx, g.cy, g.r, g.thick, 0, 360, TRACK);
@@ -172,7 +186,7 @@ void ring(Canvas& c, const Ring& rg, const Geo& g) {
 void emptyRings(Canvas& c) {
   clockIcon(c, LEFT_CX, 112, 30, MUTED);
   centered(c, gfont::HEADLINE, "No timers running", LEFT_CX, 186, TEXT);
-  centered(c, gfont::SMALL, "Tap a button below, or ask me:", LEFT_CX, 220, MUTED);
+  centered(c, gfont::SMALL, "Tap a button below, or tap Ask me and say:", LEFT_CX, 220, MUTED);
   centered(c, gfont::SMALL, "\"Set a timer for 10 minutes\"", LEFT_CX, 244, MUTED);
 }
 
@@ -222,13 +236,14 @@ void reminders(Canvas& c, const View& v) {
   c.fillRRect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 20, BORDER);
   c.fillRRect(PANEL_X + 1, PANEL_Y + 1, PANEL_W - 2, PANEL_H - 2, 19, PANEL);
   const float x = PANEL_X + 18, w = PANEL_W - 36;
-  c.text(gfont::TITLE, "Coming up", x, (int)PANEL_Y + 34, TEXT);
+  c.text(gfont::TITLE, "Next up", x, (int)PANEL_Y + 34, TEXT);
+  askButton(c);
 
   char buf[72];
   if (!v.clockKnown) {
     c.text(gfont::SMALL, "Waiting for the time...", x, (int)ROW_Y + 30, MUTED);
   } else if (v.rowCount == 0) {
-    const char* lines[] = {"No reminders yet.", "Ask me, like:", "\"Remind me at 5", "to call mom\""};
+    const char* lines[] = {"No reminders yet.", "Tap Ask me and say:", "\"Remind me at 5", "to call mom\""};
     for (int i = 0; i < 4; ++i) c.text(gfont::SMALL, lines[i], x, (int)ROW_Y + 26 + i * 24, MUTED);
   }
   for (int i = 0; i < v.rowCount; ++i) {
@@ -285,6 +300,7 @@ void draw(Canvas& c, const View& v) {
 TapResult tap(int x, int y, const View& v) {
   TapResult t;
   // reminders
+  if (inside(x, y, ASK_X - 8, ASK_Y - 10, ASK_W + 16, ASK_H + 14)) return {Tap::AskMe, 0};
   if (x >= PANEL_X - 8) {
     for (int i = 0; i < v.rowCount; ++i) {
       const float ry = ROW_Y + i * ROW_H;
