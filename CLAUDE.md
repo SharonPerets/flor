@@ -65,12 +65,38 @@ swiping sideways, instant switch: **Music ← Face → Weather**. Music screen s
 240x240 RGB565) and song progress. Weather from Open-Meteo for 16 Israeli cities (Nahariya default),
 also given to the AI. Screens return to the face after 45 s.
 
-## Next steps (agreed order; plan each one with the user before coding)
+## Next steps (chosen by the user, in this order; plan each one with the user before coding)
 
-1. **Time screen** (one screen, after Weather): timers, 25-min focus sessions, and reminders, set by
-   voice ("remind me in 20 minutes...", via AI tags like the memory tags) or by touch. Gorgi has no
-   speaker: when due, the face reacts and the PC says it out loud if the helper is connected.
-2. **Sketch pad** screen: draw with a finger, a few colours, eraser, save sketches.
-3. **Night clock** (big dim clock at night) and **"Hey Gorgi" wake word** (local: VAD + Whisper name check,
-   on/off setting).
-- Shelved: Claude Code usage screen (user said "forget about this for now").
+Planned screen order when all exist: **Music ← Face → Weather → Time → Sketch** (dots in the top bar).
+
+1. **Time screen** - ONE screen for both (the user chose this over two screens):
+   - **Timers** ("set a timer for 10 minutes", or by touch) with big countdown rings.
+   - **Focus sessions** (e.g. 25 minutes), Gorgi cheers when one ends.
+   - **Reminders**: "remind me in 20 minutes to take the laundry out", "every day at 8 remind me...".
+     A list of what's coming up; add/delete by touch too.
+   - Set by voice through the AI (tags like the memory tags, e.g. `[timer: ...]`, `[remind: ...]`).
+   - Gorgi has no speaker: when something is due, Gorgi wakes up, the face reacts and the screen shows it;
+     the PC says it out loud if the helper is connected. Decide with the user where reminders are stored
+     (on Gorgi so they fire without the PC, or on the PC).
+2. **Sketch pad** screen: draw with a finger, a few colours, eraser, save ~10 sketches.
+   Optional bonus: "Gorgi, what did I draw?" - the AI guesses (needs a model that can see pictures; check first).
+3. **Night clock**: at night Gorgi shows a big dim clock instead of just sleeping.
+4. **"Hey Gorgi" wake word**: talk without tapping. Local on the PC (voice detection + Whisper checking
+   for the name and sound-alikes), with an on/off setting.
+
+## Ideas list (discussed, not chosen yet - offer them again when asked "what next?")
+
+- **Petting reactions**: rub the face = happy, poke = grumpy.
+- **PC status screen**: CPU, memory, temperature, network speed as live gauges (from the helper).
+- **Photo frame**: photos from a PC folder when Gorgi is idle/asleep.
+- **Calendar**: today's events from the PC calendar; Gorgi mentions what's next.
+- **Games**: e.g. tic-tac-toe against Gorgi, with happy/sad faces when it wins/loses.
+- **Claude Code usage screen** (usage of a couple of Claude Code accounts): **shelved** - the user said
+  "forget about this for now". Notes if it comes back: token/cost totals are reliable from local
+  Claude Code logs on that PC; plan-limit percentages (like /usage) would need an unofficial API.
+- **Smooth sliding between screens**: tried twice (3.7 slide, 3.7.9x new driver) and dropped; see lessons.
+
+Not wanted (don't suggest again): greetings, break reminders.
+
+**Always feel free to suggest new ideas** when the user asks what to build next: give a short list with a
+recommendation, then let the user pick, then plan it.
