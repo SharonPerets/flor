@@ -47,6 +47,8 @@ void setTabBadges(uint32_t badges);  // bit i: a small dot on tab i
 int tabAt(int x, int y);             // -1 if none
 // The big Teams mute button next to the face (only during a call)
 void setCallButton(bool visible);
+// The small handle at the top (pull down for the panel); dot = an update is waiting
+void setUpdateDot(bool on);
 // Draws the subtitle right away (used to draw the face screen into a picture)
 void drawSubtitleNow();
 // The subtitle only shows on the face screen

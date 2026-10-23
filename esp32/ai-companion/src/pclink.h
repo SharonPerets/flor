@@ -22,6 +22,8 @@
 //                     "since":1761245100}],"usage":{"five":62.5,"five_reset":1761250000,"week":23,"week_reset":..,"at":..}}
 //                    {"type":"claude_alert","name":"flor","kind":"waiting"|"done","text":"Claude needs you in flor"}
 //                    {"type":"call","on":true}       (a Teams call started / ended)
+//                    {"type":"update_info","available":true,"version":"4.2","busy":false}
+//                    {"type":"update_status","text":"Updating the PC helper..."}
 //                    {"type":"voice","state":"listening"|"thinking"|"idle","followup":false}
 //                    {"type":"heard","text":"what you said"}
 //                    {"type":"say","text":"Gorgi's answer","mood":"happy"}
@@ -30,6 +32,8 @@
 //                    {"type":"cmd","action":"playpause"|"next"|"prev"}
 //                    {"type":"cmd","action":"volume","value":40}
 //                    {"type":"cmd","action":"teams_mute"}   (the mute button during a call)
+//                    {"type":"cmd","action":"update"}       (Update in the pull-down panel)
+//                    {"type":"cmd","action":"check_updates"} (the panel was opened)
 //                    {"type":"talk"}     (face tapped: start a conversation)
 //                    {"type":"cancel"}   (face tapped again: stop it)
 //                    {"type":"weather","city":"Nahariya","now":{...},"days":[...]}
@@ -80,6 +84,7 @@ void loop();
 WifiState wifiState();
 bool helperConnected();
 String ipAddress();
+int wifiRssi();  // Wi-Fi signal in dBm (0 if not connected)
 
 // Send a command to the PC. Does nothing if the helper isn't connected.
 void sendCommand(const char* action, int value = -1);

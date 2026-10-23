@@ -4,6 +4,7 @@
 
 #include "display.h"
 #include "gfont.h"
+#include "panel.h"
 #include "tabs.h"
 
 namespace ui {
@@ -62,6 +63,7 @@ uint8_t tabIcons[tabs::MAX_TABS];
 int tabCount = 0, tabCurrent = 0;
 uint32_t tabBadges = 0;
 bool callVisible = false, callShown = false, dirtyCall = false;
+bool updateDot = false;
 bool subtitleVisible = true;
 bool dirtyTabs = true;
 bool dirtyClock = true, dirtyStatus = true, dirtySub = true;
@@ -155,7 +157,10 @@ void drawStatus(Canvas& c) {
   c.text(gfont::SMALL, text.c_str(), x + 38, 29, statusColor);
 }
 
-void drawTabs(Canvas& c) { tabs::draw(c, tabIcons, tabCount, tabCurrent, tabBadges); }
+void drawTabs(Canvas& c) {
+  tabs::draw(c, tabIcons, tabCount, tabCurrent, tabBadges);
+  panel::drawHandle(c, updateDot);
+}
 
 void drawCall(Canvas& c) {
   if (callVisible) tabs::drawCallButton(c, pressed == Target::CallMute);
@@ -275,6 +280,12 @@ void setTabBadges(uint32_t badges) {
 }
 
 int tabAt(int x, int y) { return tabs::at(x, y, tabCount); }
+
+void setUpdateDot(bool on) {
+  if (on == updateDot) return;
+  updateDot = on;
+  dirtyTabs = true;
+}
 
 void setCallButton(bool visible) {
   if (visible == callVisible) return;

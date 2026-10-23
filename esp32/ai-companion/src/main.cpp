@@ -24,6 +24,7 @@
 #include "display.h"
 #include "face.h"
 #include "music_screen.h"
+#include "panel.h"
 #include "pclink.h"
 #include "sketch.h"
 #include "sketch_store.h"
@@ -103,6 +104,15 @@ String alertSession;       // ...for this session
 
 // A Teams call is going on (the helper notices the microphone)
 bool callOn = false;
+
+// The pull-down panel (swipe down from the top bar): Sleep, Update, status
+bool panelOpen = false, panelDirty = false;
+panel::View panelView;
+int touchEndY = 0;
+bool screenOff = false;        // put to sleep from the panel: backlight off until touched
+bool sleepAfterAlert = false;  // an alert woke the screen: back to sleep once it's dismissed
+bool updateAvailable = false, updateBusy = false;
+String updateVersion;
 
 // Something is due: Gorgi shows it until tapped (or for 10 minutes)
 bool alertOn = false;
@@ -246,6 +256,8 @@ void markPageDirty(Page p) {
 }
 
 void drawFrame(uint32_t now);
+void closePanel();
+void goToSleep();
 void sendTimeList();
 void sketchShown();
 void sketchHidden();
@@ -384,6 +396,11 @@ void onUpdate(int percent, const String& message) {
   }
   if (!updating) {
     updating = true;
+    if (panelOpen) closePanel();
+    if (screenOff) {
+      screenOff = false;
+      board::setBacklight(true);
+    }
     if (inConversation) endConversation();
     showPage(Page::Face);
     face.setMood(Mood::Happy);
@@ -465,7 +482,8 @@ void onHelper(bool connected, const String& name) {
     claudeDirty = true;
     ui::setTabBadges(0);
     showMediaPlaceholder();
-    if (!isSleeping()) react(Mood::Sad, "I lost my connection to the PC.");
+    if (updateBusy) react(Mood::Happy, "The PC helper is updating. Back in a moment!");
+    else if (!isSleeping()) react(Mood::Sad, "I lost my connection to the PC.");
   }
 }
 
@@ -545,7 +563,17 @@ const char* dueKindName(alarms::Due::Kind k) {
   }
 }
 
+// An alert while the screen is off: turn it on, and back off once it's dismissed
+void alertWakesScreen() {
+  if (panelOpen) closePanel();
+  if (!screenOff) return;
+  screenOff = false;
+  sleepAfterAlert = true;
+  board::setBacklight(true);
+}
+
 void showAlert(const alarms::Due& d) {
+  alertWakesScreen();
   const uint32_t now = millis();
   alertOn = true;
   alertStart = alertNudge = now;
@@ -571,6 +599,11 @@ void showAlert(const alarms::Due& d) {
 void endAlert(bool tapped) {
   alertOn = false;
   alertClaude = false;
+  if (sleepAfterAlert) {  // it was asleep before: back to sleep
+    sleepAfterAlert = false;
+    goToSleep();
+    return;
+  }
   face.setTalking(false);
   showIdleStatus();
   setPhase(Phase::Idle);
@@ -995,6 +1028,7 @@ void updateClaudeBadge() {
 }
 
 void showClaudeAlert(const String& name, bool waiting, const String& text) {
+  alertWakesScreen();
   const uint32_t now = millis();
   alertOn = true;
   alertClaude = true;
@@ -1043,6 +1077,20 @@ void onOther(const char* type, JsonObjectConst msg) {
     if (inConversation || updating || (alertOn && !alertClaude)) return;  // the badge still shows it
     const bool waiting = strcmp(msg["kind"] | "done", "waiting") == 0;
     showClaudeAlert(String((const char*)(msg["name"] | "")), waiting, String((const char*)(msg["text"] | "")));
+  } else if (strcmp(type, "update_info") == 0) {
+    updateAvailable = msg["available"] | false;
+    updateBusy = msg["busy"] | false;  // the helper says when it's done (or failed)
+    updateVersion = (const char*)(msg["version"] | "");
+    ui::setUpdateDot(updateAvailable);
+    panelDirty = true;
+  } else if (strcmp(type, "update_status") == 0) {
+    updateBusy = true;
+    snprintf(panelView.busy, sizeof panelView.busy, "%s", (const char*)(msg["text"] | ""));
+    panelDirty = true;
+    if (!alertOn && !inConversation) {
+      ui::setSubtitle(String("Updating: ") + panelView.busy);
+      moodHoldUntil = millis() + 60000;
+    }
   } else if (strcmp(type, "call") == 0) {
     callOn = msg["on"] | false;
     ui::setCallButton(callOn);
@@ -1061,6 +1109,63 @@ void drawClaude(uint32_t now) {
     claudeView.sessions[i].ago = t && claudeSince[i] ? t - claudeSince[i] : -1;
   claudeView.usage.age = t && claudeUsageAt ? t - claudeUsageAt : -1;
   display::render(claudescreen::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { claudescreen::draw(c, claudeView); });
+}
+
+// ---------- pull-down panel, sleep ----------
+
+void openPanel() {
+  panelOpen = true;
+  panelDirty = true;
+  pclink::sendCommand("check_updates");  // so "Update" is up to date
+}
+
+void closePanel() {
+  if (!panelOpen) return;
+  panelOpen = false;
+  markPageDirty(page);  // the screen underneath comes back
+}
+
+void goToSleep() {
+  screenOff = true;
+  face.setTalking(false);
+  face.setMood(Mood::Asleep);
+  ui::setSubtitle("");
+  showIdleStatus();
+  setPhase(Phase::Asleep);
+  board::setBacklight(false);
+}
+
+void wakeScreen() {
+  screenOff = false;
+  board::setBacklight(true);
+  wakeUp();
+}
+
+void onPanelRelease() {
+  if (touchEndY - touchY0 < -40) {  // pushed back up
+    closePanel();
+    return;
+  }
+  switch (panel::tap(touchX0, touchY0)) {
+    case panel::Tap::Sleep:
+      closePanel();
+      goToSleep();
+      break;
+    case panel::Tap::Update:
+      if (!updateAvailable || updateBusy || !pclink::helperConnected()) return;
+      pclink::sendCommand("update");
+      updateBusy = true;
+      snprintf(panelView.busy, sizeof panelView.busy, "Starting...");
+      closePanel();
+      showPage(Page::Face);
+      say(Mood::Happy, "Updating! The PC helper goes first, then me.");
+      break;
+    case panel::Tap::Outside:
+      closePanel();
+      break;
+    case panel::Tap::None:
+      break;
+  }
 }
 
 // ---------- touch ----------
@@ -1145,6 +1250,14 @@ void onLongPressFace() {
 void handleTouch(uint32_t now) {
   TouchPoint tp = board::readTouch();
 
+  if (tp.pressed && !touching && screenOff) {  // asleep: a touch only wakes Gorgi up
+    touching = true;
+    touchUsed = true;
+    touchTarget = ui::Target::None;
+    lastActivity = now;
+    wakeScreen();
+    return;
+  }
   if (tp.pressed && !touching && alertOn) {  // any touch stops what's going off
     touching = true;
     touchUsed = true;
@@ -1157,6 +1270,21 @@ void handleTouch(uint32_t now) {
     if (!tp.pressed) {
       touching = false;
       touchUsed = false;
+    }
+    return;
+  }
+
+  if (panelOpen) {  // the panel takes every touch until it closes
+    if (tp.pressed && !touching) {
+      touching = true;
+      touchX0 = tp.x;
+      touchY0 = touchEndY = tp.y;
+      lastActivity = now;
+    } else if (tp.pressed) {
+      touchEndY = tp.y;
+    } else if (touching) {
+      touching = false;
+      onPanelRelease();
     }
     return;
   }
@@ -1193,6 +1321,13 @@ void handleTouch(uint32_t now) {
     lastActivity = now;
     if (sketchStroking) {  // drawing with the finger
       sketchMove(tp.x, tp.y);
+      return;
+    }
+    // pulling down from the top bar opens the panel
+    if (touchY0 < ui::FACE_Y && tp.y - touchY0 > 50 && abs(tp.y - touchY0) > abs(tp.x - touchX0)) {
+      touchUsed = true;
+      touchTarget = ui::Target::None;
+      openPanel();
       return;
     }
     const int dx = tp.x - touchX0;
@@ -1332,7 +1467,31 @@ void fatal(const char* msg) {
   while (true) delay(1000);
 }
 
+void drawPanel() {
+  panelView.update = updateBusy ? panel::Update::Busy
+                     : updateAvailable ? panel::Update::Available
+                     : pclink::helperConnected() ? panel::Update::UpToDate : panel::Update::Unknown;
+  snprintf(panelView.newVersion, sizeof panelView.newVersion, "%s", updateVersion.c_str());
+  const int rssi = pclink::wifiRssi();
+  const char* wifi = rssi == 0 ? "no Wi-Fi" : rssi > -60 ? "Wi-Fi good" : rssi > -72 ? "Wi-Fi OK" : "Wi-Fi weak";
+  if (pclink::helperConnected())
+    snprintf(panelView.status, sizeof panelView.status, "Gorgi %s  -  %s  -  PC: %s connected", GORGI_VERSION, wifi,
+             ui::toAscii(pcName).c_str());
+  else
+    snprintf(panelView.status, sizeof panelView.status, "Gorgi %s  -  %s  -  PC not connected", GORGI_VERSION, wifi);
+  if (!pclink::helperConnected() && !updateBusy) panelView.update = panel::Update::Unknown;
+  display::render(panel::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { panel::draw(c, panelView); });
+}
+
 void drawFrame(uint32_t now) {
+  if (panelOpen) {  // the screen underneath waits until the panel closes
+    if (panelDirty) {
+      panelDirty = false;
+      drawPanel();
+    }
+    ui::update(now);
+    return;
+  }
   if (page == Page::Face) {
     face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
   } else if (page == Page::Weather) {

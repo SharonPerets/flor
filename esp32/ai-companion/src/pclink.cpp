@@ -267,6 +267,7 @@ void loop() {
 WifiState wifiState() { return state; }
 bool helperConnected() { return helperClient >= 0; }
 String ipAddress() { return WiFi.localIP().toString(); }
+int wifiRssi() { return WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0; }
 
 void sendCommand(const char* action, int value) {
   if (helperClient < 0) return;

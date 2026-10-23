@@ -290,9 +290,57 @@ class Helper:
             return
         self.offer_updates(manual)
 
+    def _send_soon(self, msg):
+        try:
+            asyncio.get_running_loop().create_task(self.send(msg))
+        except RuntimeError:  # not in the event loop (tray thread)
+            pass
+
+    def update_info(self):
+        """For Gorgi's pull-down panel: is there something to update?"""
+        return {"type": "update_info", "available": self.helper_update_available or self.gorgi_update_available,
+                "version": self.latest.version if self.latest else "", "busy": self.updating}
+
+    async def update_all(self):
+        """Gorgi's "Update" button: the helper first (it restarts), then Gorgi."""
+        if self.updating:
+            return
+        if self.helper_update_available:
+            # after the restart, the new helper carries on with Gorgi (see offer_updates)
+            self.config["pending_gorgi_update"] = True
+            save_config(self.config)
+            await self.send({"type": "update_status", "text": "Updating the PC helper..."})
+            await self.update_helper()
+        elif self.gorgi_update_available:
+            await self.send({"type": "update_status", "text": "Sending the update to Gorgi..."})
+            await self.update_gorgi()
+        await self.send(self.update_info())  # done (or failed): Gorgi stops showing "Updating"
+
+    async def check_updates_soon(self):
+        """Gorgi's panel was opened: check again, at most every 10 minutes."""
+        if time.monotonic() - getattr(self, "_last_check", -1e9) > 600:
+            self._last_check = time.monotonic()
+            await self.check_updates()
+        else:
+            await self.send(self.update_info())
+
     def offer_updates(self, manual=False):
         """Tells the user about new versions (once per version, or every time when asked)."""
         self.on_changed()
+        self._send_soon(self.update_info())
+        if self.config.pop("pending_gorgi_update", False):  # the helper was just updated from Gorgi's panel
+            save_config(self.config)
+            if self.gorgi_update_available:
+                log.info("carrying on with Gorgi's update")
+                self._send_soon({"type": "update_status", "text": "Sending the update to Gorgi..."})
+                try:
+                    asyncio.get_running_loop().create_task(self.update_gorgi())
+                except RuntimeError:
+                    pass
+                return
+            if not self.latest:  # not checked yet: try again on the next offer
+                self.config["pending_gorgi_update"] = True
+                save_config(self.config)
         if not self.latest:
             if manual:
                 self.on_notify("No updates yet", f"Gorgi Helper {VERSION}")
@@ -466,6 +514,12 @@ class Helper:
             log.info("command from Gorgi: %s %s", action, msg.get("value", ""))
             if action == "teams_mute":
                 asyncio.get_running_loop().create_task(asyncio.to_thread(call_watch.teams_mute))
+                continue
+            if action == "update":
+                asyncio.get_running_loop().create_task(self.update_all())
+                continue
+            if action == "check_updates":
+                asyncio.get_running_loop().create_task(self.check_updates_soon())
                 continue
             if action in ("playpause", "next", "prev"):
                 await self.media.command(action)

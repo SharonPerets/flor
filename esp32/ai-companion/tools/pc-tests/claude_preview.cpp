@@ -4,6 +4,7 @@
 #include <vector>
 #include "claude_screen.h"
 #include "tabs.h"
+#include "panel.h"
 using namespace claudescreen;
 static void save(const char* name, int y0, int h, void (*fn)(gfx::Canvas&, void*), void* ctx) {
   const int W = 800;
@@ -29,5 +30,17 @@ int main() {
     tabs::draw(c, icons, 6, 1, 1u << 5);
     tabs::drawCallButton(c, false);
   }, nullptr);
-  printf("pictures: claude.ppm claude_empty.ppm tabs.ppm\n");
+  struct P { View v; panel::View pv; } pp{v, panel::View()};
+  pp.pv.update = panel::Update::Available; snprintf(pp.pv.newVersion, 16, "4.2");
+  snprintf(pp.pv.status, 96, "Gorgi 4.1  -  Wi-Fi good  -  PC: MY-PC connected");
+  save("panel.ppm", 0, 376, [](gfx::Canvas& c, void* p) {
+    P* x = (P*)p;
+    const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
+    tabs::draw(c, icons, 6, 5, 0);
+    panel::drawHandle(c, true);
+    draw(c, x->v);
+    gfx::Canvas pc; pc.begin(c.row(panel::AREA.y) , c.width(), panel::AREA.h, 0, panel::AREA.y);
+    panel::draw(pc, x->pv);
+  }, &pp);
+  printf("pictures: claude.ppm claude_empty.ppm tabs.ppm panel.ppm\n");
 }
