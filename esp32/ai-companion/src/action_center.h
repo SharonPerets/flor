@@ -27,11 +27,12 @@ struct Notice {
 
 struct View {
   char time[8] = "";     // "23:08"
-  char date[32] = "";    // "Friday, 24 October"
+  char date[32] = "";    // "Fri, 24 Oct"
   const weather::Data* wx = nullptr;
   int city = 0;
   const char* wxStatus = "";
-  bool cityPicker = false;  // choosing the weather city
+  bool weatherOpen = false;  // the forecast is open (tap the weather chip)
+  bool cityPicker = false;   // choosing the weather city
   Notice notices[MAX_NOTICES];
   int noticeCount = 0;
   bool busy = false;     // an update is running (its button shows "Updating...")
@@ -40,7 +41,7 @@ struct View {
 
 void draw(gfx::Canvas& c, const View& v);
 
-enum class Tap { None, Sleep, City, PickCity, ClosePicker, Action, Dismiss };
+enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss };
 struct TapResult {
   Tap what;
   int index;  // the notice, or the city for PickCity

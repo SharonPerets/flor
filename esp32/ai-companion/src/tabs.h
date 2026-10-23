@@ -27,8 +27,8 @@ constexpr gfx::Rect MINI{170, 424, 460, 44};
 void drawMiniPlayer(gfx::Canvas& c, const char* title, const char* artist, bool playing);
 
 // The Teams mute button on the right of the face
-constexpr float CALL_CX = 750, CALL_CY = 168, CALL_R = 38;
-constexpr gfx::Rect CALL_AREA{704, 112, 96, 160};
+constexpr float CALL_CX = 750, CALL_CY = 180, CALL_R = 38;
+constexpr gfx::Rect CALL_AREA{704, 124, 96, 160};
 void drawCallButton(gfx::Canvas& c, bool pressed);
 bool onCallButton(int x, int y);
 

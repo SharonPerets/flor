@@ -30,10 +30,11 @@ const Color HANDLE = gfx::rgb(0x3A4656);
 // Layout
 constexpr float PAD = 32;
 constexpr float SLEEP_X = 612, SLEEP_Y = 34, SLEEP_W = 156, SLEEP_H = 56;
+constexpr float WX_X = 456, WX_Y = 34, WX_W = 140, WX_H = 56;  // the weather chip
 constexpr float CARD_Y = 124, CARD_H = 292;
-constexpr float W_X = PAD, W_W = 318;                  // weather card
-constexpr float N_X = W_X + W_W + 20, N_W = 800 - PAD - N_X;  // notifications card
-constexpr float ROW_Y = CARD_Y + 56, ROW_H = 64, ROW_GAP = 10;
+constexpr float N_X = PAD, N_W = 800 - 2 * PAD;  // notifications: the whole width
+constexpr float ROW_Y = CARD_Y + 58, ROW_H = 66, ROW_GAP = 10;
+constexpr float BACK_X = 24, BACK_Y = 6, BACK_W = 108, BACK_H = 34;
 
 void card(Canvas& c, float x, float y, float w, float h) {
   c.fillRRect(x, y, w, h, 24, CARD_EDGE);
@@ -123,45 +124,35 @@ void noticeIcon(Canvas& c, uint8_t kind, float cx, float cy) {
 
 float actionW(const Notice& n) { return Canvas::textWidth(gfont::SMALL, n.action) + 32; }
 
-void weatherCard(Canvas& c, const View& v) {
-  card(c, W_X, CARD_Y, W_W, CARD_H);
-  const float x = W_X + 24;
-  const char* city = (v.city >= 0 && v.city < weather::CITY_COUNT) ? weather::CITIES[v.city].name : "";
-  c.text(gfont::SMALL, "WEATHER", x, (int)CARD_Y + 34, MUTED);
-  // the city: tap to change
-  const float tw = Canvas::textWidth(gfont::SMALL, city);
-  const float cx = W_X + W_W - 24 - tw - 18;
-  c.text(gfont::SMALL, city, cx, (int)CARD_Y + 34, ACCENT);
-  c.fillCapsule(cx + tw + 6, CARD_Y + 25, cx + tw + 10, CARD_Y + 29, 1.3f, ACCENT);
-  c.fillCapsule(cx + tw + 10, CARD_Y + 29, cx + tw + 14, CARD_Y + 25, 1.3f, ACCENT);
-
+void weatherChip(Canvas& c, const View& v) {
+  c.fillRRect(WX_X, WX_Y, WX_W, WX_H, WX_H / 2, CARD_EDGE);
   const weather::Data* d = v.wx;
+  const float cy = WX_Y + WX_H / 2;
   if (!d || !d->valid || d->city != v.city) {
-    c.text(gfont::SMALL, v.wxStatus && v.wxStatus[0] ? v.wxStatus : "Getting the weather...", x, (int)CARD_Y + 130,
-           MUTED);
-    return;
+    weather::drawIcon(c, 3, true, WX_X + 36, cy, 34);
+    c.text(gfont::TITLE, "--", WX_X + 64, (int)cy + 8, MUTED);
+  } else {
+    weather::drawIcon(c, d->code, d->isDay, WX_X + 36, cy, 34);
+    char buf[8];
+    snprintf(buf, sizeof buf, "%d", (int)lroundf(d->temp));
+    c.text(gfont::TITLE, buf, WX_X + 62, (int)cy + 8, TEXT);
+    const float dx = WX_X + 64 + Canvas::textWidth(gfont::TITLE, buf) + 4;
+    c.strokeArc(dx + 3, cy - 7, 3, 1.8f, 0, 360, TEXT);
   }
-  weather::drawIcon(c, d->code, d->isDay, x + 46, CARD_Y + 104, 92);
-  char buf[16];
-  snprintf(buf, sizeof buf, "%d", (int)lroundf(d->temp));
-  bigText(c, buf, x + 104, (int)CARD_Y + 128, TEXT, true);
-  char desc[40];
-  fit(gfont::SMALL, weather::describe(d->code), W_W - 150, desc, sizeof desc);
-  c.text(gfont::SMALL, desc, x + 108, (int)CARD_Y + 154, MUTED);
+  // ">" : it opens
+  const float ax = WX_X + WX_W - 22;
+  c.fillCapsule(ax - 3, cy - 5, ax + 2, cy, 1.4f, MUTED);
+  c.fillCapsule(ax + 2, cy, ax - 3, cy + 5, 1.4f, MUTED);
+}
 
-  // the next days
-  const int n = d->dayCount < 5 ? d->dayCount : 5;
-  const float colW = (W_W - 48) / 5.0f, y = CARD_Y + 200;
-  c.fillRect(x, y - 10, W_W - 48, 1, CARD_EDGE);
-  for (int i = 0; i < n; ++i) {
-    const weather::Day& day = d->days[i];
-    const float mx = x + colW * (i + 0.5f);
-    const char* name = i == 0 ? "Today" : day.name;
-    c.text(gfont::SMALL, name, mx - Canvas::textWidth(gfont::SMALL, name) * 0.5f, (int)y + 14, MUTED);
-    weather::drawIcon(c, day.code, true, mx, y + 38, 30);
-    snprintf(buf, sizeof buf, "%d/%d", day.hi, day.lo);
-    c.text(gfont::SMALL, buf, mx - Canvas::textWidth(gfont::SMALL, buf) * 0.5f, (int)y + 72, TEXT);
-  }
+void weatherPage(Canvas& c, const View& v) {
+  // a "< Back" button where the top bar usually is, then the forecast
+  c.fillRRect(BACK_X, BACK_Y, BACK_W, BACK_H, BACK_H / 2, CARD_EDGE);
+  c.fillCapsule(BACK_X + 24, BACK_Y + 17, BACK_X + 30, BACK_Y + 11, 1.6f, TEXT);
+  c.fillCapsule(BACK_X + 24, BACK_Y + 17, BACK_X + 30, BACK_Y + 23, 1.6f, TEXT);
+  c.text(gfont::SMALL, "Back", BACK_X + 42, (int)BACK_Y + 23, TEXT);
+  static weather::Data none;
+  weather::draw(c, v.wx ? *v.wx : none, v.city, v.cityPicker, v.wxStatus);
 }
 
 void noticesCard(Canvas& c, const View& v) {
@@ -170,11 +161,11 @@ void noticesCard(Canvas& c, const View& v) {
   c.text(gfont::SMALL, "NOTIFICATIONS", x, (int)CARD_Y + 34, MUTED);
   if (v.noticeCount == 0) {
     const float mx = N_X + N_W / 2;
-    bellIcon(c, mx, CARD_Y + 128, FAINT);
+    bellIcon(c, mx, CARD_Y + 120, FAINT);
     const char* t = "You're all caught up";
-    c.text(gfont::TITLE, t, mx - Canvas::textWidth(gfont::TITLE, t) * 0.5f, (int)CARD_Y + 186, TEXT);
+    c.text(gfont::HEADLINE, t, mx - Canvas::textWidth(gfont::HEADLINE, t) * 0.5f, (int)CARD_Y + 190, TEXT);
     const char* s = "Updates and things you missed show up here";
-    c.text(gfont::SMALL, s, mx - Canvas::textWidth(gfont::SMALL, s) * 0.5f, (int)CARD_Y + 212, MUTED);
+    c.text(gfont::SMALL, s, mx - Canvas::textWidth(gfont::SMALL, s) * 0.5f, (int)CARD_Y + 220, MUTED);
     return;
   }
   for (int i = 0; i < v.noticeCount && i < 3; ++i) {
@@ -216,44 +207,43 @@ bool inside(int x, int y, float bx, float by, float bw, float bh) {
 }  // namespace
 
 void draw(Canvas& c, const View& v) {
-  if (!v.cityPicker) {  // header: the time, the date, Sleep
+  if (v.weatherOpen) {
+    weatherPage(c, v);
+  } else {  // header: the time and date, the weather chip, Sleep
     const float tx = bigText(c, v.time, PAD, 96, TEXT);
-    c.text(gfont::TITLE, v.date, tx + 22, 92, MUTED);
+    char date[40];
+    fit(gfont::TITLE, v.date, WX_X - tx - 40, date, sizeof date);
+    c.text(gfont::TITLE, date, tx + 22, 92, MUTED);
+    weatherChip(c, v);
     c.fillRRect(SLEEP_X, SLEEP_Y, SLEEP_W, SLEEP_H, SLEEP_H / 2, CARD_EDGE);
     moonIcon(c, SLEEP_X + 34, SLEEP_Y + SLEEP_H / 2, MOON, CARD_EDGE);
     c.text(gfont::TITLE, "Sleep", SLEEP_X + 60, (int)(SLEEP_Y + 36), TEXT);
-  }
-
-  if (v.cityPicker) {  // choosing the city: the weather screen's own picker
-    weather::Data none;
-    weather::draw(c, none, v.city, true, "");
-  } else {
-    weatherCard(c, v);
     noticesCard(c, v);
   }
-
   // footer: status, and the handle to push it back up
   c.text(gfont::SMALL, v.status, PAD, 452, FAINT);
   c.fillRRect(400 - 30, 468, 60, 5, 2.5f, HANDLE);
 }
 
 TapResult tap(int x, int y, const View& v) {
-  if (!v.cityPicker && inside(x, y, SLEEP_X - 8, SLEEP_Y - 8, SLEEP_W + 16, SLEEP_H + 16)) return TapResult(Tap::Sleep);
-  if (v.cityPicker) {
+  if (v.weatherOpen) {
+    if (inside(x, y, BACK_X - 10, 0, BACK_W + 20, 46)) return TapResult(Tap::Back);
     int city = v.city;
-    switch (weather::tap(x, y, true, city)) {
-      case weather::Tap::PickCity: return TapResult(Tap::PickCity, city);
+    switch (weather::tap(x, y, v.cityPicker, city)) {
+      case weather::Tap::OpenPicker: return TapResult(Tap::OpenPicker);
       case weather::Tap::ClosePicker: return TapResult(Tap::ClosePicker);
+      case weather::Tap::PickCity: return TapResult(Tap::PickCity, city);
       default: return TapResult();
     }
   }
-  if (inside(x, y, W_X, CARD_Y, W_W, 52)) return TapResult(Tap::City);
+  if (inside(x, y, SLEEP_X - 8, SLEEP_Y - 8, SLEEP_W + 16, SLEEP_H + 16)) return TapResult(Tap::Sleep);
+  if (inside(x, y, WX_X - 8, WX_Y - 8, WX_W + 12, WX_H + 16)) return TapResult(Tap::Weather);
   for (int i = 0; i < v.noticeCount && i < 3; ++i) {
     const Notice& n = v.notices[i];
     const float ry = ROW_Y + i * (ROW_H + ROW_GAP), rx = N_X + 14, rw = N_W - 28;
     if (!inside(x, y, rx, ry, rw, ROW_H)) continue;
     if (n.action[0]) return x >= rx + rw - actionW(n) - 30 ? TapResult(Tap::Action, i) : TapResult();
-    return x >= rx + rw - 60 ? TapResult(Tap::Dismiss, i) : TapResult();
+    return x >= rx + rw - 70 ? TapResult(Tap::Dismiss, i) : TapResult();
   }
   return TapResult();
 }

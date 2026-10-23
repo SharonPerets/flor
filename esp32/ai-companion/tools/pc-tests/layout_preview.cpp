@@ -48,7 +48,7 @@ int main() {
   const char* names[] = {"Today", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"}; int codes[] = {1, 2, 61, 3, 0, 0, 80};
   for (int i = 0; i < 7; ++i) { snprintf(wx.days[i].name, 6, "%s", names[i]); wx.days[i].code = codes[i]; wx.days[i].hi = 26 - i % 3; wx.days[i].lo = 17 + i % 2; wx.days[i].rain = 0; }
   static actioncenter::View a;
-  snprintf(a.time, 8, "23:08"); snprintf(a.date, 32, "Friday, 24 October"); a.wx = &wx; a.city = 0;
+  snprintf(a.time, 8, "23:08"); snprintf(a.date, 32, "Fri, 24 Oct"); a.wx = &wx; a.city = 0;
   snprintf(a.status, 96, "Gorgi 4.3  -  Wi-Fi good  -  PC: SHARON-PC connected");
   a.notices[0] = actioncenter::Notice{actioncenter::UPDATE, "Update ready", "Gorgi 4.4 - helper first, then Gorgi", "Update"};
   a.notices[1] = actioncenter::Notice{actioncenter::MISSED, "Missed: Call mom", "Reminder at 17:00, nobody tapped it", ""};
@@ -57,5 +57,7 @@ int main() {
   save("l_action.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &a);
   static actioncenter::View e = a; e.noticeCount = 0;
   save("l_action_empty.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &e);
-  printf("pictures: l_face l_time l_action l_action_empty\n");
+  static actioncenter::View w = a; w.weatherOpen = true;
+  save("l_action_weather.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &w);
+  printf("pictures: l_face l_time l_action l_action_empty l_action_weather\n");
 }
