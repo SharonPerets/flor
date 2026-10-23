@@ -1,8 +1,9 @@
 name: Gorgi test build
 
-# Publishes a test version of Gorgi's firmware as a GitHub *pre-release* when
-# esp32/TEST_VERSION changes. Pre-releases are never offered by Gorgi Helper;
-# they're flashed by USB to try something out first.
+# Publishes a test version of Gorgi's firmware (and the matching Gorgi Helper
+# installer) as a GitHub *pre-release* when esp32/TEST_VERSION changes.
+# Pre-releases are never offered by Gorgi Helper; the firmware is flashed by USB
+# and the helper installed by hand, to try something out first.
 
 on:
   push:
@@ -14,8 +15,11 @@ jobs:
   firmware:
     uses: ./.github/workflows/gorgi-firmware.yml
 
+  helper:
+    uses: ./.github/workflows/gorgi-helper.yml
+
   publish:
-    needs: firmware
+    needs: [firmware, helper]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,6 +29,10 @@ jobs:
         with:
           name: gorgi-firmware
           path: fw
+      - uses: actions/download-artifact@v4
+        with:
+          name: GorgiHelper-Setup
+          path: setup
       - name: Publish the pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -34,11 +42,14 @@ jobs:
           mkdir out
           cp "$(find fw -name gorgi-full.bin | head -1)" "out/gorgi-test-full-$V.bin"
           cp "$(find fw -name gorgi-firmware.bin | head -1)" "out/gorgi-test-firmware-$V.bin"
+          cp "$(find setup -name '*.exe' | head -1)" "out/GorgiHelper-Setup-test-$V.exe"
           cat > notes.md <<NOTES
           **Test version - not offered by Gorgi Helper.**
 
           Flash \`gorgi-test-full-$V.bin\` at address 0x0 with https://espressif.github.io/esptool-js/
           (Gorgi forgets its Wi-Fi, so set it up again from the "Gorgi-Setup" network).
+
+          On the PC, run \`GorgiHelper-Setup-test-$V.exe\` (it installs over the current Gorgi Helper).
 
           To go back: flash \`gorgi-full-<version>.bin\` from the latest normal release the same way.
           NOTES
