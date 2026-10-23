@@ -30,7 +30,14 @@ jobs:
         run: pip install platformio esptool "click<8.2"  # the platform's esptool breaks with click 8.2+
 
       - name: Build
-        run: pio run -e waveshare-s3-lcd7
+        shell: bash
+        run: |
+          # Compile errors are also shown as annotations (readable without the full log)
+          set -o pipefail
+          pio run -e waveshare-s3-lcd7 2>&1 | tee build.log || {
+            grep -E "error|undefined reference" build.log | head -25 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
 
       - name: Make a single flashable file
         run: |
