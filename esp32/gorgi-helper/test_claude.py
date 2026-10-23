@@ -83,4 +83,48 @@ asyncio.run(server_test())
 
 assert call_watch.in_call(["MSTeams_8wekyb3d8bbwe"]) and call_watch.in_call(["C:#Users#a#AppData#Local#Microsoft#Teams#current#Teams.exe"])
 assert not call_watch.in_call(["Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe", "C:#Program Files#GorgiHelper#GorgiHelper.exe"])
+# ---- usage: sign-in, tokens from logs, Anthropic's answer
+import time as _t
+import usage_fetch as uf
+cred = d / ".credentials.json"
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": int((_t.time() + 3600) * 1000),
+                                              "subscriptionType": "max"}}))
+assert uf.read_sign_in(cred) == ("tok", "Max")
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": int((_t.time() - 10) * 1000),
+                                              "subscriptionType": "pro"}}))
+assert uf.read_sign_in(cred) == (None, "Pro")
+assert uf.read_sign_in(d / "missing.json") == (None, None)
+
+proj = d / "projects" / "C--code-flor"
+proj.mkdir(parents=True)
+now = _t.time()
+iso = lambda t: _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime(t))
+rows = [{"type": "assistant", "timestamp": iso(now - 600), "message": {"id": "m1", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 10, "cache_read_input_tokens": 9999}}},
+        {"type": "assistant", "timestamp": iso(now - 600), "message": {"id": "m1", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 10}}},
+        {"type": "assistant", "timestamp": iso(now - 3 * 86400), "message": {"id": "m2", "usage": {"input_tokens": 1000, "output_tokens": 0}}},
+        {"type": "user", "timestamp": iso(now), "message": {"content": "hi"}}]
+(proj / "s.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n")
+assert uf.LogCounter().count([d / "projects"], now) == (160, 1160)
+
+class FakeWatch(ClaudeWatch):
+    pass
+fw = FakeWatch()
+f = uf.UsageFetcher(fw, d / "usage-debug.json")
+uf.claude_dir = lambda: d
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": int((_t.time() + 3600) * 1000), "subscriptionType": "max"}}))
+async def ok(client, token):
+    return 200, {"five_hour": {"utilization": 41.0, "resets_at": "2026-10-24T03:00:00+00:00"},
+                 "seven_day": {"utilization": 12.5, "resets_at": "2026-10-29T09:00:00+00:00"}}
+f.ask_anthropic = ok
+asyncio.run(f.check_once(None))
+u = fw.message()["usage"]
+assert u["mode"] == "percent" and u["five"] == 41.0 and u["plan"] == "Max" and u["week_reset"] > 0, u
+assert "tok" not in (d / "usage-debug.json").read_text()
+async def refused(client, token):
+    return 401, {"error": {"type": "authentication_error"}}
+fw2 = FakeWatch(); f2 = uf.UsageFetcher(fw2); f2.ask_anthropic = refused
+asyncio.run(f2.check_once(None))
+u = fw2.message()["usage"]
+assert u["mode"] == "tokens" and u["five_tokens"] == 160 and u["week_tokens"] == 1160 and u["plan"] == "Max", u
+print(fw2.summary())
 print("ALL OK")

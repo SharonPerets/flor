@@ -29,7 +29,14 @@ struct Usage {
   char fiveReset[20] = "";   // "18:40"
   char weekReset[20] = "";   // "Fri 09:00"
   int32_t age = -1;          // seconds since it was read
+  char plan[12] = "";        // "Max": which account this is
+  bool tokens = false;       // only token amounts are known (no plan %)
+  char fiveTokens[12] = "";  // "1.2M"
+  char weekTokens[12] = "";
 };
+
+// 1234567 -> "1.2M"
+void formatTokens(uint32_t n, char* out, int size);
 
 struct View {
   Session sessions[MAX_SESSIONS];

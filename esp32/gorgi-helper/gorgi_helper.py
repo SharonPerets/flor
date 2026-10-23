@@ -35,6 +35,7 @@ import album_art  # noqa: E402
 import call_watch  # noqa: E402
 import claude_setup  # noqa: E402
 from claude_watch import ClaudeWatch  # noqa: E402
+from usage_fetch import UsageFetcher  # noqa: E402
 from timekeeper import TimeKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
@@ -926,6 +927,10 @@ def self_test(out_path):
 
         lines.append(f"mic in use by: {cw.apps_using_mic()}")
         lines.append(f"claude code connected: {cs.status()}")
+        import usage_fetch
+
+        token, plan = usage_fetch.read_sign_in()
+        lines.append(f"claude sign-in found: {bool(token)}, plan: {plan}")
         import settings_window  # noqa: F401
 
         import updater as upd
@@ -1045,8 +1050,9 @@ def main():
             show_settings(config)  # first run: ask for the Ollama key
     log.info("%s started", APP_NAME)
     try:
+        usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(), helper.claude.serve(),
-                                               helper.call_loop()))
+                                               helper.call_loop(), usage.run(helper.stop_event)))
     except KeyboardInterrupt:
         pass
     finally:

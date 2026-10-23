@@ -69,7 +69,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
 
-## Where things stand (4.2 released and confirmed by the user ("looks good"); 4.1 + 4.2 merged to main)
+## Where things stand (4.2.1 in progress: Claude usage for the desktop app; 4.2 confirmed, merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -120,6 +120,14 @@ Done and confirmed:
     the firmware to Gorgi by itself. Orange dot on the top handle when an update is waiting.
   - Status line: version, Wi-Fi signal (RSSI), PC name.
   - The pull-down panel from the ideas list is partly done; still open: quiet mode, lock/sleep PC, big volume.
+- **4.2.1 - usage fix**: the user runs Claude Code in the **Claude desktop app** (Code tab), which has **no status
+  line**, so usage never arrived (hooks work fine there). Now `usage_fetch.py` reads the PC app's saved sign-in
+  (`~/.claude/.credentials.json`, `claudeAiOauth.accessToken`, read-only, never refreshed) and asks
+  `https://api.anthropic.com/api/oauth/usage` (unofficial, `anthropic-beta: oauth-2025-04-20`) every 3 min
+  (`five_hour`/`seven_day` `utilization` + `resets_at`). Fallback: tokens from `~/.claude/projects/*/*.jsonl`
+  (input+output+cache creation, last 5 h / 7 days) shown as amounts. Plan name ("Max") next to "Usage" so the
+  user can see which account it is: only the PC app's account, never the browser one (user asked for that).
+  Last result in `claude-usage.json` (helper settings folder, no token) for debugging. The user has a Max plan.
 - Screens now: **Music ← Face → Weather → Time → Sketch → Claude** (icon tabs at the top).
 
 Lessons from 3.9 (keep for future screens):

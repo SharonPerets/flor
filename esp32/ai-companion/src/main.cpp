@@ -1063,8 +1063,15 @@ void onOther(const char* type, JsonObjectConst msg) {
       if (alertOn && alertClaude && alertSession == out.name && out.state == claudescreen::WORKING) endAlert(false);
     }
     JsonObjectConst u = msg["usage"];
-    claudeView.usage.known = !u.isNull() && u["five"].is<float>();
-    if (claudeView.usage.known) {
+    const bool tokens = !u.isNull() && strcmp(u["mode"] | "percent", "tokens") == 0;
+    claudeView.usage.known = !u.isNull() && (tokens || u["five"].is<float>());
+    claudeView.usage.tokens = tokens;
+    snprintf(claudeView.usage.plan, sizeof claudeView.usage.plan, "%s", (const char*)(u["plan"] | ""));
+    if (tokens) {
+      claudescreen::formatTokens(u["five_tokens"] | 0u, claudeView.usage.fiveTokens, sizeof claudeView.usage.fiveTokens);
+      claudescreen::formatTokens(u["week_tokens"] | 0u, claudeView.usage.weekTokens, sizeof claudeView.usage.weekTokens);
+      claudeUsageAt = u["at"] | 0;
+    } else if (claudeView.usage.known) {
       claudeView.usage.five = u["five"] | 0.0f;
       claudeView.usage.week = u["week"] | 0.0f;
       formatWhen(u["five_reset"] | 0, claudeView.usage.fiveReset, sizeof claudeView.usage.fiveReset);

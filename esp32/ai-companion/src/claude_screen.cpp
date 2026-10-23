@@ -106,6 +106,13 @@ void gauge(Canvas& c, const char* label, float pct, const char* reset, float y) 
 
 }  // namespace
 
+void formatTokens(uint32_t n, char* out, int size) {
+  if (n >= 10000000) snprintf(out, size, "%uM", (unsigned)(n / 1000000));
+  else if (n >= 1000000) snprintf(out, size, "%u.%uM", (unsigned)(n / 1000000), (unsigned)(n / 100000 % 10));
+  else if (n >= 1000) snprintf(out, size, "%uk", (unsigned)(n / 1000));
+  else snprintf(out, size, "%u", (unsigned)n);
+}
+
 void formatAgo(int32_t s, char* out, int size) {
   if (s < 45) snprintf(out, size, "just now");
   else if (s < 3600) snprintf(out, size, "%d min", (int)((s + 30) / 60));
@@ -140,13 +147,29 @@ void draw(Canvas& c, const View& v) {
   // usage
   panel(c, R_X, R_W);
   c.text(gfont::TITLE, "Usage", R_X + 18, (int)P_Y + 36, TEXT);
+  if (v.usage.plan[0]) {
+    char plan[24];
+    snprintf(plan, sizeof plan, "- %s", v.usage.plan);
+    c.text(gfont::SMALL, plan, R_X + 26 + Canvas::textWidth(gfont::TITLE, "Usage"), (int)P_Y + 35, MUTED);
+  }
   if (!v.usage.known) {
     const char* lines[] = {"Shows up after", "Claude Code answers", "once."};
     for (int i = 0; i < 3; ++i) c.text(gfont::SMALL, lines[i], R_X + 18, (int)ROW_Y + 26 + i * 24, MUTED);
     return;
   }
-  gauge(c, "5-hour", v.usage.five, v.usage.fiveReset, ROW_Y + 14);
-  gauge(c, "Weekly", v.usage.week, v.usage.weekReset, ROW_Y + 112);
+  if (v.usage.tokens) {  // amounts only (the plan % couldn't be read)
+    const float x = R_X + 18;
+    c.text(gfont::SMALL, "Last 5 hours", x, (int)ROW_Y + 14, MUTED);
+    c.text(gfont::HEADLINE, v.usage.fiveTokens, x, (int)ROW_Y + 52, TEXT);
+    c.text(gfont::SMALL, "tokens", x + Canvas::textWidth(gfont::HEADLINE, v.usage.fiveTokens) + 8, (int)ROW_Y + 52, MUTED);
+    c.text(gfont::SMALL, "Last 7 days", x, (int)ROW_Y + 100, MUTED);
+    c.text(gfont::HEADLINE, v.usage.weekTokens, x, (int)ROW_Y + 138, TEXT);
+    c.text(gfont::SMALL, "tokens", x + Canvas::textWidth(gfont::HEADLINE, v.usage.weekTokens) + 8, (int)ROW_Y + 138, MUTED);
+    c.text(gfont::SMALL, "Plan % not available", x, (int)ROW_Y + 176, MUTED, 0.7f);
+  } else {
+    gauge(c, "5-hour", v.usage.five, v.usage.fiveReset, ROW_Y + 14);
+    gauge(c, "Weekly", v.usage.week, v.usage.weekReset, ROW_Y + 112);
+  }
   if (v.usage.age >= 0) {
     char ago[24], buf[40];
     formatAgo(v.usage.age, ago, sizeof ago);
