@@ -68,8 +68,13 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - The backlight is only on/off (CH422G pin), it can't be dimmed in hardware: "dim" means darker drawing.
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
+- **The helper must be able to quit**: every task in the main `gather` must end when `stop_event` is set. In 4.1-4.3
+  `claude_watch.serve()` ran forever, so after starting its installer the old helper stayed alive ("Downloading..."
+  in the tray), and the new one quit at once ("already running"). Fixed in 4.3.1: serve stops with the event,
+  `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
+  runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3 released: Action Center redesign - waiting for the user to test; 4.2.1 untested; 4.2 confirmed)
+## Where things stand (4.3.1 in progress: helper quit/update fix; 4.3 released but not installed; 4.2 confirmed)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +

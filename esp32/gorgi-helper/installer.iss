@@ -47,5 +47,17 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; also runs after a quiet update, so the helper comes back by itself
 Filename: "{app}\GorgiHelper.exe"; Description: "Start Gorgi Helper now"; Flags: nowait postinstall
 
+[Code]
+// Close any running Gorgi Helper first: an old helper that didn't quit properly (4.1 - 4.3)
+// would otherwise keep its files busy and stop the new one from starting.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM GorgiHelper.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(800);
+  Result := '';
+end;
+
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM GorgiHelper.exe /F"; Flags: runhidden; RunOnceId: "StopHelper"

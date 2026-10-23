@@ -230,7 +230,8 @@ class ClaudeWatch:
 
     # ------------------------------------------------------------ the little web server
 
-    async def serve(self):
+    async def serve(self, stop_event=None):
+        """Listens until stop_event is set (it must stop, or the helper can't quit to update itself)."""
         try:
             server = await asyncio.start_server(self._client, "127.0.0.1", PORT)
         except OSError as e:
@@ -238,7 +239,11 @@ class ClaudeWatch:
             return
         log.info("listening for Claude Code on 127.0.0.1:%d", PORT)
         async with server:
-            await server.serve_forever()
+            if stop_event is None:
+                await server.serve_forever()
+            else:
+                await stop_event.wait()
+        log.info("stopped listening for Claude Code")
 
     async def _client(self, reader, writer):
         try:

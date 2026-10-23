@@ -412,7 +412,21 @@ class Helper:
             log.warning("helper update failed: %s", e)
             window.fail(f"Update failed: {e}")
             return
-        self.stop_event.set()  # quit, so the installer can replace this app
+        self.request_stop()  # quit, so the installer can replace this app
+
+    def request_stop(self):
+        """Quit (from the event loop). If something still holds the app open after a few
+        seconds, it's ended anyway: a helper that won't quit blocks its own update."""
+        self.stop_event.set()
+
+        def force_quit():
+            log.warning("didn't quit in time: forcing it")
+            logging.shutdown()
+            os._exit(0)
+
+        timer = threading.Timer(8.0, force_quit)
+        timer.daemon = True
+        timer.start()
 
     async def _sleep(self, seconds):
         try:
@@ -747,7 +761,7 @@ def start_tray(helper, loop):
 
     def quit_app(icon, _item):
         icon.stop()
-        loop.call_soon_threadsafe(helper.stop_event.set)
+        loop.call_soon_threadsafe(helper.request_stop)
 
     def toggle_autostart(_icon, _item):
         set_autostart(not autostart_enabled())
@@ -1051,14 +1065,17 @@ def main():
     log.info("%s started", APP_NAME)
     try:
         usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
-        loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(), helper.claude.serve(),
-                                               helper.call_loop(), usage.run(helper.stop_event)))
+        loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),
+                                               helper.claude.serve(helper.stop_event), helper.call_loop(),
+                                               usage.run(helper.stop_event)))
     except KeyboardInterrupt:
         pass
     finally:
         if icon:
             icon.stop()
         log.info("%s stopped", APP_NAME)
+        logging.shutdown()
+        os._exit(0)  # don't let a leftover thread keep the app (and its files) alive
 
 
 if __name__ == "__main__":
