@@ -47,6 +47,9 @@ constexpr Rect BUTTON_AREA{PREV_X - 34, BAR_Y + 4, NEXT_X - PREV_X + 68, BAR_H -
 constexpr Rect VOLUME_AREA{560, BAR_Y + 4, 224, BAR_H - 8};
 
 String clockText = "Gorgi";
+String chipText = "";
+bool chipFocus = false;
+const Color FOCUS_C = gfx::rgb(0xB69CFF);
 String statusText = "";
 Color statusColor = COLOR_TEXT_DIM;
 bool statusPulse = false;
@@ -126,7 +129,19 @@ String fit(const gfont::Font& f, const String& s, float maxW) {
 
 // ---------------------------------------------------------------- parts (drawn in screen coordinates)
 
-void drawClock(Canvas& c) { c.text(gfont::TITLE, clockText.c_str(), 20, 30, COLOR_TEXT_DIM); }
+void drawClock(Canvas& c) {
+  c.text(gfont::TITLE, clockText.c_str(), 20, 30, COLOR_TEXT_DIM);
+  if (chipText.length() == 0) return;
+  // countdown chip: a little ring and the time left
+  const Color& col = chipFocus ? FOCUS_C : ACCENT;
+  const float x = 20 + Canvas::textWidth(gfont::TITLE, clockText.c_str()) + 16;
+  const float w = Canvas::textWidth(gfont::SMALL, chipText.c_str()) + 46;
+  c.fillRRect(x, 8, w, 30, 15, BORDER);
+  c.fillRRect(x + 1, 9, w - 2, 28, 14, PANEL);
+  c.strokeArc(x + 17, 23, 6.5f, 2.2f, 0, 360, TRACK);
+  c.strokeArc(x + 17, 23, 6.5f, 2.2f, -90, 150, col);
+  c.text(gfont::SMALL, chipText.c_str(), x + 32, 28, col);
+}
 
 void drawStatus(Canvas& c) {
   if (statusText.length() == 0) return;
@@ -270,6 +285,13 @@ void setSubtitleVisible(bool visible) {
 void setClock(const String& text) {
   if (text == clockText) return;
   clockText = text;
+  dirtyClock = true;
+}
+
+void setTimerChip(const String& text, bool focus) {
+  if (text == chipText && focus == chipFocus) return;
+  chipText = text;
+  chipFocus = focus;
   dirtyClock = true;
 }
 

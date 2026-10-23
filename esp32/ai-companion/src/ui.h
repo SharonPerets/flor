@@ -31,6 +31,9 @@ struct MediaInfo {
 void begin(LGFX& lcd);
 
 void setClock(const String& text);
+// A small countdown next to the clock ("9:41"), shown on every screen while a
+// timer or focus session runs. Empty text hides it.
+void setTimerChip(const String& text, bool focus);
 void setStatus(const String& text, const gfx::Color& color, bool pulse);
 void setSubtitle(const String& text);
 void setMedia(const MediaInfo& info);

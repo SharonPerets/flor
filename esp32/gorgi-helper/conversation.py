@@ -14,9 +14,10 @@ FIRST_WAIT_SECONDS = 7.0  # how long to wait for you to start talking after a ta
 
 
 class Conversation:
-    def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0):
+    def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0, timekeeper=None):
         self.send = send  # async fn(dict): message to Gorgi
         self.media = media
+        self.timekeeper = timekeeper  # timers and reminders (see timekeeper.py)
         self.brain = brain
         self.recorder = recorder
         self.transcriber = transcriber
@@ -78,7 +79,9 @@ class Conversation:
                     return
                 log.info("AI answered in %.1f s", time.monotonic() - started)
 
-                keep_talking, resume_music = await self._do_actions(actions, resume_music)
+                keep_talking, resume_music, problem = await self._do_actions(actions, resume_music)
+                if problem:  # e.g. too many timers: say that instead of "done!"
+                    mood, spoken = "confused", problem
                 await self._say(mood, spoken)
                 if not keep_talking:
                     return
@@ -110,11 +113,19 @@ class Conversation:
             await asyncio.sleep(min(8.0, 1.0 + len(text) * 0.06))
 
     async def _do_actions(self, actions, resume_music):
-        """Carries out music actions. Returns (keep_talking, resume_music)."""
+        """Carries out music and time actions. Returns (keep_talking, resume_music, problem)."""
         keep_talking = True
+        problem = None
         for action, value in actions:
             log.info("action: %s %s", action, value if value is not None else "")
-            if action == "pause":
+            if action in ("timer", "focus", "remind", "reminder", "cancel"):
+                if self.timekeeper is None:
+                    continue
+                messages, trouble = self.timekeeper.handle(action, value)
+                for message in messages:
+                    await self.send(message)
+                problem = problem or trouble
+            elif action == "pause":
                 resume_music = False  # you want quiet: don't restart it afterwards
             elif action == "play":
                 resume_music = True
@@ -128,7 +139,7 @@ class Conversation:
             elif action in ("volume_up", "volume_down"):
                 current = self.media.get_volume() or 50
                 self.media.set_volume(current + (15 if action == "volume_up" else -15))
-        return keep_talking, resume_music
+        return keep_talking, resume_music, problem
 
     def _context(self, info, paused_music):
         lines = [f"Right now it is {time.strftime('%A %d %B %Y, %H:%M')}."]
@@ -143,4 +154,6 @@ class Conversation:
         forecast = weather.summary()
         if forecast:
             lines.append(forecast)
+        if self.timekeeper is not None:
+            lines.append(self.timekeeper.prompt_block())
         return "\n".join(lines)

@@ -6,6 +6,7 @@ A small app that connects your PC to Gorgi over Wi-Fi:
 - Gorgi's **volume slider** controls the PC volume, and follows it when you change it on the PC
 - Gorgi shows the **song title and artist** and the PC's **time**
 - **Talk to Gorgi**: tap its face, speak into the PC microphone, and Gorgi answers out loud
+- **Timers and reminders** by voice, and Gorgi's voice says them out loud when they're due
 
 ## Install
 
@@ -57,6 +58,22 @@ Gorgi and the PC must be on the same Wi-Fi network.
 Gorgi remembers things you tell it, like your name, the people and pets in your life, what you
 like, or plans you mention. They're kept on your PC in `memory.json` (tray menu → **Memories...**
 opens it). Say "Gorgi, forget that" or "forget everything" to remove them.
+
+## Timers and reminders
+
+Ask Gorgi, for example:
+
+- "Set a timer for 10 minutes for the pasta", "how long is left?", "cancel the pasta timer"
+- "Start a focus session" (25 minutes) or "a 45 minute focus session"
+- "Remind me in 20 minutes to take the laundry out", "remind me at 5 to call mom",
+  "remind me tomorrow at 8:30 about the dentist"
+- "Every day at 8 remind me to take my vitamins", "every Sunday and Tuesday at 7 pm remind me to take out the trash"
+  ("weekdays" means Sunday to Thursday)
+- "What reminders do I have?", "cancel the vitamins reminder"
+
+They're kept on Gorgi itself, so they go off even when the PC is off. When one is due, Gorgi shows it,
+and if the helper is running, a pop-up appears and Gorgi's voice says it on the PC (music pauses for a moment).
+You can see, pause and delete them on Gorgi's **Time** screen too.
 
 ## If it doesn't connect
 

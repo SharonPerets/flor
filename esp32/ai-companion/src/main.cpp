@@ -10,18 +10,26 @@
 //   hold face 1 s     -> show the next expression (handy for testing)
 //   media buttons     -> control music on the PC
 //   hold clock 5 s    -> forget Wi-Fi and open the "Gorgi-Setup" network again
-//   swipe sideways    -> other screens: music (swipe right), weather (swipe left)
+//   swipe sideways    -> other screens: music (swipe right), weather, time, sketch (swipe left)
+//                        (on the sketch screen: swipe on the toolbar, the paper is for drawing)
+//   when a timer or reminder goes off: tap anywhere to stop it
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 
+#include "alarms.h"
 #include "board.h"
 #include "display.h"
 #include "face.h"
 #include "music_screen.h"
 #include "pclink.h"
+#include "sketch.h"
+#include "sketch_store.h"
+#include "time_screen.h"
 #include "ui.h"
 #include "weather.h"
+#include "wallclock.h"
 #include "weather_net.h"
 
 namespace {
@@ -38,7 +46,7 @@ constexpr uint32_t FRAME_MS = 33;        // ~30 frames per second
 constexpr uint32_t SLEEP_FRAME_MS = 90;  // ~11 frames per second while asleep
 constexpr uint32_t VOLUME_SEND_MS = 120;
 
-enum class Phase { Idle, Listening, Thinking, Talking, Sleepy, Asleep };
+enum class Phase { Idle, Listening, Thinking, Talking, Sleepy, Asleep, Alert };
 Phase phase = Phase::Idle;
 uint32_t phaseUntil = 0;     // when the current phase ends (0 = never)
 uint32_t lastActivity = 0;   // last touch
@@ -50,10 +58,8 @@ constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 // ---------- screens ----------
 // Swipe left/right in the middle of the screen to switch, in this order.
 // More screens can be added to this list later.
-enum class Page { Music, Face, Weather, Count };
+enum class Page { Music, Face, Weather, Time, Sketch, Count };
 Page page = Page::Face;
-uint32_t pageTouched = 0;  // last touch on a page other than the face
-constexpr uint32_t PAGE_IDLE_MS = 45 * 1000;  // then back to the face
 bool musicDirty = true;      // the music screen needs drawing
 int musicProgressKey = -2;   // what the progress bar showed last
 
@@ -72,6 +78,24 @@ constexpr uint32_t WX_REFRESH_MS = 30 * 60 * 1000;
 constexpr uint32_t WX_RETRY_MS = 2 * 60 * 1000;
 Preferences wxPrefs;
 
+// Time screen: timers, focus sessions, reminders
+timescreen::View timeView;
+bool timeDirty = true;
+uint32_t timeRingsKey = 0, timeListKey = 0;
+uint32_t timeVersionSeen = 0;
+int timeConfirm = -1;        // reminder row asking "Delete?"
+String timeNote;             // short message at the top of the Time screen
+uint32_t timeNoteUntil = 0;
+
+bool sketchFull = true;  // the sketch screen needs drawing in full
+
+// Something is due: Gorgi shows it until tapped (or for 10 minutes)
+bool alertOn = false;
+uint32_t alertStart = 0, alertNudge = 0, alertMoodBack = 0;
+Mood alertMood = Mood::Happy;
+constexpr uint32_t ALERT_NUDGE_MS = 30 * 1000;
+constexpr uint32_t ALERT_GIVE_UP_MS = 10 * 60 * 1000;
+
 ui::MediaInfo media;
 String pcName;
 bool gotMediaSinceConnect = false;
@@ -83,6 +107,7 @@ ui::Target touchTarget = ui::Target::None;
 bool longPressDone = false;
 int touchX0 = 0, touchY0 = 0, touchEndX = 0;
 bool swiping = false;  // the finger moved sideways: no tap, no long press
+bool touchUsed = false;  // this touch already did its job (it stopped an alert)
 int testMoodIndex = 0;
 
 // Volume slider
@@ -155,7 +180,7 @@ void say(Mood mood, const String& text) {
 
 // A short reaction without the full talking animation
 void react(Mood mood, const String& text) {
-  if (inConversation) return;  // don't interrupt a conversation
+  if (inConversation || alertOn) return;  // don't interrupt a conversation or an alert
   face.setMood(mood);
   face.setTalking(false);
   ui::setSubtitle(text);
@@ -196,15 +221,20 @@ void markPageDirty(Page p) {
   if (p == Page::Face) face.invalidate();
   if (p == Page::Weather) wxDirty = true;
   if (p == Page::Music) musicDirty = true;
+  if (p == Page::Time) timeDirty = true;
+  if (p == Page::Sketch) sketchFull = true;
 }
 
 void drawFrame(uint32_t now);
+void sendTimeList();
+void sketchShown();
+void sketchHidden();
 
 // Switches screens right away (no animation)
 void showPage(Page p) {
   if (p == page) return;
+  if (page == Page::Sketch) sketchHidden();
   page = p;
-  pageTouched = millis();
   ui::setPagePosition((float)(int)p);
   ui::setSubtitleVisible(p == Page::Face);
   if (p == Page::Face) {
@@ -214,6 +244,10 @@ void showPage(Page p) {
                     [](gfx::Canvas&) {});
   } else if (p == Page::Weather) {
     wxPicker = false;
+  } else if (p == Page::Time) {
+    timeConfirm = -1;
+  } else if (p == Page::Sketch) {
+    sketchShown();
   }
   markPageDirty(p);
   drawFrame(millis());  // the new screen right away, in one go
@@ -352,6 +386,7 @@ void onVoice(const char* type, JsonObjectConst msg) {
   lastVoiceMsg = now;
   lastActivity = now;  // a conversation keeps Gorgi awake
   if (page != Page::Face && strcmp(type, "level") != 0) showPage(Page::Face);
+  if (alertOn && strcmp(type, "level") != 0) alertOn = false;  // a conversation takes over
 
   if (strcmp(type, "level") == 0) {
     face.setTalkLevel(msg["value"] | 0.0f, now);
@@ -397,10 +432,11 @@ void onHelper(bool connected, const String& name) {
   if (connected) {
     pcName = name;
     sendWeather();
+    sendTimeList();
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
   } else {
-    ui::setClock("Gorgi");
+    if (!wallclock::valid()) ui::setClock("Gorgi");
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Sad, "I lost my connection to the PC.");
   }
@@ -425,12 +461,17 @@ void onMedia(const ui::MediaInfo& m) {
   }
 
   // A new song started: a little happy reaction (unless Gorgi is busy or asleep)
-  if (!first && media.title.length() && media.title != oldTitle && !isBusy() && !isSleeping()) {
+  if (!first && media.title.length() && media.title != oldTitle && !isBusy() && !isSleeping() && !alertOn &&
+      !alarms::focusRunning()) {
     react(Mood::Happy, String("Now playing: ") + media.title);
   }
 }
 
-void onClock(const String& text) { ui::setClock(text); }
+// The PC's time: only used until Gorgi gets the time from the internet
+void onClock(const String& text, uint32_t epoch) {
+  if (epoch) wallclock::setFromPC((time_t)epoch);
+  if (!wallclock::valid()) ui::setClock(text);
+}
 
 void onArt(uint32_t id, uint32_t total, uint32_t offset, const uint8_t* data, size_t len) {
   if (music::artChunk(id, total, offset, data, len) && id == media.artId) musicDirty = true;
@@ -448,6 +489,454 @@ void onWifi(pclink::WifiState s) {
     case pclink::WifiState::Connecting:
       break;
   }
+}
+
+// ---------- time: timers, focus sessions, reminders ----------
+
+uint32_t msSince(uint32_t now, uint32_t since);
+void onTap(ui::Target target);
+
+void showTimeNote(const String& text) {
+  timeNote = text;
+  timeNoteUntil = millis() + 3000;
+  timeDirty = true;
+}
+
+// Tells the helper what's set, so the AI knows (and can cancel things)
+void sendTimeList() {
+  JsonDocument doc;
+  alarms::toJson(doc, millis());
+  pclink::send(doc);
+}
+
+const char* dueKindName(alarms::Due::Kind k) {
+  switch (k) {
+    case alarms::Due::Timer: return "timer";
+    case alarms::Due::Focus: return "focus";
+    case alarms::Due::Reminder: return "reminder";
+    default: return "missed";
+  }
+}
+
+void showAlert(const alarms::Due& d) {
+  const uint32_t now = millis();
+  alertOn = true;
+  alertStart = alertNudge = now;
+  alertMoodBack = now + 2000;
+  alertMood = d.kind == alarms::Due::Focus ? Mood::Excited : (d.kind == alarms::Due::Missed ? Mood::Sad : Mood::Happy);
+  lastActivity = now;  // wakes Gorgi up
+  moodHoldUntil = 0;
+  showPage(Page::Face);
+  face.setTalking(false);
+  face.setMood(d.kind == alarms::Due::Missed ? Mood::Sad : Mood::Surprised);
+  ui::setSubtitle(d.text);
+  ui::setStatus("Tap to stop", ui::COLOR_ACCENT, true);
+  setPhase(Phase::Alert);
+  // the PC says it out loud
+  JsonDocument doc;
+  doc["type"] = "due";
+  doc["kind"] = dueKindName(d.kind);
+  doc["text"] = d.text;
+  pclink::send(doc);
+}
+
+void endAlert(bool tapped) {
+  alertOn = false;
+  face.setTalking(false);
+  showIdleStatus();
+  setPhase(Phase::Idle);
+  if (tapped) {
+    face.setMood(Mood::Happy);
+    ui::setSubtitle("Okay!");
+    moodHoldUntil = millis() + 2000;
+  } else {
+    face.setMood(Mood::Neutral);
+    ui::setSubtitle(restingSubtitle());
+  }
+}
+
+void updateAlert(uint32_t now) {
+  if (msSince(now, alertStart) > ALERT_GIVE_UP_MS) {
+    endAlert(false);
+    return;
+  }
+  if (alertMoodBack && (int32_t)(now - alertMoodBack) >= 0) {
+    alertMoodBack = 0;
+    face.setMood(alertMood);
+  }
+  if (msSince(now, alertNudge) > ALERT_NUDGE_MS) {  // a little jump every 30 s until tapped
+    alertNudge = now;
+    face.setMood(Mood::Surprised);
+    alertMoodBack = now + 1500;
+  }
+  lastActivity = now;  // don't fall asleep while something is due
+}
+
+void updateTime(uint32_t now) {
+  alarms::loop(now);
+
+  // the clock in the top bar (Gorgi's own, once it knows the time)
+  char hm[8];
+  wallclock::hhmm(hm, sizeof hm);
+  if (hm[0]) ui::setClock(hm);
+
+  // countdown next to the clock
+  uint32_t left = 0;
+  bool focus = false;
+  if (alarms::soonest(now, left, focus)) {
+    char buf[16];
+    timescreen::formatLeft(left, buf, sizeof buf);
+    ui::setTimerChip(buf, focus);
+  } else {
+    ui::setTimerChip("", false);
+  }
+
+  if (alarms::version() != timeVersionSeen) {
+    timeVersionSeen = alarms::version();
+    timeDirty = true;
+    timeConfirm = -1;
+    sendTimeList();
+  }
+  if (timeNoteUntil && (int32_t)(now - timeNoteUntil) >= 0) {
+    timeNoteUntil = 0;
+    timeNote = "";
+    timeDirty = true;
+  }
+
+  // something due: show it (after a conversation, not in the middle of one)
+  if (!alertOn && !inConversation && !updating && !touching) {
+    alarms::Due d;
+    if (alarms::takeDue(d)) showAlert(d);
+  }
+}
+
+void onTimeTap(int x, int y) {
+  alarms::fillView(timeView, millis());
+  timeView.confirmRow = timeConfirm;
+  const timescreen::TapResult t = timescreen::tap(x, y, timeView);
+  switch (t.what) {
+    case timescreen::Tap::Ring:
+      alarms::togglePause(timeView.rings[t.index].id);
+      break;
+    case timescreen::Tap::RingClose:
+      alarms::cancel(timeView.rings[t.index].id);
+      break;
+    case timescreen::Tap::QuickTimer:
+      if (alarms::addTimer(t.index * 60, nullptr) == alarms::Result::Full)
+        showTimeNote(String("I can only run ") + alarms::MAX_TIMERS + " timers at once");
+      break;
+    case timescreen::Tap::FocusLength:
+      alarms::nextFocusLength();
+      break;
+    case timescreen::Tap::FocusStart:
+      if (alarms::focusRunning())
+        showTimeNote("We're already focusing!");
+      else
+        alarms::startFocus(alarms::focusMinutes() * 60);
+      break;
+    case timescreen::Tap::Row:
+      timeConfirm = t.index;
+      timeDirty = true;
+      break;
+    case timescreen::Tap::Delete:
+      timeConfirm = -1;
+      timeDirty = true;
+      alarms::cancel(timeView.rows[t.index].id);
+      break;
+    case timescreen::Tap::Keep:
+      timeConfirm = -1;
+      timeDirty = true;
+      break;
+    case timescreen::Tap::AskMe:  // talk right from here: back to the face, listening
+      showPage(Page::Face);
+      if (!inConversation) onTap(ui::Target::Face);
+      break;
+    case timescreen::Tap::None:
+      break;
+  }
+}
+
+void drawTime(uint32_t now) {
+  alarms::fillView(timeView, now);
+  timeView.confirmRow = timeConfirm;
+  timeView.note = timeNoteUntil ? timeNote.c_str() : "";
+  uint32_t rings = timeView.ringCount;
+  for (int i = 0; i < timeView.ringCount; ++i)
+    rings = rings * 31 + timeView.rings[i].left * 2 + (timeView.rings[i].paused ? 1 : 0);
+  const uint32_t list = wallclock::valid() ? (uint32_t)(wallclock::now() / 60) : 1;
+  auto draw = [](gfx::Canvas& c) { timescreen::draw(c, timeView); };
+  if (timeDirty) {
+    display::render(timescreen::AREA, ui::BACKGROUND, draw);
+  } else {
+    if (rings != timeRingsKey) display::render(timescreen::RINGS_AREA, ui::BACKGROUND, draw);
+    if (list != timeListKey) display::render(timescreen::LIST_AREA, ui::BACKGROUND, draw);
+  }
+  timeDirty = false;
+  timeRingsKey = rings;
+  timeListKey = list;
+}
+
+// Timers and reminders set by voice (the helper turns the AI's tags into these)
+void onTime(const char* type, JsonObjectConst msg) {
+  if (strcmp(type, "time_cancel") == 0) {
+    alarms::cancel(msg["id"] | 0u);
+    return;
+  }
+  const char* kind = msg["kind"] | "";
+  const char* text = msg["text"] | "";
+  alarms::Result r = alarms::Result::Bad;
+  if (strcmp(kind, "timer") == 0) {
+    r = alarms::addTimer(msg["seconds"] | 0u, msg["label"] | "");
+  } else if (strcmp(kind, "focus") == 0) {
+    r = alarms::startFocus(msg["seconds"] | (uint32_t)alarms::focusMinutes() * 60);
+  } else if (strcmp(kind, "remind") == 0) {
+    if (msg["at"].is<uint32_t>())
+      r = alarms::remindAt((time_t)(msg["at"] | 0u), text);
+    else
+      r = alarms::remindRepeat(msg["minute"] | -1, (uint8_t)(msg["days"] | 0), text);
+  }
+  if (r != alarms::Result::Ok) {
+    Serial.printf("time: couldn't add %s (%d)\n", kind, (int)r);
+    sendTimeList();  // so the helper sees nothing changed
+  }
+}
+
+// ---------- sketch pad ----------
+
+uint16_t* skPic = nullptr;  // the drawing (PSRAM)
+constexpr int UNDO_STEPS = 5;
+uint16_t* skUndo[UNDO_STEPS] = {};
+int skUndoSlots = 0;          // how many undo pictures could be made
+int skUndoCount = 0, skUndoNext = 0;
+uint16_t* skThumbs = nullptr;  // gallery pictures
+sketch::Tools skTools;
+sketch::Gallery skGallery;
+Preferences skPrefs;
+uint32_t skCurrent = 1, skNextId = 2;
+bool skLoaded = false;     // the current sketch was read from flash
+bool skChanged = false;    // drawn on since the last save
+bool skToolbarDirty = false;
+uint32_t skLastStroke = 0;
+bool sketchStroking = false;
+float skLastX = 0, skLastY = 0;
+constexpr uint32_t SKETCH_SAVE_AFTER_MS = 20 * 1000;  // save after a pause in drawing
+constexpr size_t SKETCH_PIXELS = (size_t)sketch::PAPER_W * sketch::PAPER_H;
+
+void sketchMove(int x, int y);
+
+void sketchSetup() {
+  skPic = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
+  skThumbs = (uint16_t*)heap_caps_malloc((size_t)sketch::MAX_SKETCHES * sketch::THUMB_W * sketch::THUMB_H * 2,
+                                         MALLOC_CAP_SPIRAM);
+  for (int i = 0; i < UNDO_STEPS; ++i) {
+    skUndo[i] = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
+    if (!skUndo[i]) break;
+    skUndoSlots = i + 1;
+  }
+  skPrefs.begin("sketch", false);
+  skCurrent = skPrefs.getUInt("cur", 1);
+  skNextId = skPrefs.getUInt("next", skCurrent + 1);
+  sketchstore::begin();
+  Serial.printf("sketch: ready, %d undo steps, free psram %u\n", skUndoSlots, ESP.getFreePsram());
+}
+
+void sketchClear() {
+  if (!skPic) return;
+  for (size_t i = 0; i < SKETCH_PIXELS; ++i) skPic[i] = sketch::PAPER_COLOR.c;
+}
+
+void sketchForgetUndo() {
+  skUndoCount = 0;
+  skTools.canUndo = false;
+}
+
+void sketchSave() {
+  if (!skChanged || !skPic) return;
+  skChanged = false;
+  sketchstore::save(skCurrent, skPic);
+}
+
+void sketchLoadCurrent() {
+  skLoaded = true;
+  if (!skPic) return;
+  if (!sketchstore::load(skCurrent, skPic)) sketchClear();
+  sketchForgetUndo();
+}
+
+void sketchStartNew() {
+  sketchSave();
+  skCurrent = skNextId++;
+  skPrefs.putUInt("cur", skCurrent);
+  skPrefs.putUInt("next", skNextId);
+  sketchClear();
+  sketchForgetUndo();
+}
+
+void sketchShown() {
+  if (!skLoaded) sketchLoadCurrent();
+  skTools.gallery = false;
+  sketchFull = true;
+}
+
+void sketchHidden() {
+  sketchStroking = false;
+  skTools.gallery = false;
+  sketchSave();
+}
+
+void sketchFillGallery() {
+  uint32_t ids[sketch::MAX_SKETCHES];
+  skGallery.count = sketchstore::list(ids, sketch::MAX_SKETCHES);
+  skGallery.current = skCurrent;
+  skGallery.confirm = -1;
+  for (int i = 0; i < skGallery.count; ++i) {
+    uint16_t* thumb = skThumbs ? skThumbs + (size_t)i * sketch::THUMB_W * sketch::THUMB_H : nullptr;
+    if (thumb && !sketchstore::loadThumb(ids[i], thumb)) thumb = nullptr;
+    skGallery.items[i] = sketch::GalleryItem{ids[i], thumb};
+  }
+}
+
+void sketchRenderRect(const gfx::Rect& r) {
+  display::render(r, sketch::PAPER_COLOR, [](gfx::Canvas& c) { sketch::drawPaper(c, skPic); });
+}
+
+// Finger down on the paper: start a stroke (a dot so far)
+void sketchBegin(int x, int y) {
+  if (skTools.gallery || !skPic || x < sketch::PAPER_X || y < sketch::PAPER_Y ||
+      x >= sketch::PAPER_X + sketch::PAPER_W || y >= sketch::PAPER_Y + sketch::PAPER_H)
+    return;
+  if (skUndoSlots) {  // remember the picture before this stroke
+    memcpy(skUndo[skUndoNext], skPic, SKETCH_PIXELS * 2);
+    skUndoNext = (skUndoNext + 1) % skUndoSlots;
+    if (skUndoCount < skUndoSlots) ++skUndoCount;
+    if (!skTools.canUndo) skToolbarDirty = true;
+    skTools.canUndo = true;
+  }
+  sketchStroking = true;
+  skLastX = x;
+  skLastY = y;
+  sketchMove(x, y);
+}
+
+void sketchMove(int x, int y) {
+  const float dx = x - skLastX, dy = y - skLastY;
+  if (dx * dx + dy * dy < 4 && skChanged && (x != skLastX || y != skLastY)) return;  // wait for a bigger move
+  const gfx::Color& col = skTools.eraser ? sketch::PAPER_COLOR : sketch::COLORS[skTools.color];
+  const float r = sketch::SIZES[skTools.size] * (skTools.eraser ? 2.5f : 1.0f);
+  sketchRenderRect(sketch::stroke(skPic, skLastX, skLastY, x, y, col, r));
+  skLastX = x;
+  skLastY = y;
+  skChanged = true;
+}
+
+void sketchEnd(uint32_t now) {
+  sketchStroking = false;
+  skLastStroke = now;
+}
+
+void sketchUndo() {
+  if (!skUndoCount) return;
+  skUndoNext = (skUndoNext + skUndoSlots - 1) % skUndoSlots;
+  memcpy(skPic, skUndo[skUndoNext], SKETCH_PIXELS * 2);
+  --skUndoCount;
+  skTools.canUndo = skUndoCount > 0;
+  skChanged = true;
+  skLastStroke = millis();
+  sketchFull = true;
+}
+
+void onSketchTap(int x, int y) {
+  if (x < sketch::TOOLBAR_RIGHT) {
+    const sketch::ToolTap t = sketch::toolbarTap(x, y);
+    switch (t.what) {
+      case sketch::Tool::Color:
+        skTools.color = t.index;
+        skTools.eraser = false;
+        break;
+      case sketch::Tool::Eraser:
+        skTools.eraser = !skTools.eraser;
+        break;
+      case sketch::Tool::Size:
+        skTools.size = (skTools.size + 1) % sketch::SIZE_COUNT;
+        break;
+      case sketch::Tool::Undo:
+        if (!skTools.gallery) sketchUndo();
+        break;
+      case sketch::Tool::Gallery:
+        skTools.gallery = !skTools.gallery;
+        if (skTools.gallery) {
+          sketchSave();
+          sketchFillGallery();
+        }
+        sketchFull = true;
+        break;
+      case sketch::Tool::None:
+        return;
+    }
+    if (skTools.gallery && t.what != sketch::Tool::Gallery) {  // picking a colour closes the gallery
+      skTools.gallery = false;
+      sketchFull = true;
+    }
+    skToolbarDirty = true;
+    return;
+  }
+  if (!skTools.gallery) return;
+  const sketch::GalleryTap g = sketch::galleryTap(x, y, skGallery);
+  switch (g.what) {
+    case sketch::GTap::New:
+      sketchStartNew();
+      skTools.gallery = false;
+      break;
+    case sketch::GTap::Open:
+      sketchSave();
+      skCurrent = skGallery.items[g.index].id;
+      skPrefs.putUInt("cur", skCurrent);
+      sketchLoadCurrent();
+      skTools.gallery = false;
+      break;
+    case sketch::GTap::AskDelete:
+      skGallery.confirm = g.index;
+      break;
+    case sketch::GTap::Delete: {
+      const uint32_t id = skGallery.items[g.index].id;
+      sketchstore::remove(id);
+      if (id == skCurrent) {  // the one on the paper: start a fresh page
+        skChanged = false;
+        sketchStartNew();
+      }
+      sketchFillGallery();
+      break;
+    }
+    case sketch::GTap::Keep:
+      skGallery.confirm = -1;
+      break;
+    case sketch::GTap::Close:
+      skTools.gallery = false;
+      break;
+    case sketch::GTap::None:
+      return;
+  }
+  sketchFull = true;
+}
+
+void drawSketch() {
+  if (sketchFull) {
+    sketchFull = skToolbarDirty = false;
+    display::render(sketch::AREA, ui::BACKGROUND, [](gfx::Canvas& c) {
+      sketch::drawToolbar(c, skTools);
+      if (skTools.gallery) sketch::drawGallery(c, skGallery);
+      else sketch::drawPaper(c, skPic);
+    });
+  } else if (skToolbarDirty) {
+    skToolbarDirty = false;
+    display::render(sketch::TOOLBAR, ui::BACKGROUND, [](gfx::Canvas& c) { sketch::drawToolbar(c, skTools); });
+  }
+}
+
+// Saves after a pause in drawing (writing to flash can make the screen jump
+// for a moment, so not while the finger is drawing)
+void updateSketch(uint32_t now) {
+  if (skChanged && !touching && msSince(now, skLastStroke) > SKETCH_SAVE_AFTER_MS) sketchSave();
 }
 
 // ---------- touch ----------
@@ -532,6 +1021,22 @@ void onLongPressFace() {
 void handleTouch(uint32_t now) {
   TouchPoint tp = board::readTouch();
 
+  if (tp.pressed && !touching && alertOn) {  // any touch stops what's going off
+    touching = true;
+    touchUsed = true;
+    touchTarget = ui::Target::None;
+    lastActivity = now;
+    endAlert(true);
+    return;
+  }
+  if (touchUsed) {  // wait for the finger to lift
+    if (!tp.pressed) {
+      touching = false;
+      touchUsed = false;
+    }
+    return;
+  }
+
   if (tp.pressed && !touching) {
     touching = true;
     touchStart = now;
@@ -540,9 +1045,10 @@ void handleTouch(uint32_t now) {
     touchX0 = tp.x;
     touchY0 = tp.y;
     swiping = false;
-    if (page != Page::Face) pageTouched = now;
     ui::showPressed(touchTarget);
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
+
+    if (page == Page::Sketch && touchTarget == ui::Target::Face) sketchBegin(tp.x, tp.y);
 
     bool wasAsleep = isSleeping();
     lastActivity = now;
@@ -561,11 +1067,14 @@ void handleTouch(uint32_t now) {
 
   if (tp.pressed && touching) {
     lastActivity = now;
-    if (page != Page::Face) pageTouched = now;
+    if (sketchStroking) {  // drawing with the finger
+      sketchMove(tp.x, tp.y);
+      return;
+    }
     const int dx = tp.x - touchX0;
     // A sideways drag in the middle of the screen moves the screens
     if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(dx) > 16 &&
-        abs(dx) * 5 > abs(tp.y - touchY0) * 6) {
+        abs(dx) * 5 > abs(tp.y - touchY0) * 6 && !(page == Page::Sketch && touchX0 >= sketch::TOOLBAR_RIGHT)) {
       swiping = true;
     }
     if (swiping) {
@@ -600,6 +1109,10 @@ void handleTouch(uint32_t now) {
     touching = false;
     ui::Target released = touchTarget;
     touchTarget = ui::Target::None;
+    if (sketchStroking) {
+      sketchEnd(now);
+      return;
+    }
     if (swiping) {
       swiping = false;
       // A long enough sideways swipe changes screens
@@ -610,6 +1123,8 @@ void handleTouch(uint32_t now) {
     }
     if (released == ui::Target::Face && page != Page::Face) {
       if (!longPressDone && page == Page::Weather) onWeatherTap(touchX0, touchY0);
+      if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
+      if (page == Page::Sketch) onSketchTap(touchX0, touchY0);
       return;
     }
     if (released == ui::Target::Volume)
@@ -670,6 +1185,9 @@ void updatePhase(uint32_t now) {
       break;
     case Phase::Asleep:
       break;
+    case Phase::Alert:
+      updateAlert(now);
+      break;
   }
 }
 
@@ -690,6 +1208,10 @@ void drawFrame(uint32_t now) {
       display::render(weather::AREA, ui::BACKGROUND,
                       [](gfx::Canvas& c) { weather::draw(c, wx, wxCity, wxPicker, wxStatus.c_str()); });
     }
+  } else if (page == Page::Time) {
+    drawTime(now);
+  } else if (page == Page::Sketch) {
+    drawSketch();
   } else if (page == Page::Music) {
     const int key = music::progressKey(media, now);
     if (musicDirty) {
@@ -741,7 +1263,11 @@ void setup() {
   h.onVoice = onVoice;
   h.onUpdate = onUpdate;
   h.onArt = onArt;
+  h.onTime = onTime;
   pclink::begin(h);
+  wallclock::begin();
+  alarms::begin();
+  sketchSetup();
 
   wxPrefs.begin("weather", false);
   wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
@@ -768,7 +1294,8 @@ void loop() {
   handleTouch(now);
   updatePhase(millis());
   updateWeather(millis());
-  if (page != Page::Face && !touching && msSince(millis(), pageTouched) > PAGE_IDLE_MS) showPage(Page::Face);
+  updateTime(millis());
+  updateSketch(millis());
 
   // Gorgi barely moves while asleep, so it is redrawn less often (less load on the screen memory)
   const uint32_t interval = phase == Phase::Asleep ? SLEEP_FRAME_MS : FRAME_MS;

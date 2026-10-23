@@ -11,6 +11,8 @@ import time
 
 import httpx
 
+import timekeeper
+
 log = logging.getLogger("gorgi.brain")
 
 OLLAMA_CLOUD_URL = "https://ollama.com"
@@ -48,7 +50,8 @@ Write the fact about your friend in the third person, one fact per tag. Don't st
 and don't repeat facts you already remember. If they ask you to forget something, add
 [forget: words from that fact], or [forget: everything] to forget it all.
 Use what you remember naturally, without listing it.
-"""
+
+""" + timekeeper.PROMPT + "\n"
 
 MEMORY_RE = re.compile(r"\[(remember|forget)\s*:\s*([^\]]+)\]", re.IGNORECASE)
 
@@ -67,10 +70,13 @@ class BrainError(Exception):
 def parse_reply(reply):
     """'[happy] Hi! [action:next]' -> ('happy', 'Hi!', [('next', None)])
 
-    Memory tags come out as ('remember', 'fact') and ('forget', 'words')."""
+    Memory tags come out as ('remember', 'fact') and ('forget', 'words'), time tags
+    as ('timer', '10m | pasta'), ('remind', ...), ('focus', ...), ('cancel', ...)."""
     mood = None
     actions = [(m.group(1).lower(), m.group(2).strip()) for m in MEMORY_RE.finditer(reply)]
     reply = MEMORY_RE.sub("", reply)
+    reply, time_tags = timekeeper.extract(reply)
+    actions += time_tags
     for m in TAG_RE.finditer(reply):
         name = m.group(1).lower()
         if name in MOODS and mood is None:

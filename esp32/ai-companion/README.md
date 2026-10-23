@@ -59,11 +59,33 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
 - **Swipe sideways** in the middle of the screen to change screens. Order: **Music ← Face →
-  Weather**. After 45 seconds untouched, Gorgi goes back to its face.
+  Weather → Time → Sketch**. Gorgi stays on the screen you leave it on (it switches to its face
+  when you talk to it or when a timer or reminder goes off).
 - **Music screen** (swipe right): album art, the song, and how far into it you are.
 - **Weather screen** (swipe left): now and the next 7 days. Tap the city name to pick another
   city in Israel (Nahariya is the default). The forecast comes from
   [Open-Meteo](https://open-meteo.com) and updates every 30 minutes.
+- **Time screen** (swipe left from the weather): timers, focus sessions and reminders.
+  - Tap **1 / 5 / 10 min** to start a timer (up to 3 at once). Tap a ring to pause or resume it,
+    tap its small **x** to cancel it.
+  - Tap the **25 min** button to change the focus length (15, 25, 45, 60), then **Start focus**.
+    Gorgi doesn't comment on new songs while you focus, and cheers when the session ends.
+  - **Next up** lists the next reminders. Tap one to delete it. To add one, tap **Ask me** and say it
+    ("remind me at 5 to call mom"; see the helper's README). Ask me works for timers too.
+  - While something counts down, a small countdown shows next to the clock on every screen.
+  - When something is due, Gorgi wakes up, shows it and bounces every 30 s. **Tap anywhere** to stop it.
+    The PC says it out loud if Gorgi Helper is running.
+  - Everything is saved on Gorgi (up to 20 reminders), so it survives restarts and works without the PC.
+    Anything that went off while Gorgi was off is shown once when it starts again.
+- **Sketch screen** (swipe left from the time screen): draw with your finger.
+  - Left toolbar: 8 colours, eraser, brush size (tap to cycle 3 sizes), undo (last 5 strokes), gallery.
+  - On the sketch screen, **swipe on the toolbar** to change screens (on the paper, a swipe draws).
+  - Drawings save by themselves (after a 20-second pause, or when you leave). The **gallery** shows the
+    last 10: tap one to open it, **New page** for a fresh one, the small **x** to delete one. When there
+    are more than 10, the oldest is removed.
+  - The first start after installing 4.0 takes a few seconds longer: Gorgi prepares its storage once.
+- **The clock** comes from the internet (Israel time, summer/winter time automatic), or from the PC
+  until the internet answers.
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.
   Tap to wake it up.
 
@@ -77,6 +99,11 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/music_screen.cpp` | The music screen: album art, song, progress |
 | `src/weather.cpp` | The weather screen: forecast, weather pictures, city picker |
 | `src/weather_net.cpp` | Downloads the forecast in the background |
+| `src/time_screen.cpp` | The Time screen: countdown rings, buttons, the reminder list |
+| `src/alarms.cpp` | Keeps timers, focus sessions and reminders (saved in flash) and says when one is due |
+| `src/wallclock.cpp` | The time of day from the internet (Israel time zone) |
+| `src/sketch.cpp` | The Sketch screen: toolbar, paper, gallery, packing drawings small |
+| `src/sketch_store.cpp` | Saves and loads sketches in flash (LittleFS) |
 | `src/gfx.cpp` | Smooth-edged drawing (circles, rounded boxes, icons, text) |
 | `src/display.cpp` | Draws in fast memory, strip by strip, then copies to the screen |
 | `src/gfont_data.cpp` | Smooth text, made from the Nunito font by `tools/make_fonts.py` |

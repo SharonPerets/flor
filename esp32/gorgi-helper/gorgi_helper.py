@@ -32,11 +32,12 @@ import httpx  # noqa: E402
 import websockets  # noqa: E402
 
 import album_art  # noqa: E402
+from timekeeper import TimeKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "3.8"  # must match esp32/VERSION
+VERSION = "4.0"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -197,9 +198,12 @@ def make_progress_window(title):
 
 
 class Helper:
-    def __init__(self, media, config, on_status=None, make_conversation=None):
+    def __init__(self, media, config, on_status=None, make_conversation=None, timekeeper=None, speak=None):
         self.media = media
         self.config = config
+        self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
+        self.speak = speak  # async fn(text): says something on the PC speakers (None = no voice)
+        self._announcing = asyncio.Lock()
         self.on_status = on_status or (lambda text, connected: None)
         # make_conversation(send) -> Conversation, or None when voice isn't available
         self.make_conversation = make_conversation
@@ -407,6 +411,7 @@ class Helper:
         finally:
             self.ws = None
             self.gorgi_version = None
+            self.timekeeper.forget()
             self.on_changed()
             self.stop_conversation()
             for task in (sender, receiver, stopper):
@@ -430,6 +435,13 @@ class Helper:
                 weather.update(msg)
                 log.info("weather for %s from Gorgi", msg.get("city"))
                 continue
+            if msg.get("type") == "time_list":
+                self.timekeeper.update(msg)
+                continue
+            if msg.get("type") == "due":
+                log.info("due on Gorgi (%s): %s", msg.get("kind"), msg.get("text"))
+                asyncio.get_running_loop().create_task(self.announce(str(msg.get("text") or "")))
+                continue
             if msg.get("type") == "talk":
                 log.info("Gorgi was tapped: starting a conversation")
                 self.start_conversation()
@@ -449,6 +461,34 @@ class Helper:
                 self.ignore_volume_until = time.monotonic() + 0.5
             # Report the new state soon, once the media app has reacted
             asyncio.get_running_loop().call_later(0.4, self.refresh_event.set)
+
+    async def announce(self, text):
+        """Something on Gorgi is due: a pop-up, and Gorgi's voice says it."""
+        if not text:
+            return
+        self.on_notify("Gorgi", text)
+        if self.speak is None:
+            return
+        # Not in the middle of a conversation: wait for it to end (a minute at most)
+        for _ in range(120):
+            if not (self.conversation_task and not self.conversation_task.done()):
+                break
+            await asyncio.sleep(0.5)
+        async with self._announcing:
+            paused = False
+            try:
+                info = await self.media.get_info()
+                if info.get("playing"):
+                    await self.media.set_playing(False)
+                    paused = True
+                    await asyncio.sleep(0.3)
+                await self.speak(text)
+            except Exception as e:
+                log.warning("couldn't say it out loud: %s", e)
+            finally:
+                if paused:
+                    await asyncio.sleep(0.4)
+                    await self.media.set_playing(True)
 
     async def _send_art(self, ws, track):
         """Sends the song's picture to Gorgi (once per picture). Returns its id, or 0."""
@@ -530,7 +570,7 @@ class Helper:
 
             clock = time.strftime("%H:%M")
             if full or clock != last_clock:
-                await ws.send(json.dumps({"type": "clock", "text": clock}))
+                await ws.send(json.dumps({"type": "clock", "text": clock, "epoch": int(time.time())}))
                 last_clock = clock
 
             self.refresh_event.clear()
@@ -694,14 +734,15 @@ def run_settings_window():
 
 
 def make_voice(config):
-    """Builds the conversation parts. Returns a factory, or None if they can't load."""
+    """Builds the conversation parts. Returns (conversation factory, speak), or (None, None)
+    if they can't load."""
     try:
         from brain import Brain
         from conversation import Conversation
         from voice import Recorder, Speaker, Transcriber
     except Exception as e:
         log.error("voice features unavailable: %s", e)
-        return None
+        return None, None
 
     from memory import Memory
 
@@ -710,11 +751,17 @@ def make_voice(config):
     # Download/load Whisper in the background so the first chat is quick
     threading.Thread(target=transcriber.load, daemon=True).start()
 
-    def factory(send, media):
+    def speaker():
         voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
-        return Conversation(send, media, brain, Recorder(), transcriber, Speaker(voice, pitch="+5Hz"))
+        return Speaker(voice, pitch="+5Hz")
 
-    return factory
+    def factory(send, media, timekeeper):
+        return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper)
+
+    async def speak(text):
+        await speaker().say(text)
+
+    return factory, speak
 
 
 # ---------------------------------------------------------------- self test (used by the build)
@@ -758,6 +805,7 @@ def self_test(out_path):
         import memory  # noqa: F401
         import progress_window  # noqa: F401
         import conversation  # noqa: F401
+        import timekeeper  # noqa: F401
         import settings_window  # noqa: F401
 
         import updater as upd
@@ -857,9 +905,10 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     media = make_media()
-    voice_factory = make_voice(config)
-    make_conversation = (lambda send: voice_factory(send, media)) if voice_factory else None
-    helper = Helper(media, config, make_conversation=make_conversation)
+    voice_factory, speak = make_voice(config)
+    timekeeper = TimeKeeper()
+    make_conversation = (lambda send: voice_factory(send, media, timekeeper)) if voice_factory else None
+    helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak)
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)
