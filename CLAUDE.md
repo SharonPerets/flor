@@ -28,9 +28,16 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 
 - The sandbox can't reach the PlatformIO registry, so firmware is **compiled by GitHub Actions**:
   push to the branch and check the "Gorgi firmware" workflow (GitHub MCP tools).
-- Visual work: a PC preview of the drawing code (LovyanGFX on Linux) renders screenshots. It lived in the
-  old session's scratchpad and is gone; rebuild if needed (LovyanGFX `examples_for_PC`, compile
-  `face/ui/gfx/display/weather/music_screen/gfont_data.cpp` against a sprite-based `LGFX`).
+- Visual work: `esp32/ai-companion/tools/pc-tests/run.sh` (plain g++, no LovyanGFX) draws the Time screen
+  into pictures and tests the timer/reminder engine with a fake clock (Arduino stand-ins in `stub/`).
+  The same trick works for any pure-C++ screen (`weather.cpp`, `music_screen.cpp`): they only need
+  `gfx.cpp` + `gfont_data.cpp`. Helper: `python esp32/gorgi-helper/test_timekeeper.py`.
+- The board compiles as **gnu++11**: no default member initializers in structs built with `{a, b}`
+  (give them a constructor). Check with `g++ -std=gnu++11 -fsyntax-only`.
+- GitHub's full build logs can't be downloaded from the sandbox; the firmware workflow prints compile
+  errors as annotations: `gh api repos/SharonPerets/flor/check-runs/<job id>/annotations`.
+- Pushing a change to `esp32/VERSION` on any branch publishes a release. Push code first with the old
+  version to let the builds check it, then bump the version.
 - **Release** = change `esp32/VERSION` and set the same version in `GORGI_VERSION`
   (`esp32/ai-companion/src/pclink.h`) and `VERSION` (`esp32/gorgi-helper/gorgi_helper.py`), then push.
   `gorgi-release.yml` builds firmware + helper installer and publishes GitHub release `gorgi-v<ver>`.
@@ -57,7 +64,13 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - `millis()` comparisons must be wrap-safe (`msSince`).
 - Names: `pclink` (not `link`, clashes with POSIX), `gfont` (not `fonts`, clashes with LovyanGFX).
 
-## Where things stand (version 3.8)
+## Where things stand (version 3.8 released; 3.9 code done, waiting to be released/tested)
+
+3.9 = the Time screen (step 1 below): `wallclock` (internet time, Israel TZ, PC time as backup),
+`alarms` (timers/focus/reminders saved in NVS namespace "alarms", due list, missed after restart),
+`time_screen` (drawing + taps), helper `timekeeper.py` (AI tags -> `time_add`/`time_cancel`, list in the
+AI context, `due` -> pop-up + spoken on the PC). Screens: **Music ← Face → Weather → Time**.
+
 
 Done: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control + volume,
 long-term memory (`memory.json` on the PC), Wi-Fi updates with progress window on the PC, screens by
