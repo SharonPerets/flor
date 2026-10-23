@@ -1,6 +1,8 @@
 #include "tabs.h"
 
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "gfont.h"
 
@@ -13,7 +15,11 @@ using gfx::Pt;
 
 const Color BG = gfx::rgb(0x05070A);
 const Color DIM = gfx::rgb(0x6B7886);
-const Color ON_BG = gfx::rgb(0x1C2733);
+const Color ON_BG = gfx::rgb(0x141C26);
+const Color LINE = gfx::rgb(0x161D27);
+const Color PILL = gfx::rgb(0x10151C);
+const Color PILL_EDGE = gfx::rgb(0x1C2430);
+const Color TEXT = gfx::rgb(0xE8EEF4);
 const Color ACCENT = gfx::rgb(0x4FE3D6);
 const Color BADGE = gfx::rgb(0xFF9F43);
 const Color CALL = gfx::rgb(0xE5484D);
@@ -77,10 +83,14 @@ void micSlash(Canvas& c, float cx, float cy, float s, const Color& col) {
 }  // namespace
 
 void draw(Canvas& c, const uint8_t* icons, int count, int current, uint32_t badges) {
+  c.fillRect(AREA.x, LINE_Y, AREA.w, 1, LINE);
   for (int i = 0; i < count && i < MAX_TABS; ++i) {
-    const float x = centerX(i, count), y = 22;
+    const float x = centerX(i, count), y = 21;
     const bool on = i == current;
-    if (on) c.fillRRect(x - 19, y - 16, 38, 32, 12, ON_BG);
+    if (on) {
+      c.fillRRect(x - 22, y - 15, 44, 30, 15, ON_BG);
+      c.fillRRect(x - 8, LINE_Y - 2, 16, 3, 1.5f, ACCENT);  // underline
+    }
     const Color& col = on ? ACCENT : DIM;
     switch (icons[i]) {
       case MUSIC: note(c, x, y, col); break;
@@ -102,6 +112,36 @@ int at(int x, int y, int count) {
   for (int i = 0; i < count && i < MAX_TABS; ++i)
     if (fabsf(x - centerX(i, count)) <= GAP * 0.5f) return i;
   return -1;
+}
+
+void drawMiniPlayer(Canvas& c, const char* title, const char* artist, bool playing) {
+  const gfx::Rect& m = MINI;
+  c.fillRRect(m.x, m.y, m.w, m.h, m.h / 2.0f, PILL_EDGE);
+  c.fillRRect(m.x + 1, m.y + 1, m.w - 2, m.h - 2, m.h / 2.0f - 1, PILL);
+  const float cy = m.y + m.h / 2.0f;
+  note(c, m.x + 28, cy, ACCENT);
+  // "Song - Artist", cut to fit
+  char line[96];
+  if (artist && artist[0]) snprintf(line, sizeof line, "%s  -  %s", title, artist);
+  else snprintf(line, sizeof line, "%s", title);
+  const float maxW = m.w - 110;
+  int n = (int)strlen(line);
+  while (n > 3 && Canvas::textWidth(gfont::SMALL, line) > maxW) {
+    line[--n] = 0;
+    line[n - 1] = line[n - 2] = line[n - 3] = '.';
+  }
+  c.text(gfont::SMALL, line, m.x + 52, (int)cy + 6, TEXT);
+  // play / pause
+  const float px = m.x + m.w - 30;
+  c.fillCircle(px, cy, 15, ACCENT);
+  const Color dark = gfx::rgb(0x05201E);
+  if (playing) {
+    c.fillRRect(px - 5.5f, cy - 6, 4, 12, 1.5f, dark);
+    c.fillRRect(px + 1.5f, cy - 6, 4, 12, 1.5f, dark);
+  } else {
+    const Pt tri[3] = {{px - 3.5f, cy - 6.5f}, {px - 3.5f, cy + 6.5f}, {px + 6.5f, cy}};
+    c.fillPolygon(tri, 3, dark, 1.0f, 1.2f);
+  }
 }
 
 void drawCallButton(Canvas& c, bool pressed) {
