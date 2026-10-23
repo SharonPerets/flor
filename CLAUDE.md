@@ -69,7 +69,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
 
-## Where things stand (4.2.1 released: Claude usage for the desktop app - waiting for the user to test; 4.2 confirmed, merged to main)
+## Where things stand (4.3 in progress: Action Center redesign; 4.2.1 released, untested; 4.2 confirmed, merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -128,7 +128,20 @@ Done and confirmed:
   (input+output+cache creation, last 5 h / 7 days) shown as amounts. Plan name ("Max") next to "Usage" so the
   user can see which account it is: only the PC app's account, never the browser one (user asked for that).
   Last result in `claude-usage.json` (helper settings folder, no token) for debugging. The user has a Max plan.
-- Screens now: **Music ← Face → Weather → Time → Sketch → Claude** (icon tabs at the top).
+- **4.3 - top bar vs Action Center** (user's notes from a video):
+  - Top bar = icons only (clock, countdown chip, tabs ♪ ☺ ⏱ ✎ ✳ with highlight + teal underline, talk pill, a thin
+    line under it). Handle dot = there are notifications. `CLOCK_AREA` now stops at x 248 (it used to wipe the
+    first tab icon when the countdown appeared - fixed).
+  - **Action Center** (`action_center.cpp`) replaces the 4.2 panel: a full 800x480 screen (ui::update is paused
+    while open, `ui::redrawAll()` on close): big time + date, small weather chip (tap -> forecast with Back and the
+    city picker; the user rarely uses weather, so it's hidden until tapped), Sleep, full-width notifications.
+    Notifications (main.cpp `notices[]`): UPDATE (from `update_info`, button "Update"), MISSED (an alert nobody
+    tapped in 10 min), CLAUDE (a Claude alert while Gorgi was busy). x clears one.
+  - **No Weather tab** any more (fetching continues: the chip, the AI).
+  - **Music bar folded** into a slim line (`tabs::drawMiniPlayer`, y 424); tap -> full bar for 10 s (`openMusicBar`).
+    Face moved down a little (FACE_Y 56, subtitle 330..388, bar 392..476).
+  - Time screen redraws only the changed part (rings / buttons / list): a full redraw flickered (start/stop focus).
+- Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
@@ -153,7 +166,7 @@ Planned screen order when all exist: **Music ← Face → Weather → Time → S
 - **Next meeting countdown** (Outlook calendar, "Join" button) - suggested with 4.1, a good next step.
 - **Gorgi dances** to the music beat; **focus music** (playlist starts with a focus session);
   **build/PR watcher** (GitHub CI results) - suggested with 4.1.
-- **More for the pull-down panel**: quiet mode, lock/sleep PC, big volume.
+- **More for the Action Center**: quiet mode, lock/sleep PC, big volume; more notification kinds.
 - **Smooth sliding between screens**: tried twice (3.7 slide, 3.7.9x new driver) and dropped; see lessons.
 
 Not wanted (don't suggest again): greetings, break reminders.

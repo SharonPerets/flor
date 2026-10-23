@@ -1380,7 +1380,7 @@ void handleTouch(uint32_t now) {
     return;
   }
 
-  if (acOpen) {  // the panel takes every touch until it closes
+  if (acOpen) {  // the Action Center takes every touch until it closes
     if (tp.pressed && !touching) {
       touching = true;
       touchX0 = tp.x;
@@ -1432,7 +1432,7 @@ void handleTouch(uint32_t now) {
       sketchMove(tp.x, tp.y);
       return;
     }
-    // pulling down from the top bar opens the panel
+    // pulling down from the top bar opens the Action Center
     if (touchY0 < ui::TOP_H && tp.y - touchY0 > 50 && abs(tp.y - touchY0) > abs(tp.x - touchX0)) {
       touchUsed = true;
       touchTarget = ui::Target::None;
