@@ -66,7 +66,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - `millis()` comparisons must be wrap-safe (`msSince`).
 - Names: `pclink` (not `link`, clashes with POSIX), `gfont` (not `fonts`, clashes with LovyanGFX).
 
-## Where things stand (version 3.8 released; 3.9 code done, waiting to be released/tested)
+## Where things stand (version 3.9 released: the Time screen; waiting for the user to test it)
 
 3.9 = the Time screen (step 1 below): `wallclock` (internet time, Israel TZ, PC time as backup),
 `alarms` (timers/focus/reminders saved in NVS namespace "alarms", due list, missed after restart),
