@@ -5,28 +5,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bidi.h"
-
 namespace todos {
 namespace {
 
 constexpr int MAX_TASKS = MAX_OPEN + MAX_DONE;
 constexpr uint32_t SAVE_AFTER_MS = 1500;  // a moment after the last change (writing flash can make the screen jump)
-constexpr uint32_t MAGIC_V1 = 0x31444F54;  // "TOD1": fixed-size records with 56-byte text (4.6)
-constexpr uint32_t MAGIC = 0x32444F54;     // "TOD2": packed records, text stored at its own length (4.7)
-constexpr int OLD_TEXT_MAX = 56;
-
-// How 4.6 saved a task
-struct TaskV1 {
-  uint32_t id;
-  int32_t due;
-  uint32_t remindAt;
-  uint32_t alarmId;
-  uint32_t doneAt;
-  uint8_t flags;
-  char text[OLD_TEXT_MAX + 1];
-};
-constexpr size_t FIXED = 21;  // packed record: id, due, remindAt, alarmId, doneAt, flags, then text length + text
+constexpr uint32_t MAGIC = 0x31444F54;    // "TOD1"
+constexpr uint32_t MAGIC_PACKED = 0x32444F54;  // "TOD2": how 4.7-4.8 saved the list (read once, then saved as TOD1)
+constexpr size_t PACKED_FIXED = 21;            // id, due, remindAt, alarmId, doneAt, flags; then length + text
 
 Task tasks[MAX_TASKS];
 int count = 0;
@@ -75,18 +61,14 @@ void copyText(char* out, const char* in) {
   // squeeze spaces, cut to TEXT_MAX
   int n = 0;
   bool space = true;
-  char tmp[TEXT_MAX * 2 + 1];
-  for (const char* p = in; *p && n < TEXT_MAX + 4; ++p) {
+  for (const char* p = in; *p && n < TEXT_MAX; ++p) {
     char ch = *p;
     if (ch == '\n' || ch == '\t' || ch == '\r') ch = ' ';
-    if ((uint8_t)ch < 32 || ch == 127) continue;  // control characters (UTF-8 letters are kept)
+    if ((uint8_t)ch < 32 || (uint8_t)ch > 126) continue;
     if (ch == ' ' && space) continue;
     space = ch == ' ';
-    tmp[n++] = ch;
+    out[n++] = ch;
   }
-  tmp[n] = 0;
-  n = (int)bidi::safeCut(tmp, TEXT_MAX);  // never half a Hebrew letter
-  memcpy(out, tmp, n);
   while (n > 0 && out[n - 1] == ' ') --n;
   out[n] = 0;
 }
@@ -158,9 +140,10 @@ int32_t parseDate(const char* s) {
 
 // ---------------------------------------------------------------- the list
 
+// Tasks saved by 4.7-4.8: kept, with only plain letters (others dropped)
 static void loadPacked(const uint8_t* p, size_t len) {
   size_t at = 8;
-  while (count < MAX_TASKS && at + FIXED + 1 <= len) {
+  while (count < MAX_TASKS && at + PACKED_FIXED + 1 <= len) {
     Task& t = tasks[count];
     memcpy(&t.id, p + at, 4);
     memcpy(&t.due, p + at + 4, 4);
@@ -168,53 +151,51 @@ static void loadPacked(const uint8_t* p, size_t len) {
     memcpy(&t.alarmId, p + at + 12, 4);
     memcpy(&t.doneAt, p + at + 16, 4);
     t.flags = p[at + 20];
-    const size_t n = p[at + FIXED];
-    at += FIXED + 1;
-    if (n > TEXT_MAX || at + n > len) break;
-    memcpy(t.text, p + at, n);
-    t.text[n] = 0;
+    const size_t n = p[at + PACKED_FIXED];
+    at += PACKED_FIXED + 1;
+    if (at + n > len) break;
+    char raw[256];
+    memcpy(raw, p + at, n);
+    raw[n] = 0;
     at += n;
-    ++count;
+    copyText(t.text, raw);
+    if (t.text[0]) ++count;
   }
-}
-
-static void loadV1(const uint8_t* p, size_t len) {  // the 4.6 format, once after the update
-  const int n = (int)((len - 8) / sizeof(TaskV1));
-  for (int i = 0; i < n && count < MAX_TASKS; ++i) {
-    TaskV1 o;
-    memcpy(&o, p + 8 + i * sizeof(TaskV1), sizeof o);
-    Task& t = tasks[count++];
-    t.id = o.id;
-    t.due = o.due;
-    t.remindAt = o.remindAt;
-    t.alarmId = o.alarmId;
-    t.doneAt = o.doneAt;
-    t.flags = o.flags;
-    o.text[OLD_TEXT_MAX] = 0;
-    snprintf(t.text, sizeof t.text, "%s", o.text);
-  }
+  dirty = count > 0;
 }
 
 void begin() {
   prefsOpen = prefs.begin("todo", false);
   count = 0;
   const size_t len = prefs.getBytesLength("list");
-  if (len >= 8 && len <= 8 + (FIXED + 1 + TEXT_MAX) * MAX_TASKS) {
+  if (len >= 8 && len <= 8 + 256 * MAX_TASKS) {
     uint8_t* buf = (uint8_t*)malloc(len);
-    if (buf && prefs.getBytes("list", buf, len) == len) {
-      uint32_t magic;
-      memcpy(&magic, buf, 4);
+    uint32_t magic = 0;
+    if (buf && prefs.getBytes("list", buf, len) == len) memcpy(&magic, buf, 4);
+    if (magic == MAGIC_PACKED) {
       memcpy(&nextId, buf + 4, 4);
-      if (magic == MAGIC) {
-        loadPacked(buf, len);
-      } else if (magic == MAGIC_V1 && (len - 8) % sizeof(TaskV1) == 0) {
-        loadV1(buf, len);
-        dirty = true;  // saved in the new format below
-      }
+      loadPacked(buf, len);
       for (int i = 0; i < count; ++i)
         if (tasks[i].id >= nextId) nextId = tasks[i].id + 1;
     }
     free(buf);
+  }
+  if (count == 0 && len >= 8 && (len - 8) % sizeof(Task) == 0) {
+    static uint8_t buf[8 + sizeof(Task) * MAX_TASKS];
+    if (len <= sizeof buf && prefs.getBytes("list", buf, len) == len) {
+      uint32_t magic;
+      memcpy(&magic, buf, 4);
+      memcpy(&nextId, buf + 4, 4);
+      const int n = (int)((len - 8) / sizeof(Task));
+      if (magic == MAGIC && n <= MAX_TASKS) {
+        memcpy(tasks, buf + 8, n * sizeof(Task));
+        count = n;
+        for (int i = 0; i < count; ++i) {
+          tasks[i].text[TEXT_MAX] = 0;
+          if (tasks[i].id >= nextId) nextId = tasks[i].id + 1;
+        }
+      }
+    }
   }
   if (!nextId) nextId = 1;
   Serial.printf("todo: %d task(s) from memory\n", count);
@@ -225,31 +206,11 @@ void saveNow() {
   if (!dirty) return;
   dirty = false;
   if (!prefsOpen) return;
-  size_t len = 8;
-  for (int i = 0; i < count; ++i) len += FIXED + 1 + strlen(tasks[i].text);
-  uint8_t* buf = (uint8_t*)malloc(len);
-  if (!buf) {
-    dirty = true;  // try again later
-    return;
-  }
+  static uint8_t buf[8 + sizeof(Task) * MAX_TASKS];
   memcpy(buf, &MAGIC, 4);
   memcpy(buf + 4, &nextId, 4);
-  size_t at = 8;
-  for (int i = 0; i < count; ++i) {
-    const Task& t = tasks[i];
-    const size_t n = strlen(t.text);
-    memcpy(buf + at, &t.id, 4);
-    memcpy(buf + at + 4, &t.due, 4);
-    memcpy(buf + at + 8, &t.remindAt, 4);
-    memcpy(buf + at + 12, &t.alarmId, 4);
-    memcpy(buf + at + 16, &t.doneAt, 4);
-    buf[at + 20] = t.flags;
-    buf[at + FIXED] = (uint8_t)n;
-    memcpy(buf + at + FIXED + 1, t.text, n);
-    at += FIXED + 1 + n;
-  }
-  prefs.putBytes("list", buf, len);
-  free(buf);
+  memcpy(buf + 8, tasks, count * sizeof(Task));
+  prefs.putBytes("list", buf, 8 + count * sizeof(Task));
 }
 
 void loop(uint32_t nowMs, bool canSave) {

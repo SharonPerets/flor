@@ -17,6 +17,7 @@ import logging
 import os
 import platform
 import secrets
+import shutil
 import socket
 import sys
 import threading
@@ -42,7 +43,7 @@ import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.7"  # must match esp32/VERSION
+VERSION = "4.8.5"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -81,7 +82,19 @@ def load_config():
         save_config(config)
     except Exception as e:
         log.warning("could not read %s: %s", path, e)
+    # Hebrew was tried in 4.8 and dropped: forget its settings and the downloaded Hebrew model
+    old = [k for k in HEBREW_LEFTOVERS if k in config]
+    if old:
+        for k in old:
+            config.pop(k, None)
+        save_config(config)
+    for folder in (data_dir() / "models").glob("*ivrit-ai--*"):
+        shutil.rmtree(folder, ignore_errors=True)
     return config
+
+
+HEBREW_LEFTOVERS = ("language", "voice_he", "whisper_model_he", "hearing_he", "hearing",
+                    "groq_api_key", "openai_api_key")
 
 
 def save_config(config):

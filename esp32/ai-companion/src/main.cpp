@@ -856,7 +856,7 @@ void sendTodoList() {
 }
 
 void todoToast(const String& text, bool undo) {
-  snprintf(todoView.toast, sizeof todoView.toast, "%s", ui::cleanText(text).c_str());
+  snprintf(todoView.toast, sizeof todoView.toast, "%s", ui::toAscii(text).c_str());
   todoView.toastUndo = undo;
   todoToastUntil = millis() + (undo ? TODO_UNDO_MS : TODO_NOTE_MS);
   if (!undo) todoUndoKind = TodoUndo::None;
@@ -884,7 +884,7 @@ void todoDisarmReminder(uint32_t id) {
 // Adds a task (from the keyboard, voice or Gorgi's AI) and shows where it landed
 bool todoAdd(const String& text, int32_t due, bool someday, bool star, uint32_t remindAt, bool show) {
   uint32_t id = 0;
-  const todos::Result r = todos::add(ui::cleanText(text).c_str(), due, someday, star, remindAt, &id);
+  const todos::Result r = todos::add(ui::toAscii(text).c_str(), due, someday, star, remindAt, &id);
   if (r == todos::Result::Full) {
     todoToast(String("Your list is full (") + todos::MAX_OPEN + " tasks). Finish a few first!", false);
     return false;
@@ -965,7 +965,7 @@ void todoStopVoice() {
 void onDictation(const char* type, JsonObjectConst msg) {
   lastActivity = millis();
   if (strcmp(type, "dictation") == 0) {
-    const String text = ui::cleanText(String((const char*)(msg["text"] | "")));
+    const String text = ui::toAscii(String((const char*)(msg["text"] | "")));
     if (todoVoiceForKb && todoView.kb.open) {  // into the text box
       todoscreen::Keyboard& kb = todoView.kb;
       String t = String(kb.text);
@@ -1323,8 +1323,8 @@ void addNotice(uint8_t kind, const char* title, const char* text, const char* ac
   for (int k = noticeCount; k > 0; --k) notices[k] = notices[k - 1];
   actioncenter::Notice& n = notices[0];
   n.kind = kind;
-  snprintf(n.title, sizeof n.title, "%s", ui::cleanText(String(title)).c_str());
-  snprintf(n.text, sizeof n.text, "%s", ui::cleanText(String(text)).c_str());
+  snprintf(n.title, sizeof n.title, "%s", ui::toAscii(String(title)).c_str());
+  snprintf(n.text, sizeof n.text, "%s", ui::toAscii(String(text)).c_str());
   snprintf(n.action, sizeof n.action, "%s", action);
   ++noticeCount;
   noticesChanged();
@@ -1403,8 +1403,8 @@ void onOther(const char* type, JsonObjectConst msg) {
       if (claudeView.count >= claudescreen::MAX_SESSIONS) break;
       const int i = claudeView.count++;
       claudescreen::Session& out = claudeView.sessions[i];
-      snprintf(out.name, sizeof out.name, "%s", ui::cleanText(String((const char*)(s["name"] | "?"))).c_str());
-      snprintf(out.text, sizeof out.text, "%s", ui::cleanText(String((const char*)(s["text"] | ""))).c_str());
+      snprintf(out.name, sizeof out.name, "%s", ui::toAscii(String((const char*)(s["name"] | "?"))).c_str());
+      snprintf(out.text, sizeof out.text, "%s", ui::toAscii(String((const char*)(s["text"] | ""))).c_str());
       out.state = claudeState(s["state"] | "idle");
       claudeSince[i] = s["since"] | 0;
       formatWhen(claudeSince[i], out.at, sizeof out.at);
@@ -1888,7 +1888,7 @@ void drawActionCenter() {
   const char* wifi = rssi == 0 ? "no Wi-Fi" : rssi > -60 ? "Wi-Fi good" : rssi > -72 ? "Wi-Fi OK" : "Wi-Fi weak";
   if (pclink::helperConnected())
     snprintf(acView.status, sizeof acView.status, "Gorgi %s  -  %s  -  PC: %s connected", GORGI_VERSION, wifi,
-             ui::cleanText(pcName).c_str());
+             ui::toAscii(pcName).c_str());
   else
     snprintf(acView.status, sizeof acView.status, "Gorgi %s  -  %s  -  PC not connected", GORGI_VERSION, wifi);
   display::render(actioncenter::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { actioncenter::draw(c, acView); });
