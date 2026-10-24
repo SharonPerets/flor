@@ -149,8 +149,9 @@ uint32_t ignorePcVolumeUntil = 0;  // don't let the PC move the slider while you
 
 const gfx::Color CALL_RED = gfx::rgb(0xFF6B6B);
 void showIdleStatus() {
+  // Nothing when idle: on the face you tap the face; screens without one have a Talk button
   if (callOn) ui::setStatus("On a call", CALL_RED, false);
-  else ui::setStatus("Tap me to talk", ui::COLOR_TEXT_DIM, false);
+  else ui::setStatus("", ui::COLOR_TEXT_DIM, false);
 }
 
 // Text that stays under the face while nothing else is being said
@@ -276,6 +277,7 @@ void showPage(Page p) {
   page = p;
   ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
+  ui::setTalkButton(p == Page::Sketch);
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
     display::render(gfx::Rect{0, ui::TOP_H, 800, ui::FACE_Y - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
@@ -780,30 +782,41 @@ void onTime(const char* type, JsonObjectConst msg) {
 }
 
 // ---------- sketch pad ----------
+// Write mode: a big writing box, the words land small on a lined page (sketch::Writer).
+// Draw mode: free drawing on the whole paper. Both work on the same picture.
 
 uint16_t* skPic = nullptr;  // the drawing (PSRAM)
-constexpr int UNDO_STEPS = 5;
+uint16_t* skBox = nullptr;  // the big writing in the Write box (PSRAM)
+// Undo: the last few states of the picture, newest = what's on the paper now. A copy is
+// made when a stroke (Draw) or a word (Write) is finished, never while the finger draws.
+constexpr int UNDO_STEPS = 6;
 uint16_t* skUndo[UNDO_STEPS] = {};
+sketch::Cursor skUndoCursor[UNDO_STEPS];
 int skUndoSlots = 0;          // how many undo pictures could be made
-int skUndoCount = 0, skUndoNext = 0;
+int skHistStart = 0, skHistCount = 0;
 uint16_t* skThumbs = nullptr;  // gallery pictures
 sketch::Tools skTools;
 sketch::Gallery skGallery;
+sketch::Writer skWriter;
+sketch::Smoother skSmooth;
 Preferences skPrefs;
 uint32_t skCurrent = 1, skNextId = 2;
 bool skLoaded = false;     // the current sketch was read from flash
 bool skChanged = false;    // drawn on since the last save
 bool skToolbarDirty = false;
 uint32_t skLastStroke = 0;
+uint32_t skClearAsked = 0;  // when "Clear" started asking "Sure?"
 bool sketchStroking = false;
-float skLastX = 0, skLastY = 0;
+enum class SkStroke { Draw, Box, Erase };  // what the finger is doing
+SkStroke skStroke = SkStroke::Draw;
+gfx::Pt skLast = {0, 0};
 constexpr uint32_t SKETCH_SAVE_AFTER_MS = 20 * 1000;  // save after a pause in drawing
+constexpr uint32_t SKETCH_CLEAR_ASK_MS = 3000;
 constexpr size_t SKETCH_PIXELS = (size_t)sketch::PAPER_W * sketch::PAPER_H;
-
-void sketchMove(int x, int y);
 
 void sketchSetup() {
   skPic = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
+  skBox = (uint16_t*)heap_caps_malloc((size_t)sketch::PAPER_W * sketch::BOX_H * 2, MALLOC_CAP_SPIRAM);
   skThumbs = (uint16_t*)heap_caps_malloc((size_t)sketch::MAX_SKETCHES * sketch::THUMB_W * sketch::THUMB_H * 2,
                                          MALLOC_CAP_SPIRAM);
   for (int i = 0; i < UNDO_STEPS; ++i) {
@@ -811,9 +824,11 @@ void sketchSetup() {
     if (!skUndo[i]) break;
     skUndoSlots = i + 1;
   }
+  skWriter.attach(skPic, skBox);
   skPrefs.begin("sketch", false);
   skCurrent = skPrefs.getUInt("cur", 1);
   skNextId = skPrefs.getUInt("next", skCurrent + 1);
+  skTools.write = skPrefs.getUChar("mode", 1) != 0;
   sketchstore::begin();
   Serial.printf("sketch: ready, %d undo steps, free psram %u\n", skUndoSlots, ESP.getFreePsram());
 }
@@ -823,9 +838,38 @@ void sketchClear() {
   for (size_t i = 0; i < SKETCH_PIXELS; ++i) skPic[i] = sketch::PAPER_COLOR.c;
 }
 
+void sketchUpdateCanUndo() {
+  const bool can = skHistCount >= 2 || (skTools.write && skWriter.hasInk());
+  if (can == skTools.canUndo) return;
+  skTools.canUndo = can;
+  skToolbarDirty = true;
+}
+
+// Remembers the picture as it is now (the newest undo step)
+void sketchCheckpoint() {
+  if (!skUndoSlots || !skPic) return;
+  if (skHistCount == skUndoSlots) {  // full: forget the oldest
+    skHistStart = (skHistStart + 1) % skUndoSlots;
+    --skHistCount;
+  }
+  const int i = (skHistStart + skHistCount) % skUndoSlots;
+  memcpy(skUndo[i], skPic, SKETCH_PIXELS * 2);
+  skUndoCursor[i] = skWriter.cursor();
+  ++skHistCount;
+  sketchUpdateCanUndo();
+}
+
 void sketchForgetUndo() {
-  skUndoCount = 0;
-  skTools.canUndo = false;
+  skHistCount = 0;
+  sketchCheckpoint();
+}
+
+// Write mode: finishes the word in the box (the box moves on)
+void sketchCommitWord() {
+  if (skWriter.commit()) {
+    skChanged = true;
+    sketchCheckpoint();
+  }
 }
 
 void sketchSave() {
@@ -838,16 +882,23 @@ void sketchLoadCurrent() {
   skLoaded = true;
   if (!skPic) return;
   if (!sketchstore::load(skCurrent, skPic)) sketchClear();
+  skWriter.clearBox();
+  skWriter.findCursor();  // carry on after the last writing
   sketchForgetUndo();
 }
 
 void sketchStartNew() {
+  sketchCommitWord();
   sketchSave();
   skCurrent = skNextId++;
   skPrefs.putUInt("cur", skCurrent);
   skPrefs.putUInt("next", skNextId);
   sketchClear();
+  skWriter.clearBox();
+  skWriter.setCursor(sketch::Cursor());
+  skWriter.takeLayoutChange();
   sketchForgetUndo();
+  sketchFull = true;
 }
 
 void sketchShown() {
@@ -859,6 +910,8 @@ void sketchShown() {
 void sketchHidden() {
   sketchStroking = false;
   skTools.gallery = false;
+  skTools.confirmClear = false;
+  sketchCommitWord();
   sketchSave();
 }
 
@@ -874,59 +927,156 @@ void sketchFillGallery() {
   }
 }
 
-void sketchRenderRect(const gfx::Rect& r) {
-  display::render(r, sketch::PAPER_COLOR, [](gfx::Canvas& c) { sketch::drawPaper(c, skPic); });
+void sketchDrawSheet(gfx::Canvas& c) {
+  if (skTools.write) skWriter.draw(c);
+  else sketch::drawPaper(c, skPic);
 }
 
-// Finger down on the paper: start a stroke (a dot so far)
-void sketchBegin(int x, int y) {
-  if (skTools.gallery || !skPic || x < sketch::PAPER_X || y < sketch::PAPER_Y ||
-      x >= sketch::PAPER_X + sketch::PAPER_W || y >= sketch::PAPER_Y + sketch::PAPER_H)
+void sketchRenderRect(const gfx::Rect& r) {
+  if (r.empty() || skTools.gallery) return;
+  display::render(r, sketch::PAPER_COLOR, [](gfx::Canvas& c) { sketchDrawSheet(c); });
+}
+
+// Draws what the Write box changed (or everything, when the box moved to the other end)
+void sketchFlushWriter() {
+  gfx::Rect rects[8];
+  const int n = skWriter.takeDirty(rects, 8);
+  if (skWriter.takeLayoutChange()) {
+    sketchFull = true;
     return;
-  if (skUndoSlots) {  // remember the picture before this stroke
-    memcpy(skUndo[skUndoNext], skPic, SKETCH_PIXELS * 2);
-    skUndoNext = (skUndoNext + 1) % skUndoSlots;
-    if (skUndoCount < skUndoSlots) ++skUndoCount;
-    if (!skTools.canUndo) skToolbarDirty = true;
-    skTools.canUndo = true;
+  }
+  if (sketchFull) return;
+  for (int i = 0; i < n; ++i) sketchRenderRect(rects[i]);
+}
+
+// Draws smoothed stroke pieces into the picture (Draw mode, or erasing in Write mode)
+void sketchInk(const gfx::Pt* pts, int n) {
+  if (n <= 0) return;
+  const bool erase = skTools.eraser;
+  const gfx::Color& col = erase ? sketch::PAPER_COLOR : sketch::COLORS[skTools.color];
+  const float r = sketch::SIZES[skTools.size] * (erase ? 2.5f : 1.0f);
+  gfx::Rect changed;
+  for (int i = 0; i < n; ++i) {
+    changed = gfx::unite(changed, sketch::stroke(skPic, skLast.x, skLast.y, pts[i].x, pts[i].y, col, r));
+    skLast = pts[i];
+  }
+  sketchRenderRect(changed);
+  skChanged = true;
+}
+
+bool sketchOnPaper(int x, int y) {
+  return x >= sketch::PAPER_X && y >= sketch::PAPER_Y && x < sketch::PAPER_X + sketch::PAPER_W &&
+         y < sketch::PAPER_Y + sketch::PAPER_H;
+}
+
+// Finger down on the paper: start a stroke (a dot so far). Taps on buttons and
+// on the page (Write mode: move the writing spot) are handled when the finger lifts.
+void sketchBegin(int x, int y) {
+  if (skTools.gallery || !skPic || !sketchOnPaper(x, y)) return;
+  if (skTools.confirmClear) {
+    skTools.confirmClear = false;
+    skToolbarDirty = true;
+  }
+  if (skTools.write) {
+    if (skWriter.inBox(x, y)) {
+      const gfx::Color& col = sketch::COLORS[skTools.color];
+      skWriter.begin(x, y, col, skTools.size);
+      if (skWriter.takePageFull()) {  // no lines left: carry on on a new page
+        sketchStartNew();
+        skWriter.begin(x, y, col, skTools.size);
+      }
+      sketchStroking = true;
+      skStroke = SkStroke::Box;
+      skChanged = true;
+      sketchUpdateCanUndo();
+      sketchFlushWriter();
+      return;
+    }
+    if (!skTools.eraser || skWriter.buttonAt(x, y) != sketch::BoxButton::None) return;
+    sketchCommitWord();
+    skStroke = SkStroke::Erase;  // the eraser works right on the page
+  } else {
+    skStroke = SkStroke::Draw;
   }
   sketchStroking = true;
-  skLastX = x;
-  skLastY = y;
-  sketchMove(x, y);
+  gfx::Pt pts[sketch::Smoother::MAX_OUT];
+  skSmooth.start(x, y, pts);
+  skLast = pts[0];
+  sketchInk(pts, 1);
 }
 
 void sketchMove(int x, int y) {
-  const float dx = x - skLastX, dy = y - skLastY;
-  if (dx * dx + dy * dy < 4 && skChanged && (x != skLastX || y != skLastY)) return;  // wait for a bigger move
-  const gfx::Color& col = skTools.eraser ? sketch::PAPER_COLOR : sketch::COLORS[skTools.color];
-  const float r = sketch::SIZES[skTools.size] * (skTools.eraser ? 2.5f : 1.0f);
-  sketchRenderRect(sketch::stroke(skPic, skLastX, skLastY, x, y, col, r));
-  skLastX = x;
-  skLastY = y;
-  skChanged = true;
+  if (skStroke == SkStroke::Box) {
+    skWriter.move(x, y);
+    sketchFlushWriter();
+    return;
+  }
+  gfx::Pt pts[sketch::Smoother::MAX_OUT];
+  sketchInk(pts, skSmooth.add(x, y, pts));
 }
 
 void sketchEnd(uint32_t now) {
   sketchStroking = false;
   skLastStroke = now;
+  if (skStroke == SkStroke::Box) {
+    if (skWriter.end(now)) sketchCheckpoint();  // writing past the line: the box moved on
+    sketchFlushWriter();
+    return;
+  }
+  gfx::Pt pts[sketch::Smoother::MAX_OUT];
+  sketchInk(pts, skSmooth.finish(pts));
+  sketchCheckpoint();
 }
 
 void sketchUndo() {
-  if (!skUndoCount) return;
-  skUndoNext = (skUndoNext + skUndoSlots - 1) % skUndoSlots;
-  memcpy(skPic, skUndo[skUndoNext], SKETCH_PIXELS * 2);
-  --skUndoCount;
-  skTools.canUndo = skUndoCount > 0;
+  if (skTools.write && skWriter.hasInk()) {
+    skWriter.clearBox();  // the word being written goes; the page goes back to before it
+  } else {
+    if (skHistCount < 2) return;
+    --skHistCount;
+  }
+  if (!skHistCount) return;
+  const int i = (skHistStart + skHistCount - 1) % skUndoSlots;
+  memcpy(skPic, skUndo[i], SKETCH_PIXELS * 2);
+  skWriter.setCursor(skUndoCursor[i]);
+  skWriter.takeLayoutChange();
   skChanged = true;
   skLastStroke = millis();
+  sketchUpdateCanUndo();
+  sketchFull = true;
+}
+
+void sketchClearPage() {
+  skWriter.clearBox();
+  sketchClear();
+  skWriter.setCursor(sketch::Cursor());
+  skWriter.takeLayoutChange();
+  skChanged = true;
+  skLastStroke = millis();
+  sketchCheckpoint();  // Undo brings it back
   sketchFull = true;
 }
 
 void onSketchTap(int x, int y) {
   if (x < sketch::TOOLBAR_RIGHT) {
     const sketch::ToolTap t = sketch::toolbarTap(x, y);
+    if (t.what == sketch::Tool::None) return;
+    const bool wasAsking = skTools.confirmClear;
+    skTools.confirmClear = false;
     switch (t.what) {
+      case sketch::Tool::Write:
+      case sketch::Tool::Draw: {
+        const bool write = t.what == sketch::Tool::Write;
+        if (write != skTools.write) {
+          sketchCommitWord();
+          skTools.write = write;
+          skPrefs.putUChar("mode", write ? 1 : 0);
+          if (write) skWriter.takeLayoutChange();
+          sketchUpdateCanUndo();
+          sketchFull = true;
+        }
+        break;
+      }
       case sketch::Tool::Color:
         skTools.color = t.index;
         skTools.eraser = false;
@@ -943,22 +1093,60 @@ void onSketchTap(int x, int y) {
       case sketch::Tool::Gallery:
         skTools.gallery = !skTools.gallery;
         if (skTools.gallery) {
+          sketchCommitWord();
           sketchSave();
           sketchFillGallery();
         }
         sketchFull = true;
         break;
+      case sketch::Tool::Clear:
+        if (wasAsking) {
+          skTools.gallery = false;
+          sketchClearPage();
+        } else {
+          skTools.confirmClear = true;
+          skClearAsked = millis();
+        }
+        break;
+      case sketch::Tool::NewPage:
+        skTools.gallery = false;
+        sketchStartNew();
+        break;
       case sketch::Tool::None:
         return;
     }
-    if (skTools.gallery && t.what != sketch::Tool::Gallery) {  // picking a colour closes the gallery
-      skTools.gallery = false;
+    if (skTools.gallery && t.what != sketch::Tool::Gallery && t.what != sketch::Tool::Clear) {
+      skTools.gallery = false;  // picking a colour closes the gallery
       sketchFull = true;
     }
     skToolbarDirty = true;
     return;
   }
-  if (!skTools.gallery) return;
+  if (!skTools.gallery) {
+    if (skTools.confirmClear) {
+      skTools.confirmClear = false;
+      skToolbarDirty = true;
+    }
+    if (!skTools.write || !sketchOnPaper(x, y)) return;
+    switch (skWriter.buttonAt(x, y)) {
+      case sketch::BoxButton::Space:
+        sketchCommitWord();
+        skWriter.space();
+        break;
+      case sketch::BoxButton::NewLine:
+        sketchCommitWord();
+        skWriter.newLine();
+        if (skWriter.takePageFull()) sketchStartNew();
+        break;
+      case sketch::BoxButton::None:
+        if (skWriter.inBox(x, y)) return;
+        sketchCommitWord();
+        skWriter.placeAt(x, y);  // the writing spot goes where you tapped
+        break;
+    }
+    sketchFlushWriter();
+    return;
+  }
   const sketch::GalleryTap g = sketch::galleryTap(x, y, skGallery);
   switch (g.what) {
     case sketch::GTap::New:
@@ -1000,10 +1188,12 @@ void onSketchTap(int x, int y) {
 void drawSketch() {
   if (sketchFull) {
     sketchFull = skToolbarDirty = false;
+    skWriter.takeDirty(nullptr, 0);  // all of it is drawn now
+    skWriter.takeLayoutChange();
     display::render(sketch::AREA, ui::BACKGROUND, [](gfx::Canvas& c) {
       sketch::drawToolbar(c, skTools);
       if (skTools.gallery) sketch::drawGallery(c, skGallery);
-      else sketch::drawPaper(c, skPic);
+      else sketchDrawSheet(c);
     });
   } else if (skToolbarDirty) {
     skToolbarDirty = false;
@@ -1014,6 +1204,15 @@ void drawSketch() {
 // Saves after a pause in drawing (writing to flash can make the screen jump
 // for a moment, so not while the finger is drawing)
 void updateSketch(uint32_t now) {
+  if (page == Page::Sketch && skTools.write && !sketchStroking && skWriter.tick(now)) {  // a pause: the box moves on
+    skChanged = true;
+    sketchCheckpoint();
+    sketchFlushWriter();
+  }
+  if (skTools.confirmClear && msSince(now, skClearAsked) > SKETCH_CLEAR_ASK_MS) {
+    skTools.confirmClear = false;
+    skToolbarDirty = true;
+  }
   if (skChanged && !touching && msSince(now, skLastStroke) > SKETCH_SAVE_AFTER_MS) sketchSave();
 }
 
@@ -1496,6 +1695,11 @@ void handleTouch(uint32_t now) {
     }
     if (released == ui::Target::Mini) {  // the slim music line: open the full bar for a while
       ui::openMusicBar();
+      return;
+    }
+    if (released == ui::Target::Talk) {  // the Talk button: to the face, listening
+      showPage(Page::Face);
+      if (!inConversation) onTap(ui::Target::Face);
       return;
     }
     if (released == ui::Target::CallMute) {

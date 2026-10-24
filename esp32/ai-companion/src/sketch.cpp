@@ -1,5 +1,6 @@
 #include "sketch.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -8,10 +9,10 @@
 namespace sketch {
 
 const gfx::Color COLORS[COLOR_COUNT] = {
-    gfx::rgb(0xEEF2F6), gfx::rgb(0xFF5A5A), gfx::rgb(0xFF9F43), gfx::rgb(0xFFD166),
-    gfx::rgb(0x5DD879), gfx::rgb(0x4FE3D6), gfx::rgb(0x5AA9FF), gfx::rgb(0xB69CFF),
+    gfx::rgb(0xEEF2F6), gfx::rgb(0xFF5A5A), gfx::rgb(0xFFD166), gfx::rgb(0x5AA9FF),
 };
-const float SIZES[SIZE_COUNT] = {2.5f, 5.5f, 11.0f};
+const float SIZES[SIZE_COUNT] = {1.5f, 3.5f, 8.0f};
+const float WRITE_SIZES[SIZE_COUNT] = {0.9f, 1.3f, 1.8f};
 
 namespace {
 
@@ -29,11 +30,19 @@ const Color ACCENT = gfx::rgb(0x4FE3D6);
 const Color DARK_TEXT = gfx::rgb(0x05201E);
 const Color DANGER = gfx::rgb(0xFF7A7A);
 const Color SELECTED = gfx::rgb(0x2A3646);
+const Color RULE = gfx::rgb(0x222C38);
+const Color BOX_BG = gfx::rgb(0x0B1118);
+const Color GUIDE = gfx::rgb(0x2F5F5C);
 
-// Toolbar: two columns of round buttons
+// Toolbar: Write and Draw on top, then two columns of round buttons, then Clear and New page
 constexpr float COL_X[2] = {30, 78};
-constexpr float ROW_Y[6] = {76, 126, 176, 226, 282, 336};
-constexpr float CELL_R = 22;  // highlight behind a button
+constexpr float ROW_Y[4] = {146, 190, 234, 278};
+constexpr float CELL_R = 19;  // highlight behind a button
+constexpr float PILL_X = 6, PILL_W = 96, PILL_H = 30;
+constexpr float WRITE_Y = 54, DRAW_Y = 89, CLEAR_Y = 304, NEW_Y = 339;
+
+// Write mode box buttons (x on screen, y from the top of the box)
+constexpr float BTN_X = 700, BTN_W = 80, BTN_H = 36, SPACE_Y = 28, NEWLINE_Y = 78;
 
 // Gallery
 constexpr float G_X = 120, G_Y = 98, G_GAP_X = 8, G_GAP_Y = 12;
@@ -99,45 +108,69 @@ bool inside(int x, int y, float bx, float by, float bw, float bh) {
 
 // ---------------------------------------------------------------- toolbar
 
+static void pill(Canvas& c, float y, const char* label, bool on, const Color& onColor = ACCENT) {
+  c.fillRRect(PILL_X, y, PILL_W, PILL_H, PILL_H / 2, on ? onColor : BORDER);
+  centered(c, gfont::SMALL, label, PILL_X + PILL_W / 2, (int)y + 21, on ? DARK_TEXT : TEXT);
+}
+
 void drawToolbar(Canvas& c, const Tools& t) {
   c.fillRect(TOOLBAR_RIGHT - 1, 50, 1, 320, BORDER);
+  pill(c, WRITE_Y, "Write", t.write);
+  pill(c, DRAW_Y, "Draw", !t.write);
   for (int i = 0; i < COLOR_COUNT; ++i) {
     const float x = COL_X[i % 2], y = ROW_Y[i / 2];
     const bool on = !t.eraser && t.color == i && !t.gallery;
     if (on) c.fillCircle(x, y, CELL_R, SELECTED);
-    c.fillCircle(x, y, on ? 15 : 13, COLORS[i]);
+    c.fillCircle(x, y, on ? 14 : 12, COLORS[i]);
   }
   // eraser
-  if (t.eraser && !t.gallery) c.fillCircle(COL_X[0], ROW_Y[4], CELL_R, SELECTED);
-  eraserIcon(c, COL_X[0], ROW_Y[4] - 2, TEXT);
-  // brush size: a dot as big as the brush
+  if (t.eraser && !t.gallery) c.fillCircle(COL_X[0], ROW_Y[2], CELL_R, SELECTED);
+  eraserIcon(c, COL_X[0], ROW_Y[2] - 2, TEXT);
+  // pen size: a dot as big as the pen
   const Color& dot = t.eraser ? MUTED : COLORS[t.color];
-  c.strokeArc(COL_X[1], ROW_Y[4], 17, 1.5f, 0, 360, BORDER);
-  c.fillCircle(COL_X[1], ROW_Y[4], SIZES[t.size] < 3 ? 3 : SIZES[t.size], dot);
+  const float r = t.write ? WRITE_SIZES[t.size] * 2.2f : SIZES[t.size];
+  c.strokeArc(COL_X[1], ROW_Y[2], 16, 1.5f, 0, 360, BORDER);
+  c.fillCircle(COL_X[1], ROW_Y[2], r < 2 ? 2 : (r > 11 ? 11 : r), dot);
   // undo and gallery
-  undoIcon(c, COL_X[0], ROW_Y[5], t.canUndo && !t.gallery ? TEXT : BORDER);
-  if (t.gallery) c.fillCircle(COL_X[1], ROW_Y[5], CELL_R, SELECTED);
-  galleryIcon(c, COL_X[1], ROW_Y[5], t.gallery ? ACCENT : TEXT);
+  undoIcon(c, COL_X[0], ROW_Y[3], t.canUndo && !t.gallery ? TEXT : BORDER);
+  if (t.gallery) c.fillCircle(COL_X[1], ROW_Y[3], CELL_R, SELECTED);
+  galleryIcon(c, COL_X[1], ROW_Y[3], t.gallery ? ACCENT : TEXT);
+  // clear (asks first) and new page
+  pill(c, CLEAR_Y, t.confirmClear ? "Sure?" : "Clear", t.confirmClear, DANGER);
+  pill(c, NEW_Y, "New page", false);
 }
 
 ToolTap toolbarTap(int x, int y) {
-  if (x >= TOOLBAR_RIGHT) return ToolTap();
+  if (x >= TOOLBAR_RIGHT || y < 48) return ToolTap();
   const int col = x < 54 ? 0 : 1;
-  for (int row = 0; row < 6; ++row) {
-    if (y < ROW_Y[row] - 26 || y >= ROW_Y[row] + 26) continue;
-    if (row < 4) return ToolTap(Tool::Color, row * 2 + col);
-    if (row == 4) return ToolTap(col ? Tool::Size : Tool::Eraser);
-    return ToolTap(col ? Tool::Gallery : Tool::Undo);
-  }
+  if (y < 87) return ToolTap(Tool::Write);
+  if (y < 123) return ToolTap(Tool::Draw);
+  if (y < 168) return ToolTap(Tool::Color, col);
+  if (y < 212) return ToolTap(Tool::Color, 2 + col);
+  if (y < 256) return ToolTap(col ? Tool::Size : Tool::Eraser);
+  if (y < 300) return ToolTap(col ? Tool::Gallery : Tool::Undo);
+  if (y < 337) return ToolTap(Tool::Clear);
+  if (y < 376) return ToolTap(Tool::NewPage);
   return ToolTap();
 }
 
 // ---------------------------------------------------------------- paper
 
-void drawPaper(Canvas& c, const uint16_t* picture) {
+void drawPaper(Canvas& c, const uint16_t* picture, bool lines) {
   outline(c, PAPER_X, PAPER_Y, PAPER_W, PAPER_H, 1, BORDER);
   if (picture) blit(c, picture, PAPER_W, PAPER_H, PAPER_X, PAPER_Y);
   else c.fillRect(PAPER_X, PAPER_Y, PAPER_W, PAPER_H, PAPER_COLOR);
+  if (!lines) return;
+  // faint lines, only on empty paper (writing stays on top)
+  const Rect a = c.area();
+  const int x0 = gfx::imax(a.x, PAPER_X + 8), x1 = gfx::imin(a.right(), PAPER_X + PAPER_W - 8);
+  for (int i = 0; i < LINES; ++i) {
+    const int y = PAPER_Y + FIRST_LINE + i * LINE_H + 3;
+    if (y < a.y || y >= a.bottom() || x0 >= x1) continue;
+    uint16_t* p = c.row(y) + (x0 - c.originX());
+    for (int x = x0; x < x1; ++x, ++p)
+      if (*p == PAPER_COLOR.c) *p = RULE.c;
+  }
 }
 
 Rect stroke(uint16_t* picture, float x0, float y0, float x1, float y1, const Color& col, float radius) {
@@ -148,6 +181,262 @@ Rect stroke(uint16_t* picture, float x0, float y0, float x1, float y1, const Col
   const int left = (int)(x0 < x1 ? x0 : x1) - m, top = (int)(y0 < y1 ? y0 : y1) - m;
   const int right = (int)(x0 > x1 ? x0 : x1) + m + 1, bottom = (int)(y0 > y1 ? y0 : y1) + m + 1;
   return gfx::intersect(PAPER, Rect{left, top, right - left, bottom - top});
+}
+
+// ---------------------------------------------------------------- smooth strokes
+
+namespace {
+// A gentle curve from a to b that leans towards ctrl, as short straight pieces
+int quad(const Pt& a, const Pt& ctrl, const Pt& b, Pt* out, int max) {
+  const float len = hypotf(ctrl.x - a.x, ctrl.y - a.y) + hypotf(b.x - ctrl.x, b.y - ctrl.y);
+  int n = (int)ceilf(len / 3.0f);
+  if (n < 1) n = 1;
+  if (n > max) n = max;
+  for (int i = 1; i <= n; ++i) {
+    const float t = (float)i / n, u = 1 - t;
+    out[i - 1] = Pt{u * u * a.x + 2 * u * t * ctrl.x + t * t * b.x, u * u * a.y + 2 * u * t * ctrl.y + t * t * b.y};
+  }
+  return n;
+}
+}  // namespace
+
+int Smoother::start(float x, float y, Pt* out) {
+  raw_ = f_ = mid_ = Pt{x, y};
+  out[0] = raw_;
+  return 1;
+}
+
+int Smoother::add(float x, float y, Pt* out) {
+  raw_ = Pt{x, y};
+  const Pt nf{f_.x + (x - f_.x) * 0.6f, f_.y + (y - f_.y) * 0.6f};
+  if (fabsf(nf.x - f_.x) + fabsf(nf.y - f_.y) < 1.0f) return 0;  // wait for a bigger move
+  const Pt nm{(f_.x + nf.x) * 0.5f, (f_.y + nf.y) * 0.5f};
+  const int n = quad(mid_, f_, nm, out, MAX_OUT);
+  mid_ = nm;
+  f_ = nf;
+  return n;
+}
+
+int Smoother::finish(Pt* out) {
+  const int n = quad(mid_, f_, raw_, out, MAX_OUT);
+  mid_ = f_ = raw_;
+  return n;
+}
+
+// ---------------------------------------------------------------- Write mode
+
+void Writer::attach(uint16_t* page, uint16_t* box) {
+  page_ = page;
+  box_ = box;
+  if (box_)
+    for (size_t i = 0; i < (size_t)PAPER_W * BOX_H; ++i) box_[i] = BOX_BG.c;
+  inkRight_ = -1;
+  drawing_ = false;
+}
+
+Rect Writer::boxRect() const { return Rect{PAPER_X, boxY(), PAPER_W, BOX_H}; }
+
+bool Writer::inBox(int x, int y) const {
+  const Rect r = boxRect();
+  return x >= r.x && x < r.right() && y >= r.y && y < r.bottom() && buttonAt(x, y) == BoxButton::None;
+}
+
+BoxButton Writer::buttonAt(int x, int y) const {
+  const float by = (float)boxY();
+  if (inside(x, y, BTN_X - 8, by + SPACE_Y - 7, BTN_W + 16, BTN_H + 7 + 7)) return BoxButton::Space;
+  if (inside(x, y, BTN_X - 8, by + NEWLINE_Y - 7, BTN_W + 16, BTN_H + 7 + 14)) return BoxButton::NewLine;
+  return BoxButton::None;
+}
+
+Pt Writer::toPage(const Pt& p) const {
+  return Pt{PAPER_X + cur_.x + (p.x - BOX_INK_X) / SCALE,
+            PAPER_Y + baseline(cur_.line) + (p.y - (boxY() + BOX_BASE)) / SCALE};
+}
+
+void Writer::mark(const Rect& r) {
+  const Rect m = gfx::intersect(PAPER, r);
+  if (m.empty()) return;
+  if (dirtyCount_ < 6) dirty_[dirtyCount_++] = m;
+  else dirty_[5] = gfx::unite(dirty_[5], m);
+}
+
+void Writer::markCursor() {
+  mark(Rect{(int)(PAPER_X + cur_.x) - 8, PAPER_Y + baseline(cur_.line) - 34,
+            (int)((BOX_INK_RIGHT - BOX_INK_X) / SCALE) + 18, 48});
+}
+
+int Writer::takeDirty(Rect* out, int max) {
+  int n = 0;
+  for (int i = 0; i < dirtyCount_ && n < max; ++i) out[n++] = dirty_[i];
+  dirtyCount_ = 0;
+  return n;
+}
+
+void Writer::ink(const Pt* pts, int n) {
+  if (!page_ || !box_) return;
+  Canvas bc, pc;
+  bc.begin(box_, PAPER_W, BOX_H, PAPER_X, boxY());
+  pc.begin(page_, PAPER_W, PAPER_H, PAPER_X, PAPER_Y);
+  const float rb = rPage_ * SCALE;
+  for (int i = 0; i < n; ++i) {
+    const Pt& p = pts[i];
+    bc.fillCapsule(last_.x, last_.y, p.x, p.y, rb, col_);
+    const Pt a = toPage(last_), b = toPage(p);
+    pc.fillCapsule(a.x, a.y, b.x, b.y, rPage_, col_);
+    const int m = (int)rb + 2;
+    mark(gfx::intersect(boxRect(), Rect{(int)fminf(last_.x, p.x) - m, (int)fminf(last_.y, p.y) - m,
+                                         (int)fabsf(p.x - last_.x) + 2 * m + 1, (int)fabsf(p.y - last_.y) + 2 * m + 1}));
+    mark(Rect{(int)fminf(a.x, b.x) - 3, (int)fminf(a.y, b.y) - 3, (int)fabsf(b.x - a.x) + 7, (int)fabsf(b.y - a.y) + 7});
+    if (p.x + rb > inkRight_) inkRight_ = p.x + rb;
+    last_ = p;
+  }
+}
+
+void Writer::begin(float x, float y, const Color& col, int size) {
+  drawing_ = false;
+  if (!hasInk() && cur_.x > PAPER_W - 100) {  // no room left on this line
+    newLine();
+    if (full_) return;
+  }
+  col_ = col;
+  rPage_ = WRITE_SIZES[size < 0 ? 0 : (size >= SIZE_COUNT ? SIZE_COUNT - 1 : size)];
+  drawing_ = true;
+  Pt pts[Smoother::MAX_OUT];
+  sm_.start(x, y, pts);
+  last_ = pts[0];
+  ink(pts, 1);
+}
+
+void Writer::move(float x, float y) {
+  if (!drawing_) return;
+  Pt pts[Smoother::MAX_OUT];
+  ink(pts, sm_.add(x, y, pts));
+}
+
+bool Writer::end(uint32_t now) {
+  if (!drawing_) return false;
+  Pt pts[Smoother::MAX_OUT];
+  ink(pts, sm_.finish(pts));
+  drawing_ = false;
+  liftedAt_ = now;
+  if (inkRight_ > BOX_SLIDE_X) return commit();
+  return false;
+}
+
+bool Writer::tick(uint32_t now) {
+  if (!hasInk() || drawing_ || (int32_t)(now - liftedAt_) < (int32_t)PAUSE_MS) return false;
+  return commit();
+}
+
+bool Writer::commit() {
+  if (!hasInk()) return false;
+  markCursor();
+  cur_.x += (inkRight_ - BOX_INK_X) / SCALE + 2;
+  clearBox();
+  if (cur_.x > PAPER_W - 40) newLine();
+  markCursor();
+  return true;
+}
+
+void Writer::clearBox() {
+  if (box_)
+    for (size_t i = 0; i < (size_t)PAPER_W * BOX_H; ++i) box_[i] = BOX_BG.c;
+  inkRight_ = -1;
+  drawing_ = false;
+  mark(boxRect());
+}
+
+void Writer::space() {
+  commit();
+  markCursor();
+  cur_.x += SPACE;
+  if (cur_.x > PAPER_W - 40) newLine();
+  markCursor();
+}
+
+void Writer::newLine() {
+  commit();
+  if (cur_.line + 1 >= LINES) {
+    full_ = true;
+    return;
+  }
+  setCursor(Cursor(cur_.line + 1, MARGIN));
+}
+
+void Writer::setCursor(const Cursor& c) {
+  markCursor();
+  const bool wasTop = boxOnTop();
+  cur_ = c;
+  if (boxOnTop() != wasTop) flip_ = true;
+  markCursor();
+}
+
+void Writer::placeAt(int x, int y) {
+  commit();
+  int line = (y - PAPER_Y - (FIRST_LINE - 22)) / LINE_H;
+  if (line < 0) line = 0;
+  if (line >= LINES) line = LINES - 1;
+  float px = (float)(x - PAPER_X);
+  if (px < MARGIN) px = MARGIN;
+  if (px > PAPER_W - 100) px = PAPER_W - 100;
+  setCursor(Cursor(line, px));
+}
+
+void Writer::findCursor() {
+  Cursor c;
+  if (page_) {
+    for (int line = LINES - 1; line >= 0; --line) {
+      const int top = gfx::imax(0, baseline(line) - 24), bottom = gfx::imin(PAPER_H, baseline(line) + 12);
+      int right = -1;
+      for (int y = top; y < bottom; ++y) {
+        const uint16_t* row = page_ + (size_t)y * PAPER_W;
+        for (int x = PAPER_W - 1; x > right; --x)
+          if (row[x] != PAPER_COLOR.c) {
+            right = x;
+            break;
+          }
+      }
+      if (right < 0) continue;
+      c = Cursor(line, right + 10.0f);
+      if (c.x > PAPER_W - 100) c = line + 1 < LINES ? Cursor(line + 1, MARGIN) : Cursor(line, PAPER_W - 100);
+      break;
+    }
+  }
+  inkRight_ = -1;
+  cur_ = c;
+  flip_ = true;
+}
+
+void Writer::draw(Canvas& c) const {
+  drawPaper(c, page_, true);
+  // the writing spot
+  const float mx = PAPER_X + cur_.x - 6, my = PAPER_Y + baseline(cur_.line) - 32;
+  const float mw = (BOX_INK_RIGHT - BOX_INK_X) / SCALE + 12;
+  c.fillRRect(mx, my, mw, 42, 6, ACCENT, 0.10f);
+  c.fillRect(mx, my + 40, mw, 2, ACCENT);
+  // the box
+  const Rect r = boxRect();
+  if (gfx::intersect(c.area(), r).empty()) return;
+  c.fillRect(r.x, r.y, r.w, r.h, BOX_BG);
+  c.fillRect(r.x, boxOnTop() ? r.bottom() - 2 : r.y, r.w, 2, ACCENT);
+  c.text(gfont::SMALL, "Write here, big. It shrinks onto the page.", BOX_INK_X, r.y + 26, MUTED);
+  const float gy = (float)(r.y + BOX_BASE);
+  for (float x = BOX_INK_X; x < BOX_INK_RIGHT; x += 14) c.fillRect(x, gy, 7, 2, GUIDE);
+  for (float y = r.y + 36; y < r.bottom() - 8; y += 12) c.fillRect(BOX_SLIDE_X, y, 2, 6, GUIDE);
+  // the big writing on top
+  if (box_) {
+    const Rect a = gfx::intersect(c.area(), r);
+    for (int y = a.y; y < a.bottom(); ++y) {
+      const uint16_t* src = box_ + (size_t)(y - r.y) * PAPER_W + (a.x - r.x);
+      uint16_t* dst = c.row(y) + (a.x - c.originX());
+      for (int x = 0; x < a.w; ++x)
+        if (src[x] != BOX_BG.c) dst[x] = src[x];
+    }
+  }
+  c.fillRRect(BTN_X, r.y + SPACE_Y, BTN_W, BTN_H, BTN_H / 2, BORDER);
+  centered(c, gfont::SMALL, "space", BTN_X + BTN_W / 2, (int)(r.y + SPACE_Y + 24), TEXT);
+  c.fillRRect(BTN_X, r.y + NEWLINE_Y, BTN_W, BTN_H, BTN_H / 2, BORDER);
+  centered(c, gfont::SMALL, "new line", BTN_X + BTN_W / 2, (int)(r.y + NEWLINE_Y + 24), TEXT);
 }
 
 // ---------------------------------------------------------------- gallery
