@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.4 released, waiting for the user to confirm; 4.3.3 confirmed and on main)
+## Where things stand (4.3.4 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -171,7 +171,7 @@ Done and confirmed:
     helper's `update_loop()` sees `update_flow` (or the old `pending_gorgi_update`) -> `continue_after_restart()`
     reopens the window -> `_update_gorgi_step()` (wait for Gorgi 60 s, send, then wait up to 180 s for `hello`
     with the new version) -> "All done" + Close. Failures -> "Try again". Tests: `test_updates.py`.
-- **4.3.4 - plan % from the desktop app's sign-in** (NOT confirmed yet). Research report (deep research, 2026-10-24)
+- **4.3.4 - plan % from the desktop app's sign-in** (confirmed: "We have % !!!"; the full one-window update ran fine). Research report (deep research, 2026-10-24)
   found: the desktop app's Code tab uses its own token and never refreshes `~/.claude/.credentials.json` (stale);
   renewing a token ourselves (platform.claude.com/v1/oauth/token) rotates the refresh token and SIGNS CLAUDE CODE
   OUT (CodexBar, Claude-Usage-Tracker shipped that bug) - never do it. `usage_fetch.py` now (like
@@ -190,8 +190,7 @@ Done and confirmed:
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
-- **4.3.4 released** (plan % from the desktop app's sign-in), waiting for the user to test it. Update via the
-  tray "Update to 4.3.4..." window (Update all: helper, then Gorgi for the new "not available" text).
+- **4.3.4 is confirmed** (plan % works) and merged to main. Nothing is waiting.
 - Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
