@@ -22,6 +22,10 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - The user is not a programmer: explain in plain language, short, outcome first. Mobile app.
 - **Updates go over Wi-Fi only** (the user asked, after 3.8.90): ship every change as a normal release
   (3.9, 3.9.1, ...), not a USB test build.
+- **When the user confirms a release works** ("ok", "works", "looks good"), always, without asking: mark it
+  confirmed in this file (Where things stand + Handover), merge the branch to main (PR via `gh api`, merge), check
+  that the release job on main only skipped, and confirm that everything is pushed. The user starts new sessions
+  often, so this file must always say where things stand.
 - The user tests on the real device and reports back. You can't see the device: ask for photos or
   the Serial log when something's off.
 - Personality: Gorgi is a cheerful buddy, English. The user does **not** want greetings or break reminders.
@@ -74,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.1 released: helper quit/update fix + everything from 4.2.1 and 4.3, waiting for the user to test; 4.2 confirmed)
+## Where things stand (4.3.1 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -150,15 +154,9 @@ Done and confirmed:
 
 ## Handover for the next session (2026-10-24)
 
-- Branch `claude/esp32-touch-screen-software-emaips` = 4.3.1 (released). **Not merged to main yet**: main has 4.2
-  (PR SharonPerets/flor#3). Merge 4.2.1-4.3.1 once the user confirms 4.3.1 works (the user asks "merge to main").
-- Waiting for the user to report on 4.3.1:
-  1. The helper self-update (tray stuck on "Downloading..." was the 4.1-4.3 quit bug). Steps given: end GorgiHelper
-     in Task Manager, start it, Check for updates -> helper 4.3.1, then Gorgi from the Action Center.
-  2. Claude usage shows "Usage - Max" with percentages (4.2.1, desktop app); else ask for `claude-usage.json`.
-  3. 4.3: Action Center look, weather chip -> forecast -> Back, slim music line, focus start/stop without flicker,
-     the music tab icon staying, an untapped alert turning into a notification after 10 min.
-- After that: the next feature from "Next steps" / the ideas list (plan first, then build).
+- **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main. Nothing is waiting.
+- Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
+- Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
