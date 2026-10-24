@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.1 released and confirmed by the user; merged to main)
+## Where things stand (4.3.2 released, waiting for the user to confirm; 4.3.1 confirmed and on main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -150,11 +150,23 @@ Done and confirmed:
   - **Music bar folded** into a slim line (`tabs::drawMiniPlayer`, y 424); tap -> full bar for 10 s (`openMusicBar`).
     Face moved down a little (FACE_Y 56, subtitle 330..388, bar 392..476).
   - Time screen redraws only the changed part (rings / buttons / list): a full redraw flickered (start/stop focus).
+- **4.3.2 - Claude alert fixes** (helper only; NOT confirmed yet):
+  - "Finished" fired after every step: Claude Code sends `Stop` at the end of every reply. Now a Stop waits
+    `STOP_QUIET` 15 s (`ClaudeWatch.tick()`, called each second by `serve()`); any tool use / prompt cancels it.
+    If the last message (`last_assistant_message`, else the transcript tail) ends with "?" in its last 3 lines
+    -> "needs you" ("Asked you something") instead of "finished".
+  - More "needs you": new hooks `PermissionRequest` and `PreToolUse` (matcher `AskUserQuestion|ExitPlanMode`).
+    `claude_setup.upgrade()` adds missing hooks at helper start for users connected by an older helper.
+    "Needs you" alerts only when a session starts waiting (no repeats for the same wait).
+  - No pop-up / spoken alerts at all while Gorgi isn't connected (`announce` checks `self.ws`; user asked
+    the same for timers/reminders).
 - Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
 
-- **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main. Nothing is waiting.
+- **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
+- **4.3.2 released** (Claude alert fixes, see above), waiting for the user to test it. If "finished" still comes
+  too often, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
 - Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
