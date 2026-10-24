@@ -32,6 +32,7 @@ import httpx  # noqa: E402
 import websockets  # noqa: E402
 
 import album_art  # noqa: E402
+import lang  # noqa: E402
 import call_watch  # noqa: E402
 import claude_setup  # noqa: E402
 from claude_watch import ClaudeWatch  # noqa: E402
@@ -69,7 +70,44 @@ DEFAULT_CONFIG = {
     "model": "gpt-oss:20b",
     "voice": "en-US-AnaNeural",
     "whisper_model": "base.en",   # "small.en" understands better but is slower
+    "language": "en",             # "en" or "he": what Gorgi hears and speaks (Settings, or Gorgi's Action Center)
+    "voice_he": "he-IL-HilaNeural",
+    "whisper_model_he": "ivrit-ai/whisper-large-v3-turbo-ct2",  # ivrit.ai's Hebrew Whisper, downloaded on first use
 }
+
+
+def hebrew_alert(text):
+    """Gorgi's alert sentences (made in English on Gorgi) said in Hebrew."""
+    import re
+
+    m = re.match(r"^Ding! Your (.+?)(?: timer)? is done!$", text)
+    if m:
+        label = m.group(1)
+        n = re.fullmatch(r"(\d+) (second|minute|hour)", label)
+        if n:
+            unit = {"second": "שניות", "minute": "דקות", "hour": "שעות"}[n.group(2)]
+            if n.group(1) == "1":
+                unit = {"second": "שנייה", "minute": "דקה", "hour": "שעה"}[n.group(2)]
+            return f"דינג! הטיימר של {n.group(1)} {unit} נגמר!"
+        return f"דינג! הטיימר של {label} נגמר!"
+    m = re.match(r"^Hey! Reminder: (.+)$", text)
+    if m:
+        return f"היי! תזכורת: {m.group(1)}"
+    if text.startswith(("Focus session done", "Done! ", "Focus time is over")):
+        n = re.search(r"\b(\d+)\b", text)
+        return f"סשן הפוקוס נגמר! זה ה-{n.group(1)} היום, כל הכבוד!" if n else "סשן הפוקוס נגמר! עבודה מעולה!"
+    m = re.match(r"^While I was off, I missed: (.+)$", text)
+    if m:
+        missed = m.group(1).replace("a focus session", "סשן פוקוס")
+        missed = re.sub(r" and (\d+) more", r" ועוד \1", missed)
+        return f"בזמן שהייתי כבויה פספסתי: {missed}"
+    m = re.match(r"^Claude needs you in (.+)$", text)
+    if m:
+        return f"Claude צריך אותך ב-{m.group(1)}"
+    m = re.match(r"^Claude finished in (.+)$", text)
+    if m:
+        return f"Claude סיים ב-{m.group(1)}"
+    return text
 
 
 def load_config():
@@ -209,6 +247,7 @@ class Helper:
         self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
         self.todos = todos or TodoKeeper()  # Gorgi's to-do list, for the AI
         self.speak = speak  # async fn(text): says something on the PC speakers (None = no voice)
+        self.ears = None    # voice.Ears (English + Hebrew Whisper), when voice is available
         self._announcing = asyncio.Lock()
         # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
         self.claude = ClaudeWatch(on_change=self._claude_changed, on_alert=self._claude_alert)
@@ -628,6 +667,7 @@ class Helper:
         await ws.send(json.dumps({"type": "hello", "name": platform.node() or "PC",
                                   "key": self.config.get("helper_key", "")}))
         await ws.send(json.dumps(self.claude_message()))
+        await ws.send(json.dumps({"type": "language", "value": lang.code()}))
         if self.on_call:
             await ws.send(json.dumps({"type": "call", "on": True}))
         sender = asyncio.create_task(self._send_loop(ws))
@@ -704,6 +744,9 @@ class Helper:
             if action == "check_updates":
                 asyncio.get_running_loop().create_task(self.check_updates_soon())
                 continue
+            if action == "language":  # the switch in Gorgi's Action Center: 0 English, 1 Hebrew
+                asyncio.get_running_loop().create_task(self.set_language("he" if msg.get("value") == 1 else "en"))
+                continue
             if action in ("playpause", "next", "prev"):
                 await self.media.command(action)
             elif action == "volume" and isinstance(msg.get("value"), (int, float)):
@@ -755,6 +798,60 @@ class Helper:
         except Exception as e:
             log.warning("music during call: %s", e)
 
+    # ------------------------------------------------------------ language
+
+    async def set_language(self, code):
+        """Switches what Gorgi hears and speaks (from Gorgi's switch)."""
+        if code not in lang.LANGUAGES:
+            return
+        changed = code != lang.code()
+        if changed:
+            self.config["language"] = code
+            save_config(self.config)
+            log.info("language: %s", code)
+        await self.language_changed(say_it=changed)
+
+    async def language_changed(self, say_it=True):
+        """The language changed (here or in Settings): tell Gorgi, get the ears ready, say so."""
+        await self.send({"type": "language", "value": lang.code()})
+        if not say_it:
+            return
+        ears = self.ears.current() if self.ears else None
+        if lang.hebrew() and ears is not None and not ears.ready:
+            if not ears.loading:
+                threading.Thread(target=ears.load, daemon=True).start()
+            await self._tell("thinking", "רגע, אני לומדת עברית. בפעם הראשונה זה לוקח כמה דקות.")
+            for _ in range(1800):  # the download can take a while; say when it's done
+                await asyncio.sleep(1)
+                if ears.ready or (not ears.loading and ears.error) or lang.code() != "he":
+                    break
+            if lang.code() != "he":
+                return
+            if ears.ready:
+                await self._tell("excited", "סיימתי ללמוד עברית! אפשר לדבר איתי.")
+            else:
+                await self._tell("sad", "לא הצלחתי ללמוד עברית. תבדוק את החיבור לאינטרנט ונסה שוב.")
+            return
+        if lang.hebrew():
+            await self._tell("happy", "יאללה, מעכשיו מדברים עברית!")
+        else:
+            await self._tell("happy", "Okay, English it is!")
+
+    async def _tell(self, mood, text):
+        """Gorgi says something by itself: on its screen and out loud (unless busy talking or on a call)."""
+        if self.ws is None:
+            return
+        if self.conversation_task and not self.conversation_task.done():
+            return
+        await self.send({"type": "say", "text": text, "mood": mood})
+        if self.speak is None or self.on_call:
+            return
+        async with self._announcing:
+            try:
+                await self.speak(text)
+            except Exception as e:
+                log.warning("couldn't say it out loud: %s", e)
+
     async def announce(self, text):
         """Something on Gorgi is due: a pop-up, and Gorgi's voice says it."""
         if not text:
@@ -765,6 +862,8 @@ class Helper:
         if self.on_call:  # quiet during calls: Gorgi's screen shows it
             log.info("on a call, not saying: %s", text)
             return
+        if lang.hebrew():
+            text = hebrew_alert(text)
         self.on_notify("Gorgi", text)
         if self.speak is None:
             return
@@ -987,6 +1086,9 @@ def start_tray(helper, loop):
 _settings_process = None
 
 
+language_listeners = []  # called (from another thread) when Settings changed the language
+
+
 def show_settings(config):
     """Opens the Settings window as a separate process, then reloads the settings."""
     import subprocess
@@ -1002,8 +1104,13 @@ def show_settings(config):
 
     def wait_and_reload(process):
         process.wait()
+        before = config.get("language")
         config.update(load_config())  # the brain and voice read this same dict
-        log.info("settings reloaded (model: %s, voice: %s)", config.get("model"), config.get("voice"))
+        log.info("settings reloaded (model: %s, voice: %s, language: %s)", config.get("model"), config.get("voice"),
+                 config.get("language"))
+        if config.get("language") != before:
+            for listener in language_listeners:
+                listener()
 
     threading.Thread(target=wait_and_reload, args=(_settings_process,), daemon=True).start()
 
@@ -1018,7 +1125,7 @@ def run_settings_window():
     async def list_models(key):
         return await Brain({**config, "ollama_api_key": key}).list_models()
 
-    show_window(config, save_config, list_models)
+    show_window(config, save_config, list_models, report_dir=data_dir())
 
 
 # ---------------------------------------------------------------- voice
@@ -1030,7 +1137,7 @@ def make_voice(config):
     try:
         from brain import Brain
         from conversation import Conversation
-        from voice import Recorder, Speaker, Transcriber
+        from voice import Ears, Recorder, Speaker, Transcriber
     except Exception as e:
         log.error("voice features unavailable: %s", e)
         return None, None
@@ -1038,13 +1145,16 @@ def make_voice(config):
     from memory import Memory
 
     brain = Brain(config, Memory(data_dir() / "memory.json"))  # one brain, so Gorgi remembers between taps
-    transcriber = Transcriber(config.get("whisper_model") or "base.en", data_dir() / "models")
+    english = Transcriber(config.get("whisper_model") or "base.en", data_dir() / "models")
+    hebrew = Transcriber(config.get("whisper_model_he") or DEFAULT_CONFIG["whisper_model_he"], data_dir() / "models",
+                         language="he")
+    transcriber = Ears(english, hebrew)  # the one for the language chosen now
     # Download/load Whisper in the background so the first chat is quick
     threading.Thread(target=transcriber.load, daemon=True).start()
 
     def speaker():
         voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
-        return Speaker(voice, pitch="+5Hz")
+        return Speaker(voice, pitch="+5Hz", voice_he=config.get("voice_he") or "he-IL-HilaNeural")
 
     def factory(send, media, timekeeper, extra_context=None, todos=None):
         return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper,
@@ -1053,6 +1163,7 @@ def make_voice(config):
     async def speak(text):
         await speaker().say(text)
 
+    factory.ears = transcriber
     return factory, speak
 
 
@@ -1129,6 +1240,7 @@ def self_test(out_path):
             assert usage_fetch._dpapi_unprotect(locked) == b"gorgi"
         lines.append("usage decryption: ok")
         import settings_window  # noqa: F401
+        import model_test  # noqa: F401
 
         import updater as upd
 
@@ -1174,6 +1286,23 @@ def self_test(out_path):
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
             raise RuntimeError("whisper did not understand the test sentence")
+        # Hebrew: Hila says a sentence, ivrit.ai's Whisper (downloaded like on a user's PC) listens; timed
+        he_speech = asyncio.run(Speaker("en-US-AnaNeural").synthesize("גורגי, תפעיל טיימר של עשר דקות לפסטה."))
+        lines.append(f"hebrew voice: {len(he_speech)} samples")
+        he16k = np.interp(np.arange(0, len(he_speech), 1.5), np.arange(len(he_speech)), he_speech).astype(np.float32)
+        th = Transcriber(DEFAULT_CONFIG["whisper_model_he"], Path(out_path).resolve().parent / "models", language="he")
+        started = time.monotonic()
+        th.load()
+        if th.error:
+            raise RuntimeError(f"hebrew whisper failed to load: {th.error}")
+        lines.append(f"hebrew whisper downloaded + loaded in {time.monotonic() - started:.0f} s")
+        for attempt in (1, 2):
+            started = time.monotonic()
+            heard_he = th.transcribe(he16k)
+            lines.append(f"hebrew heard ({attempt}): {heard_he!r} in {time.monotonic() - started:.1f} s "
+                         f"for {len(he16k) / 16000:.1f} s of speech")
+        if "טיימר" not in heard_he:
+            lines.append("WARNING: the Hebrew test sentence was not understood")
         # Talk to Ollama Cloud with a fake key: must come back as "key doesn't work"
         from brain import Brain, BrainError
 
@@ -1237,6 +1366,7 @@ def main():
         return
 
     config = load_config()
+    lang.bind(config)  # English or Hebrew, read from this dict whenever it's needed
     if not config.get("helper_key"):
         config["helper_key"] = secrets.token_hex(16)  # Gorgi pairs with the first helper it meets
         save_config(config)
@@ -1261,6 +1391,8 @@ def main():
                          if voice_factory else None)
     helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak,
                     todos=todos)
+    helper.ears = getattr(voice_factory, "ears", None)
+    language_listeners.append(lambda: loop.call_soon_threadsafe(lambda: loop.create_task(helper.language_changed())))
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)

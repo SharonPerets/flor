@@ -37,14 +37,15 @@ struct View {
   int noticeCount = 0;
   bool busy = false;     // an update is running (its button shows "Updating...")
   char status[96] = "";  // "Gorgi 4.3 - Wi-Fi good - PC: MY-PC"
+  int language = -1;     // what Gorgi speaks: 0 English, 1 Hebrew, -1 unknown (the switch is hidden)
 };
 
 void draw(gfx::Canvas& c, const View& v);
 
-enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss };
+enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss, Language };
 struct TapResult {
   Tap what;
-  int index;  // the notice, or the city for PickCity
+  int index;  // the notice, the city for PickCity, the language for Language (0 English, 1 Hebrew)
   TapResult(Tap w = Tap::None, int i = 0) : what(w), index(i) {}
 };
 TapResult tap(int x, int y, const View& v);

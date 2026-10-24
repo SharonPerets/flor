@@ -16,6 +16,7 @@ import logging
 import os
 import re
 
+import lang
 import timekeeper
 
 log = logging.getLogger("gorgi.todo")
@@ -37,7 +38,10 @@ Confirm in a few words, like "Added!" or "Nice, ticked off!". To answer "what's 
 
 WEEKDAYS = timekeeper.DAY_WORDS
 STOP_WORDS = {"the", "a", "an", "my", "to", "for", "about", "with", "on", "of", "and", "thing", "task", "todo",
-              "to-do", "item", "one", "that", "this", "it", "please", "list", "from", "off", "in", "at", "i"}
+              "to-do", "item", "one", "that", "this", "it", "please", "list", "from", "off", "in", "at", "i",
+              "את", "של", "על", "עם", "זה", "הזה", "הזאת", "לי", "שלי", "אני", "משימה", "המשימה", "רשימה",
+              "מהרשימה", "ברשימה", "לרשימה", "בבקשה", "גם", "כבר", "הדבר", "דבר"}
+TEXT_BYTES = 112  # Gorgi keeps 112 bytes of a task (a Hebrew letter takes 2)
 
 
 # ---------------------------------------------------------------- days
@@ -49,11 +53,77 @@ def _next_weekday(today, day):
     return today + dt.timedelta(days=(day - py_today) % 7)
 
 
+HE_DAYS = {"ראשון": 0, "שני": 1, "שלישי": 2, "רביעי": 3, "חמישי": 4, "שישי": 5, "שבת": 6}
+HE_NUMBERS = {"אחת": 1, "שתיים": 2, "שתים": 2, "שלוש": 3, "ארבע": 4, "חמש": 5, "שש": 6, "שבע": 7, "שמונה": 8,
+              "תשע": 9, "עשר": 10, "אחת עשרה": 11, "שתיים עשרה": 12, "שתים עשרה": 12}
+_NB = r"(?<![\w])"   # not in the middle of a word
+_NA = r"(?![\w])"
+HE_DAY_RE = re.compile(_NB + r"(?:[בל]?יום |[בל])(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)" + _NA)
+HE_NUMBER_WORDS = "|".join(sorted(HE_NUMBERS, key=len, reverse=True))
+HE_CLOCK_RE = re.compile(
+    _NB + r"(?:בשעה |ב-?|עד |לקראת )(?:(\d{1,2})(?::(\d{2}))?|(" + HE_NUMBER_WORDS + r"))( וחצי| ורבע)?" + _NA)
+
+
+def _parse_when_hebrew(w, now, out):
+    """The Hebrew words for days and times (parse_when calls this when the text has Hebrew)."""
+    if re.search(_NB + r"(חשוב|חשובה|דחוף|דחופה|עם כוכב|בכוכב)" + _NA, w):
+        out["star"] = True
+    if re.search(_NB + r"(מתישהו|מתי שהוא|יום אחד|בלי תאריך)" + _NA, w):
+        out["someday"] = True
+        return out
+    today = now.date()
+    if re.search(_NB + r"[ולב]?מחרתיים" + _NA, w):
+        out["due"] = today + dt.timedelta(days=2)
+    elif re.search(_NB + r"[ולב]?מחר" + _NA, w):
+        out["due"] = today + dt.timedelta(days=1)
+    elif re.search(_NB + r"[ולב]?(היום|הערב|הלילה|הבוקר)" + _NA, w):
+        out["due"] = today
+    elif re.search(_NB + r"[בל]?שבוע הבא" + _NA, w):
+        out["due"] = _next_weekday(today + dt.timedelta(days=1), 0)  # the coming Sunday
+    elif re.search(_NB + r"(?:[בל]?סופ\"?ש|[בל]סוף השבוע)" + _NA, w):
+        out["due"] = _next_weekday(today, 5)
+    elif re.search(r"בעוד (\d+) ימים", w):
+        out["due"] = today + dt.timedelta(days=int(re.search(r"בעוד (\d+) ימים", w).group(1)))
+    elif "בעוד יומיים" in w:
+        out["due"] = today + dt.timedelta(days=2)
+    elif "בעוד שבוע" in w:
+        out["due"] = today + dt.timedelta(days=7)
+    else:
+        m = HE_DAY_RE.search(w)
+        if m:
+            out["due"] = _next_weekday(today, HE_DAYS[m.group(1)])
+    m = HE_CLOCK_RE.search(w)
+    if m:
+        hour = int(m.group(1)) if m.group(1) else HE_NUMBERS[m.group(3)]
+        minute = int(m.group(2) or 0)
+        if m.group(4) == " וחצי":
+            minute = 30
+        elif m.group(4) == " ורבע":
+            minute = 15
+        evening = re.search(r"(בערב|אחר הצהריים|אחה\"צ|בלילה|הערב)", w)
+        morning = re.search(r"(בבוקר|הבוקר)", w)
+        if hour < 12 and (evening or (not morning and m.group(2) is None and 1 <= hour < 8)):
+            hour += 12  # "בחמש" is in the afternoon
+        if 0 <= hour < 24 and 0 <= minute < 60:
+            date = out["due"] or today
+            at = dt.datetime.combine(date, dt.time(hour, minute))
+            if at <= now and out["due"] is None:
+                at += dt.timedelta(days=1)
+            if at > now:
+                out["at"] = at
+                out["due"] = at.date()
+    return out
+
+
 def parse_when(text, now):
     """'tomorrow' / 'friday 17:00' / 'next week' / 'someday' / '2026-11-03' / 'important' ->
     {"due": date or None, "someday": bool, "at": datetime or None, "star": bool}"""
     w = " " + " ".join(text.lower().split()) + " "
     out = {"due": None, "someday": False, "at": None, "star": False}
+    if lang.has_hebrew(text):
+        _parse_when_hebrew(w.strip(), now, out)
+        if out["someday"] or out["due"] or out["at"]:
+            return out
     if re.search(r"\b(important|urgent|starred|star|priority|high priority)\b", w):
         out["star"] = True
     if re.search(r"\b(someday|some day|sometime|one day|eventually|later on|no date)\b", w):
@@ -123,6 +193,22 @@ LEAD_RE = re.compile(
 
 TAIL_RE = re.compile(r"\s*,?\s*(?:to|on|onto|in) (?:my|the) (?:to-?do )?(?:list|to-?dos?|tasks?)\.?\s*$", re.IGNORECASE)
 
+# the same in Hebrew: "תוסיף לרשימה לקנות חלב מחר בחמש" -> "לקנות חלב"
+HE_WHEN_PART = (
+    r"[ולב]?מחרתיים|[ולב]?מחר(?: בבוקר| בערב| בצהריים)?|[ולב]?היום|הערב|הלילה|הבוקר|[בל]?שבוע הבא|[בל]?סופ\"?ש"
+    r"|בסוף השבוע|בעוד \d+ ימים|בעוד יומיים|בעוד שבוע|מתישהו|יום אחד"
+    r"|(?:[בל]?יום |[בל])(?:ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)"
+    r"|(?:בשעה |ב-?|עד )(?:\d{1,2}(?::\d{2})?|" + HE_NUMBER_WORDS + r")(?: וחצי| ורבע)?(?: בבוקר| בערב| בלילה| אחר הצהריים)?"
+    r"|(?:זה )?(?:חשוב|חשובה|דחוף|דחופה)")
+HE_WHEN_RE = re.compile(r"(?:\s*,?\s*(?:" + HE_WHEN_PART + r")[.!]?)+\s*$")
+HE_WHEN_START_RE = re.compile(r"^(?:(?:" + HE_WHEN_PART + r")[,]?\s+)+")
+HE_LEAD_RE = re.compile(
+    r"^(?:(?:היי|הי|אוקיי|טוב|בבקשה|גורגי|תגיד|תגידי)[,.!]?\s+)*"
+    r"(?:(?:תוסיף|תוסיפי|להוסיף|תרשום|תרשמי|לרשום|תכתוב|תכתבי|לכתוב|תשים|תשימי|תזכיר לי|תזכירי לי"
+    r"|אני צריך|אני צריכה|צריך|צריכה|אני חייב|אני חייבת|חייב|חייבת|אל תשכח|אל תשכחי|משימה חדשה|משימה)[:,]?\s+)"
+    r"(?:(?:ל|אל ה|ב)?(?:רשימה|משימות|רשימת המשימות|רשימה שלי)[:,]?\s+)?")
+HE_TAIL_RE = re.compile(r"\s*,?\s*(?:ל|אל ה|ב)(?:רשימה|משימות|רשימת המשימות|רשימה שלי)\.?\s*$")
+
 
 def parse_spoken(text, now=None):
     """What was said on the To-do screen -> {"text", "due", "someday", "at", "star"}."""
@@ -143,9 +229,19 @@ def parse_spoken(text, now=None):
     if m:
         task = m.group(2)
         task = LEAD_RE.sub("", task, count=1)
+    if lang.has_hebrew(task):
+        for _ in range(3):
+            before = task
+            task = HE_LEAD_RE.sub("", task, count=1)
+            task = HE_TAIL_RE.sub("", task)
+            task = HE_WHEN_RE.sub("", task).strip(" ,.!?")
+            task = HE_WHEN_START_RE.sub("", task)  # "מחר בחמש לקנות חלב"
+            if task == before:
+                break
     task = task.strip(" ,.!?") or said
     task = task[:1].upper() + task[1:]
-    return {"text": task[:56], "due": when["due"], "someday": when["someday"], "at": when["at"], "star": when["star"]}
+    return {"text": lang.cut_bytes(task, TEXT_BYTES), "due": when["due"], "someday": when["someday"], "at": when["at"],
+            "star": when["star"]}
 
 
 def to_message(task, msg_type="todo_add"):
@@ -180,8 +276,19 @@ def describe_day(due, today):
 # ---------------------------------------------------------------- finding a task by name
 
 
+def _stem(word):
+    """Hebrew glues little words to the front ("and", "the", "to", "in"...): "לבנק", "הבנק" -> "בנק"."""
+    if not lang.has_hebrew(word):
+        return word
+    if len(word) >= 4 and word[0] == "ו":
+        word = word[1:]
+    if len(word) >= 4 and word[0] in "הבלמשכ":
+        word = word[1:]
+    return word
+
+
 def _words(text):
-    return [w for w in re.findall(r"[a-z0-9']+", text.lower()) if w not in STOP_WORDS]
+    return [_stem(w) for w in re.findall(r"[\w']+", text.lower()) if w not in STOP_WORDS]
 
 
 def _word_match(a, b):
@@ -285,7 +392,7 @@ class TodoKeeper:
         the AI's answer when it can't be done, else None."""
         now = now or dt.datetime.now()
         if not self.known:
-            return [], "I need my new update for the to-do list. Right-click my icon on your PC and update me!"
+            return [], lang.t("I need my new update for the to-do list. Right-click my icon on your PC and update me!", "אני צריכה את העדכון החדש שלי בשביל רשימת המשימות. תעדכן אותי מהאייקון שלי במחשב!")
         v = " ".join(value.split()).strip()
         m = re.match(r"^(add|new|create|done|complete|completed|finish|finished|tick|check|undone|undo|reopen"
                      r"|remove|delete|cancel|drop)\b[:\s]*(.*)$", v, re.IGNORECASE)
@@ -303,7 +410,7 @@ class TodoKeeper:
             return self._mark(rest, True)
         except Exception:
             log.exception("todo tag: %s", value)
-        return [], "Hmm, I got confused with your list. Can you say it again?"
+        return [], lang.t("Hmm, I got confused with your list. Can you say it again?", "אופס, התבלבלתי עם הרשימה. אפשר להגיד שוב?")
 
     def _add(self, rest, now):
         text, sep, when = rest.partition("|")
@@ -315,9 +422,9 @@ class TodoKeeper:
         else:
             task = parse_spoken(text, now)
         if not task["text"].strip():
-            return [], "What should I add to your list?"
+            return [], lang.t("What should I add to your list?", "מה להוסיף לרשימה?")
         if len([t for t in self.tasks if not t.get("done")]) >= self.max_open:
-            return [], f"Your list is full, {self.max_open} tasks! Let's finish a few first."
+            return [], lang.t(f"Your list is full, {self.max_open} tasks! Let's finish a few first.", f"הרשימה מלאה, {self.max_open} משימות! בוא נסיים כמה קודם.")
         msg = to_message(task)
         self.tasks.append({"id": None, "text": task["text"], "due": msg.get("due"), "star": task["star"]})
         log.info("to-do add: %s", msg)
@@ -326,12 +433,12 @@ class TodoKeeper:
     def _pick(self, rest, pool, verb):
         found = find(rest, pool)
         if not found:
-            return None, f"I couldn't find \"{rest}\" on your list."
+            return None, lang.t(f"I couldn't find \"{rest}\" on your list.", f"לא מצאתי את \"{rest}\" ברשימה.")
         if len(found) > 1 and len({t.get("text") for t in found}) > 1:
-            names = " or ".join(t.get("text", "") for t in found[:3])
-            return None, f"Which one: {names}?"
+            names = lang.t(" or ", " או ").join(t.get("text", "") for t in found[:3])
+            return None, lang.t(f"Which one: {names}?", f"איזו מהן: {names}?")
         if not found[0].get("id"):
-            return None, f"Give me a second to {verb} that, I just added it."
+            return None, lang.t(f"Give me a second to {verb} that, I just added it.", "רגע, הרגע הוספתי את זה. נסה שוב עוד שנייה.")
         return found[0], None
 
     def _mark(self, rest, done):
@@ -339,9 +446,9 @@ class TodoKeeper:
         task, problem = self._pick(rest, pool, "tick" if done else "bring back")
         if problem:
             if not pool and done:
-                return [], "There's nothing left on your list to tick off!"
+                return [], lang.t("There's nothing left on your list to tick off!", "אין יותר מה לסמן ברשימה!")
             if find(rest, [t for t in self.tasks if bool(t.get("done")) == done]):
-                return [], "That one is already done!" if done else "That one isn't done yet."
+                return [], lang.t("That one is already done!", "זה כבר בוצע!") if done else lang.t("That one isn't done yet.", "זה עוד לא בוצע.")
             return [], problem
         task["done"] = done
         log.info("to-do %s: %s", "done" if done else "not done", task.get("text"))

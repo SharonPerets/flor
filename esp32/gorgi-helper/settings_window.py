@@ -1,6 +1,8 @@
-"""A small Settings window: Ollama key, AI model, Gorgi's voice, Claude Code."""
+"""A small Settings window: Ollama key, AI model, language, Gorgi's voices, Claude Code."""
 
 import asyncio
+import os
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -12,10 +14,15 @@ VOICES = {
     "Jenny - friendly (US)": "en-US-JennyNeural",
     "Guy - friendly (US)": "en-US-GuyNeural",
 }
+VOICES_HE = {
+    "Hila - warm (female)": "he-IL-HilaNeural",
+    "Avri - calm (male)": "he-IL-AvriNeural",
+}
+LANGUAGES = {"English": "en", "עברית (Hebrew)": "he"}
 SUGGESTED_MODELS = ["gpt-oss:20b", "gpt-oss:120b"]
 
 
-def show_window(config, save_config, list_models):
+def show_window(config, save_config, list_models, report_dir=None):
     """Shows the Settings window and returns when it's closed.
 
     Runs in its own process (GorgiHelper.exe --settings): Tkinter must own the
@@ -59,14 +66,82 @@ def show_window(config, save_config, list_models):
     current_voice = next((k for k, v in VOICES.items() if v == config.get("voice")), list(VOICES)[0])
     voice_var = tk.StringVar(value=current_voice)
     ttk.Combobox(frame, textvariable=voice_var, values=list(VOICES), state="readonly", width=34).grid(
-        row=6, column=0, sticky="we", pady=(2, 14))
+        row=6, column=0, sticky="we", pady=(2, 10))
+
+    # Language: what Gorgi hears and speaks (the switch in Gorgi's Action Center does the same)
+    ttk.Label(frame, text="Language").grid(row=10, column=0, sticky="w")
+    current_lang = next((k for k, v in LANGUAGES.items() if v == config.get("language")), "English")
+    lang_var = tk.StringVar(value=current_lang)
+    ttk.Combobox(frame, textvariable=lang_var, values=list(LANGUAGES), state="readonly", width=34).grid(
+        row=11, column=0, sticky="we", pady=(2, 10))
+
+    ttk.Label(frame, text="Gorgi's Hebrew voice").grid(row=12, column=0, sticky="w")
+    current_he = next((k for k, v in VOICES_HE.items() if v == config.get("voice_he")), list(VOICES_HE)[0])
+    voice_he_var = tk.StringVar(value=current_he)
+    ttk.Combobox(frame, textvariable=voice_he_var, values=list(VOICES_HE), state="readonly", width=34).grid(
+        row=13, column=0, sticky="we", pady=(2, 10))
+
+    # Hebrew test: asks a few AI models the same Hebrew requests, so you can pick the best one
+    test_var = tk.StringVar(value="Which AI model speaks the best Hebrew?")
+    ttk.Label(frame, textvariable=test_var, foreground="#666", wraplength=300).grid(
+        row=14, column=0, sticky="w", pady=(2, 14))
+    test_button = ttk.Button(frame, text="Test Hebrew answers")
+    test_button.grid(row=14, column=1, padx=(8, 0), pady=(2, 14))
+    best_model = []
+
+    def run_test():
+        import model_test
+
+        key = key_var.get().strip()
+        test_config = {**config, "ollama_api_key": key}
+        try:
+            available = asyncio.run(list_models(key))
+        except Exception as e:  # noqa: BLE001
+            root.after(0, lambda: test_done(None, f"Couldn't load models. Is the key right? ({e})"))
+            return
+        models = model_test.pick_models(available, model_var.get().strip())
+        try:
+            report, summary = asyncio.run(model_test.run(
+                test_config, models, lambda text: root.after(0, lambda: test_var.set("Testing " + text))))
+        except Exception as e:  # noqa: BLE001
+            root.after(0, lambda: test_done(None, f"The test failed: {e}"))
+            return
+        path = None
+        if report_dir is not None:
+            path = os.path.join(str(report_dir), "hebrew-test.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(report)
+        best_model[:] = [summary.split(" ")[1]] if summary.startswith("Best: ") else []
+        root.after(0, lambda: test_done(path, summary))
+
+    def test_done(path, summary):
+        test_button.state(["!disabled"])
+        test_var.set(summary)
+        if path:
+            try:
+                os.startfile(path)  # Windows: opens the report in Notepad
+            except Exception:  # noqa: BLE001
+                pass
+        if best_model and best_model[0] != model_var.get().strip():
+            if messagebox.askyesno("Gorgi Helper", f"{summary}\n\nUse {best_model[0]} from now on?", parent=root):
+                model_var.set(best_model[0])
+
+    def start_test():
+        if not key_var.get().strip():
+            messagebox.showerror("Gorgi Helper", "Enter the Ollama key first.", parent=root)
+            return
+        test_button.state(["disabled"])
+        test_var.set("Testing... (a few minutes)")
+        threading.Thread(target=run_test, daemon=True).start()
+
+    test_button.configure(command=start_test)
 
     # Claude Code: hooks so Gorgi shows your sessions and usage (changes take effect right away)
-    ttk.Label(frame, text="Claude Code").grid(row=7, column=0, sticky="w")
+    ttk.Label(frame, text="Claude Code").grid(row=15, column=0, sticky="w")
     claude_var = tk.StringVar()
-    ttk.Label(frame, textvariable=claude_var, foreground="#666").grid(row=8, column=0, sticky="w", pady=(2, 14))
+    ttk.Label(frame, textvariable=claude_var, foreground="#666").grid(row=16, column=0, sticky="w", pady=(2, 14))
     claude_button = ttk.Button(frame)
-    claude_button.grid(row=8, column=1, padx=(8, 0), pady=(2, 14))
+    claude_button.grid(row=16, column=1, padx=(8, 0), pady=(2, 14))
 
     def refresh_claude():
         connected, ours, other = claude_setup.status()
@@ -96,11 +171,13 @@ def show_window(config, save_config, list_models):
         config["ollama_api_key"] = key_var.get().strip()
         config["model"] = model_var.get().strip() or SUGGESTED_MODELS[0]
         config["voice"] = VOICES[voice_var.get()]
+        config["voice_he"] = VOICES_HE[voice_he_var.get()]
+        config["language"] = LANGUAGES[lang_var.get()]
         save_config(config)
         root.destroy()
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=9, column=0, columnspan=2, sticky="e")
+    buttons.grid(row=20, column=0, columnspan=2, sticky="e")
     ttk.Button(buttons, text="Cancel", command=root.destroy).grid(row=0, column=0, padx=(0, 8))
     ttk.Button(buttons, text="Save", command=save).grid(row=0, column=1)
 

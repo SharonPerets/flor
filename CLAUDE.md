@@ -246,6 +246,17 @@ Done and confirmed:
   Hebrew, drops vowel marks/emoji. To-dos: TEXT_MAX 112 bytes, NVS "todo"/"list" now packed "TOD2" records (4.6 "TOD1" converted
   on start). Alarm labels (32 B) / reminder texts (64 B) keep UTF-8 (sizes unchanged). PC tests: `bidi_test`, `todo_hebrew.ppm`,
   Time `hebrew.ppm`. Confirmed ("music ok": Hebrew song names show right).
+  Confirmed ("music ok"), merged (PR #9).
+- **4.8 - Gorgi hears and speaks Hebrew**: `lang.py` (config "language" en|he, `lang.t(en, he)`, `has_hebrew`, `cut_bytes`).
+  Switch: Action Center pill EN/עב (`Tap::Language` -> `cmd language` 0/1; helper answers `{"type":"language","value"}`,
+  also sent on connect) and Settings (Language, Hebrew voice Hila/Avri, **Test Hebrew answers** = `model_test.py`: 8 Hebrew
+  requests on up to 5 models, report `hebrew-test.txt` in the settings folder, offers the best model). `voice.Ears` picks
+  Whisper per language (Hebrew = `ivrit-ai/whisper-large-v3-turbo-ct2`, loaded on first Hebrew use, ~1.6 GB; "רגע, אני
+  לומדת עברית..."); `Speaker` uses `voice_he` when the reply has Hebrew letters. `brain.HEBREW_RULE`: casual Israeli Hebrew,
+  Gorgi feminine about itself, friend masculine if unknown, tags English with Hebrew contents. Hebrew durations in
+  `timekeeper` (חצי שעה, שעתיים...), Hebrew days/times + prefixes (ו + הבלמשכ) in `todolist`, Hebrew problems and spoken
+  alerts (`hebrew_alert`); the device's alert screens stay English. Self-test: Hila says a Hebrew timer request, the ivrit
+  model transcribes it (timings in the CI log).
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)

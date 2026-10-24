@@ -2,6 +2,7 @@
 
 - Recorder: listens to the PC microphone and stops when you stop talking.
 - Transcriber: turns speech into text with Whisper, on your PC (free, private).
+  Ears picks the English or the Hebrew one (ivrit.ai's Hebrew Whisper), see lang.py.
 - Speaker: says Gorgi's answers with a free Microsoft Edge voice and reports
   how loud each moment is, so Gorgi's mouth can follow the voice.
 """
@@ -12,6 +13,8 @@ import re
 import time
 
 import numpy as np
+
+import lang
 
 log = logging.getLogger("gorgi.voice")
 
@@ -99,10 +102,18 @@ def bundled_model_dir(model_name):
     return folder if (folder / "model.bin").exists() else None
 
 
+HEBREW_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"  # ivrit.ai's Hebrew Whisper (Apache 2.0), ~1.6 GB
+
+# What Whisper sometimes "hears" in silence
+NOT_SPEECH = {"", "you", "thank you", "thanks for watching", "bye",
+              "תודה", "תודה רבה", "תודה שצפיתם", "תודה רבה שצפיתם", "תודה על הצפייה", "כתוביות", "שלום"}
+
+
 class Transcriber:
-    def __init__(self, model_name, models_dir):
+    def __init__(self, model_name, models_dir, language="en"):
         self.model_name = model_name
         self.models_dir = models_dir
+        self.language = language
         self._model = None
         self.loading = False
         self.error = None
@@ -121,7 +132,8 @@ class Transcriber:
                 model = str(bundled)  # shipped with the app: no download needed
                 log.info("loading bundled Whisper model from %s", bundled)
             else:
-                log.info("loading Whisper model %s (downloads once, ~150 MB)...", self.model_name)
+                log.info("loading Whisper model %s (downloads once, %s)...", self.model_name,
+                         "~1.6 GB" if self.language == "he" else "~150 MB")
             self._model = WhisperModel(model, device="cpu", compute_type="int8",
                                        download_root=str(self.models_dir))
             log.info("Whisper model ready")
@@ -143,20 +155,53 @@ class Transcriber:
         self.load()
         if self._model is None:
             return ""
-        segments, _info = self._model.transcribe(audio, language="en", beam_size=1, vad_filter=False,
+        started = time.monotonic()
+        segments, _info = self._model.transcribe(audio, language=self.language, beam_size=1, vad_filter=False,
                                                  condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments).strip()
-        # Whisper sometimes "hears" these in silence
-        if text.lower().strip(" .!?") in ("", "you", "thank you", "thanks for watching", "bye"):
+        log.info("transcribed %.1f s of speech in %.1f s (%s)", len(audio) / SAMPLE_RATE, time.monotonic() - started,
+                 self.language)
+        if text.lower().strip(" .!?,") in NOT_SPEECH:
             return ""
         return text
+
+
+class Ears:
+    """The English and the Hebrew Whisper; works like a Transcriber for the language chosen now.
+    The Hebrew one loads (and the first time downloads) only when Hebrew is used."""
+
+    def __init__(self, english, hebrew):
+        self.english = english
+        self.hebrew = hebrew
+
+    def current(self):
+        return self.hebrew if lang.hebrew() else self.english
+
+    @property
+    def ready(self):
+        return self.current().ready
+
+    @property
+    def loading(self):
+        return self.current().loading
+
+    @property
+    def error(self):
+        return self.current().error
+
+    def load(self):
+        self.current().load()
+
+    def transcribe(self, audio):
+        return self.current().transcribe(audio)
 
 
 class Speaker:
     OUTPUT_RATE = 24000
 
-    def __init__(self, voice, rate="+0%", pitch="+0Hz"):
+    def __init__(self, voice, rate="+0%", pitch="+0Hz", voice_he="he-IL-HilaNeural"):
         self.voice = voice
+        self.voice_he = voice_he  # used when the text has Hebrew letters
         self.rate = rate
         self.pitch = pitch
 
@@ -167,11 +212,12 @@ class Speaker:
         import miniaudio
 
         mp3 = bytearray()
+        voice = self.voice_he if lang.has_hebrew(text) else self.voice
         try:  # newer edge-tts only reports sentences unless asked for words
-            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch,
+            communicate = edge_tts.Communicate(text, voice, rate=self.rate, pitch=self.pitch,
                                                boundary="WordBoundary")
         except TypeError:
-            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch)
+            communicate = edge_tts.Communicate(text, voice, rate=self.rate, pitch=self.pitch)
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 mp3 += chunk["data"]
@@ -225,7 +271,7 @@ class Speaker:
 
 
 def _plain(word):
-    return re.sub(r"[^a-z0-9]", "", word.lower())
+    return re.sub(r"[\W_]", "", word.lower())  # letters and digits (Hebrew too)
 
 
 def word_timings(text, spoken, duration):

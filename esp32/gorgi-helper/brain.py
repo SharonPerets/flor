@@ -11,6 +11,7 @@ import time
 
 import httpx
 
+import lang
 import timekeeper
 import todolist
 
@@ -30,7 +31,7 @@ microphone; your replies are spoken out loud in a cute voice and shown as subtit
 How you talk:
 - Short: one or two sentences, at most about 30 words, unless your friend asks for more.
 - Casual, warm, playful and a little cheeky. Never rude or mean.
-- English only. Plain spoken text: no emoji, no markdown, no lists, no links.
+- {language} Plain spoken text: no emoji, no markdown, no lists, no links.
 - Numbers and times written the way you would say them.
 
 Every reply MUST start with exactly one mood tag, chosen to match what you say:
@@ -53,6 +54,21 @@ and don't repeat facts you already remember. If they ask you to forget something
 Use what you remember naturally, without listing it.
 
 """ + timekeeper.PROMPT + "\n\n" + todolist.PROMPT + "\n"
+
+ENGLISH_RULE = "English only."
+HEBREW_RULE = """Always answer in Hebrew: natural, casual, everyday Israeli Hebrew, like a friend talks (no vowel marks).
+  Your friend speaks Hebrew to you (their words come from speech recognition, so forgive small mistakes).
+  Address your friend in the grammatical gender they use for themselves (from what they say or what you remember);
+  if you don't know, use the masculine form. You speak with a girl's voice, so use the feminine form about yourself
+  (אני שמחה, הוספתי). Keep names of songs, apps and people as they are.
+  Write numbers and times as digits (17:00, 10 דקות). All tags stay exactly in English as shown, but the words
+  inside them that your friend will read (timer names, reminder and task text, memories) are in Hebrew,
+  for example [timer: 10m | פסטה], [remind: at 17:00 | להתקשר לאמא], [todo: add לקנות חלב | tomorrow]."""
+
+
+def personality():
+    """Gorgi's instructions in the language chosen now."""
+    return PERSONALITY.replace("{language}", HEBREW_RULE if lang.hebrew() else ENGLISH_RULE)
 
 MEMORY_RE = re.compile(r"\[(remember|forget)\s*:\s*([^\]]+)\]", re.IGNORECASE)
 
@@ -119,12 +135,13 @@ class Brain:
     async def ask(self, text, context):
         """Ask Gorgi something. context: a line about time / music to help the model."""
         if self.needs_key():
-            raise BrainError("I need an Ollama key to think. Open Settings from my tray icon on your PC.", "confused")
+            raise BrainError(lang.t("I need an Ollama key to think. Open Settings from my tray icon on your PC.",
+                                  "אני צריכה מפתח של Ollama כדי לחשוב. פתח את ההגדרות מהאייקון שלי במחשב."), "confused")
         if time.monotonic() - self.last_chat > FORGET_AFTER_SECONDS:
             self.history = []
 
         model = self.config.get("model") or DEFAULT_MODEL
-        system = PERSONALITY + "\n" + context
+        system = personality() + "\n" + context
         if self.memory is not None:
             system += "\n\n" + self.memory.prompt_block()
         messages = [{"role": "system", "content": system}] + self.history + [{"role": "user", "content": text}]
@@ -137,22 +154,27 @@ class Brain:
                 r = await client.post(f"{self._base_url()}/api/chat", json=body, headers=self._headers())
         except httpx.HTTPError as e:
             log.warning("AI request failed: %s", e)
-            raise BrainError("I can't reach my brain right now. Is the internet working?")
+            raise BrainError(lang.t("I can't reach my brain right now. Is the internet working?",
+                                    "אני לא מצליחה להגיע למוח שלי. האינטרנט עובד?"))
 
         if r.status_code in (401, 403):
-            raise BrainError("My Ollama key doesn't work. Please check it in Settings.", "confused")
+            raise BrainError(lang.t("My Ollama key doesn't work. Please check it in Settings.",
+                                    "המפתח של Ollama לא עובד. תבדוק אותו בהגדרות."), "confused")
         if r.status_code == 404:
-            raise BrainError(f"I can't find the model {model}. Please pick another one in Settings.", "confused")
+            raise BrainError(lang.t(f"I can't find the model {model}. Please pick another one in Settings.",
+                                    f"אני לא מוצאת את המודל {model}. תבחר מודל אחר בהגדרות."), "confused")
         if r.status_code == 429:
-            raise BrainError("I've been thinking too much today. Ollama says to slow down for a bit.", "sleepy")
+            raise BrainError(lang.t("I've been thinking too much today. Ollama says to slow down for a bit.",
+                                    "חשבתי יותר מדי היום. Ollama מבקש להאט קצת."), "sleepy")
         if r.status_code >= 400:
             log.warning("AI error %s: %s", r.status_code, r.text[:300])
-            raise BrainError("Something went wrong in my brain. Let's try again.", "confused")
+            raise BrainError(lang.t("Something went wrong in my brain. Let's try again.",
+                                    "משהו השתבש לי במוח. בוא ננסה שוב."), "confused")
 
         reply = (r.json().get("message") or {}).get("content", "").strip()
         log.info("AI reply: %s", reply)
         if not reply:
-            raise BrainError("Hmm, my mind went blank. Can you ask again?", "confused")
+            raise BrainError(lang.t("Hmm, my mind went blank. Can you ask again?", "המממ, נתקעתי. אפשר לשאול שוב?"), "confused")
 
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
         self.history = self.history[-MAX_HISTORY_TURNS * 2:]
