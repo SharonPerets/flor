@@ -14,7 +14,7 @@ namespace todos {
 
 constexpr int MAX_OPEN = 40;   // tasks not done yet
 constexpr int MAX_DONE = 20;   // finished ones kept (for a week)
-constexpr int TEXT_MAX = 112;  // bytes of text in a task (English letters take 1, Hebrew letters 2)
+constexpr int TEXT_MAX = 56;   // letters in a task
 constexpr int32_t NO_DAY = 0;  // no due day
 constexpr uint32_t KEEP_DONE_SECONDS = 7 * 24 * 3600;
 

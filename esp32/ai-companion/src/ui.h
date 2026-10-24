@@ -77,9 +77,9 @@ void update(uint32_t nowMs);
 Target hitTest(int x, int y);
 int volumeFromX(int x);
 
-// Cleans UTF-8 text for the screen: keeps English and Hebrew letters, turns curly quotes and
-// dashes into plain ones, drops what the fonts can't show (emoji, accents, Hebrew vowel marks).
-String cleanText(const String& utf8);
+// Converts UTF-8 text (curly quotes, dashes, emoji...) into plain ASCII
+// that the fonts can show.
+String toAscii(const String& utf8);
 
 // Screen background
 constexpr gfx::Color BACKGROUND = gfx::rgb(0x05070A);

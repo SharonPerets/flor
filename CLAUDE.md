@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.7 Hebrew on the screen confirmed and merged; 4.8 Hebrew hearing/speaking on branch claude/project-thread-vbs4n9)
+## Where things stand (4.6.2 confirmed; Hebrew 4.7-4.8.4 dropped, 4.8.5 = back to 4.6.2 on branch claude/project-thread-vbs4n9)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -230,55 +230,12 @@ Done and confirmed:
   `ui::setSubtitleReveal(n)` draws only the first n words of the (fully wrapped) subtitle, two lines at a time, turning
   to the next two lines for long replies (no more "..." cut); main `updateSayWords` each frame. Rejected option C
   (hide "You: ..." / "Thinking...") for now. Confirmed ("looks great!").
-- **Hebrew plan** (user, 2026-10-24: "Hebrew across the board"; plan doc https://claude.ai/artifact/252ezF3tuXChEh2ictoAsT,
-  user picked all recommendations): a Hebrew / English **switch** (Settings + Action Center), English buttons with Hebrew
-  content (no mirrored screens), Edge voice **he-IL-HilaNeural**, Hebrew keyboard later. Steps: 4.7 screen shows Hebrew,
-  4.8 hears/speaks Hebrew (ivrit.ai `whisper-large-v3-turbo-ct2` via faster-whisper, language "he", ~1.6 GB download on
-  first Hebrew use; Hebrew rule in the personality, tags stay English with Hebrew content; to-do find must handle Hebrew
-  words + prefixes ה ו ב ל מ ש; Hebrew day words in `parse_spoken`; Hebrew alerts; a "Hebrew model test" in Settings to
-  pick the Ollama model - gpt-oss:20b is weak in Hebrew, candidates gpt-oss:120b, gemma4, deepseek-v4.1-flash), 4.9 Hebrew keyboard.
-- **4.7 - Hebrew on the screen**: Hebrew letters (alef..tav) from **Fredoka** (OFL, `tools/Fredoka-OFL.txt`) in SUBTITLE,
-  TITLE, SMALL, HEADLINE, NOTE (`src/gfont_hebrew.cpp` from `tools/make_fonts.py --hebrew Fredoka.ttf`, weight = Nunito's - 200;
-  `gfont::extraFor(font)`). `bidi.cpp` (pure C++): UTF-8 `next`, `dropLast` / `safeCut` / `trimPartial` (never half a letter),
-  `isRtl` (first letter Hebrew), `visual()` = a small Unicode bidi for one line (numbers like 17:00 kept, brackets mirrored).
-  `Canvas::text` reorders Hebrew lines itself; `Canvas::textIn(x, w)` puts RTL lines at the right edge (music screen + bar,
-  to-dos, reminders, notifications, Claude names); subtitles reveal from the right. `ui::cleanText` (was `toAscii`) keeps
-  Hebrew, drops vowel marks/emoji. To-dos: TEXT_MAX 112 bytes, NVS "todo"/"list" now packed "TOD2" records (4.6 "TOD1" converted
-  on start). Alarm labels (32 B) / reminder texts (64 B) keep UTF-8 (sizes unchanged). PC tests: `bidi_test`, `todo_hebrew.ppm`,
-  Time `hebrew.ppm`. Confirmed ("music ok": Hebrew song names show right), merged (PR #9).
-- **4.8 - Gorgi hears and speaks Hebrew**: `lang.py` (config "language" en|he, `lang.t(en, he)`, `has_hebrew`, `cut_bytes`).
-  Switch: Action Center pill EN/עב (`Tap::Language` -> `cmd language` 0/1; helper answers `{"type":"language","value"}`,
-  also sent on connect) and Settings (Language, Hebrew voice Hila/Avri, **Test Hebrew answers** = `model_test.py`: 8 Hebrew
-  requests on up to 5 models, report `hebrew-test.txt` in the settings folder, offers the best model). `voice.Ears` picks
-  Whisper per language (Hebrew = `ivrit-ai/whisper-large-v3-turbo-ct2`, loaded on first Hebrew use, ~1.6 GB; "רגע, אני
-  לומדת עברית..."); `Speaker` uses `voice_he` when the reply has Hebrew letters. `brain.HEBREW_RULE`: casual Israeli Hebrew,
-  Gorgi feminine about itself, friend masculine if unknown, tags English with Hebrew contents. Hebrew durations in
-  `timekeeper` (חצי שעה, שעתיים...), Hebrew days/times + prefixes (ו + הבלמשכ) in `todolist`, Hebrew problems and spoken
-  alerts (`hebrew_alert`); the device's alert screens stay English. Self-test: Hila says a Hebrew timer request, the ivrit
-  model transcribes it word for word, but in ~12 s for 4 s of speech on the 4-core CI PC (all cores used now); ask the user
-  how long Hebrew answers take. Released as gorgi-v4.8.
-- **4.8.1 - Hebrew download fix**: on the user's PC the ivrit model downloaded (~35 s) but faster-whisper said "Unable to
-  open file 'model.bin'" in the Hugging Face cache (`models--ivrit-ai--.../snapshots/...`; likely Windows symlinks).
-  Now `Transcriber._download()` uses `snapshot_download(local_dir=models/ivrit-ai--whisper-large-v3-turbo-ct2)` (plain
-  files), writes `download-complete.txt` (no internet needed later), deletes the old cache folder, logs model.bin size.
-  Released as gorgi-v4.8.1: the download then hung at 4 KB on the user's PC.
-- **4.8.2 - Hebrew download, take 2**: `huggingface_hub.snapshot_download` shows a tqdm progress bar, which hangs in the
-  `--noconsole` exe (CI passed only because the plain-Python step had downloaded the model first). Now
-  `faster_whisper.utils.download_model(name, output_dir=...)` (no progress bar, only the 5 needed files). CI deletes the
-  Hebrew folder before the packaged self-test, so the exe downloads it itself (14 s; heard in ~5.3 s for 4 s of speech on
-  4 cores). Lesson: test downloads in the packaged, console-less app.
-- **4.8.3 - Hebrew hearing in the cloud**: 4.8.2 worked on the user's laptop but took 20.6 s for 2.4 s of speech (no NVIDIA;
-  AI 1.3 s, voice 1.6 s). User OK'd **Groq** (free key, console.groq.com): `voice.CloudTranscriber` posts a WAV to
-  `api.groq.com/openai/v1/audio/transcriptions` (`whisper-large-v3`, language he); OpenAI (`gpt-4o-mini-transcribe`) also
-  supported. Config `hearing_he` groq|openai|local, `groq_api_key`, `openai_api_key` (Settings > Hebrew hearing). `Ears`
-  uses the cloud when it has a key, falls back to the ivrit model on the PC if the request fails.
-- **4.8.4 - automatic language, no Hebrew model on the PC** (user: "don't want to choose", "don't want the local Hebrew
-  model at all"): with a cloud key ALL speech goes to Groq/OpenAI without a language; Hebrew letters in the text = Hebrew
-  (`voice.spoken_language`; Arabic/Cyrillic/CJK guess -> asked again with the last language). `Ears.transcribe` calls
-  `lang.set_spoken()` -> config "language" + `lang.on_change` -> helper `language_changed()` (saves, sends `language` to
-  Gorgi). Answers, voice and alerts follow the last language spoken. No key / cloud error -> English Whisper on the PC.
-  Removed: ivrit model + `_download`, `whisper_model_he`, Settings Language + "On this PC", the Action Center EN/עב pill
-  (firmware). `voice.forget_hebrew_model()` deletes `models/*ivrit-ai--*` at start. Config key `hearing` (was `hearing_he`).
+- **Hebrew (4.7 - 4.8.4) was tried and DROPPED** (user, 2026-10-24: "This is terrible - drop and remove all hebrew traces
+  from everywhere"). 4.7 showed Hebrew on the screen (Fredoka letters, own bidi), 4.8 heard/spoke Hebrew (ivrit.ai Whisper on
+  the PC: 20 s per sentence on the user's laptop; then Groq cloud hearing; then auto language). **4.8.5 = the 4.6.2 code again**
+  (git tree of 3fdc1c2) plus two clean-ups: the firmware reads the 4.7 to-do format ("TOD2") once and saves it as 4.6's "TOD1"
+  (non-English letters dropped, Hebrew-only tasks lost), and the helper removes the Hebrew settings from config.json
+  (`HEBREW_LEFTOVERS`) and any `models/*ivrit-ai--*` folder. Don't offer Hebrew again unless the user asks.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -291,10 +248,8 @@ Done and confirmed:
   (with 4.4/4.5).
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
-- **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
-- **4.8 - 4.8.4 (Hebrew hearing/speaking)** are on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
-  confirmed, merge, then plan 4.9 (Hebrew keyboard). If Hebrew hearing is slow/wrong, ask for `gorgi-helper.log`
-  ("transcribed in ..." lines) and `hebrew-test.txt`.
+- **Hebrew was dropped** by the user. 4.8.5 (= 4.6.2 + clean-ups, see above) is on branch `claude/project-thread-vbs4n9`,
+  waiting for the user's test. On "works": mark confirmed, merge to main (main still has 4.7: the merge removes it).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).

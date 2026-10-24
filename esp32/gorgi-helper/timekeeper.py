@@ -15,8 +15,6 @@ import logging
 import re
 import time
 
-import lang
-
 log = logging.getLogger("gorgi.time")
 
 TAG_RE = re.compile(r"\[(timer|focus|remind|reminder|cancel)\s*:\s*([^\]]+)\]", re.IGNORECASE)
@@ -55,9 +53,7 @@ Use the list below to answer questions like "how long is left?" or "what are my 
 
 
 DURATION_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s|שעות|שעה|דקות|דקה|דק'|שניות|שנייה|שניה)"
-    r"(?![a-z\u05d0-\u05ea])", re.IGNORECASE)
-HEBREW_UNITS = {"ש": 3600, "ד": 60}  # שעה/שעות = hours, דקה/דקות = minutes; שניות (seconds) is checked first
+    r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])", re.IGNORECASE)
 
 
 def parse_duration(text):
@@ -66,14 +62,8 @@ def parse_duration(text):
     total = 0.0
     found = False
     for m in DURATION_RE.finditer(text):
-        value, unit = float(m.group(1)), m.group(2)
-        if unit.startswith("שנ"):
-            seconds = 1
-        elif unit[0] in HEBREW_UNITS:
-            seconds = HEBREW_UNITS[unit[0]]
-        else:
-            seconds = {"h": 3600, "m": 60, "s": 1}[unit[0].lower()]
-        total += value * seconds
+        value, unit = float(m.group(1)), m.group(2)[0]
+        total += value * {"h": 3600, "m": 60, "s": 1}[unit]
         found = True
     if not found:
         m = re.fullmatch(r"(\d+(?:\.\d+)?)", text)
@@ -82,14 +72,8 @@ def parse_duration(text):
         m = re.fullmatch(r"(\d+):(\d\d)", text)  # "1:30" = 1 minute 30 seconds
         if m:
             return int(m.group(1)) * 60 + int(m.group(2))
-        if re.search(r"\b(half an hour|half hour)\b", text) or "חצי שעה" in text:
+        if re.search(r"\b(half an hour|half hour)\b", text):
             return 1800
-        if "רבע שעה" in text:
-            return 900
-        if "שעתיים" in text:
-            return 7200
-        if re.fullmatch(r"(?:\w\s*)?שעה(?: אחת)?", text):  # "שעה", "בשעה" alone = an hour
-            return 3600
         if re.search(r"\b(an hour|one hour)\b", text):
             return 3600
         return None
@@ -221,7 +205,7 @@ class TimeKeeper:
         now = now or dt.datetime.now()
         name = name.lower()
         if not self.known:  # Gorgi runs an older version without timers
-            return [], lang.t("I need my new update for timers. Right-click my icon on your PC and update me!", "אני צריכה את העדכון החדש שלי בשביל טיימרים. תעדכן אותי מהאייקון שלי במחשב!")
+            return [], "I need my new update for timers. Right-click my icon on your PC and update me!"
         try:
             if name == "timer":
                 return self._timer(value)
@@ -233,20 +217,20 @@ class TimeKeeper:
                 return self._cancel(value)
         except Exception:
             log.exception("time tag %s: %s", name, value)
-        return [], lang.t("Hmm, I got confused setting that up. Can you say it again?", "אופס, התבלבלתי. אפשר להגיד את זה שוב?")
+        return [], "Hmm, I got confused setting that up. Can you say it again?"
 
     def _timer(self, value):
         when, sep, label = value.partition("|")
         seconds = parse_duration(when)
         if not sep:  # "pasta 10m": the name is what's left without the length
             label = DURATION_RE.sub("", value)
-        label = lang.cut_bytes(" ".join(label.split()).strip(" .,"), 31)  # Gorgi keeps 31 bytes
+        label = " ".join(label.split()).strip(" .,")[:31]
         if not seconds:
-            return [], lang.t("Hmm, how long should the timer be?", "כמה זמן לשים בטיימר?")
+            return [], "Hmm, how long should the timer be?"
         if seconds > 24 * 3600:
-            return [], lang.t("That's too long for a timer. Try a reminder instead!", "זה ארוך מדי לטיימר. בוא נשים תזכורת במקום!")
+            return [], "That's too long for a timer. Try a reminder instead!"
         if len([t for t in self.timers if t.get("kind") != "focus"]) >= self.max_timers:
-            return [], lang.t(f"I can only run {self.max_timers} timers at once. Want me to cancel one?", f"אני יכולה להריץ רק {self.max_timers} טיימרים ביחד. לבטל אחד?")
+            return [], f"I can only run {self.max_timers} timers at once. Want me to cancel one?"
         self.timers.append({"id": None, "kind": "timer", "label": label or "timer", "left": seconds, "paused": False})
         log.info("timer: %d s (%s)", seconds, label)
         return [{"type": "time_add", "kind": "timer", "seconds": seconds, "label": label}], None
@@ -256,14 +240,14 @@ class TimeKeeper:
         focus = [t for t in self.timers if t.get("kind") == "focus"]
         if v in ("stop", "end", "cancel", "off", "done", "finish"):
             if not focus:
-                return [], lang.t("There's no focus session running.", "אין עכשיו סשן פוקוס.")
+                return [], "There's no focus session running."
             return [{"type": "time_cancel", "id": t["id"]} for t in focus if t.get("id")], None
         if focus:
-            return [], lang.t("We're already focusing! I'll cheer when it's done.", "אנחנו כבר בפוקוס! אריע כשזה ייגמר.")
+            return [], "We're already focusing! I'll cheer when it's done."
         seconds = parse_duration(v) if v not in ("", "start", "on", "default") else None
         seconds = seconds or self.focus_minutes * 60
         if seconds > 4 * 3600:
-            return [], lang.t("That's a really long focus session. Let's keep it under four hours.", "זה סשן פוקוס ארוך מאוד. בוא נשאיר אותו מתחת לארבע שעות.")
+            return [], "That's a really long focus session. Let's keep it under four hours."
         self.timers.append({"id": None, "kind": "focus", "label": "Focus", "left": seconds, "paused": False})
         log.info("focus: %d s", seconds)
         return [{"type": "time_add", "kind": "focus", "seconds": seconds}], None
@@ -272,16 +256,16 @@ class TimeKeeper:
         when, sep, text = value.partition("|")
         text = " ".join(text.split()).strip(" .")
         if not sep or not text:
-            return [], lang.t("What should I remind you about?", "על מה להזכיר לך?")
+            return [], "What should I remind you about?"
         if len(self.reminders) >= self.max_reminders:
-            return [], lang.t(f"I already have {self.max_reminders} reminders, that's my limit. Want me to delete one?", f"יש לי כבר {self.max_reminders} תזכורות, זה המקסימום. למחוק אחת?")
+            return [], f"I already have {self.max_reminders} reminders, that's my limit. Want me to delete one?"
         w = " ".join(when.lower().split())
 
         # in 20 minutes
         if w.startswith("in ") or w.startswith("after "):
             seconds = parse_duration(w.split(" ", 1)[1])
             if not seconds:
-                return [], lang.t("Hmm, in how long should I remind you?", "בעוד כמה זמן להזכיר לך?")
+                return [], "Hmm, in how long should I remind you?"
             at = now + dt.timedelta(seconds=seconds)
             return self._remind_at(at, text)
 
@@ -291,17 +275,17 @@ class TimeKeeper:
         if repeating:
             days = parse_days(w)
             if not days:
-                return [], lang.t("Which days should I remind you?", "באילו ימים להזכיר לך?")
+                return [], "Which days should I remind you?"
             if not clock:
-                return [], lang.t("At what time should I remind you?", "באיזו שעה להזכיר לך?")
+                return [], "At what time should I remind you?"
             minute = clock[0] * 60 + clock[1]
             self.reminders.append({"id": None, "text": text, "when": w, "repeat": True})
             log.info("repeating reminder: %s %02d:%02d %s", [DAY_NAMES[d] for d in range(7) if days >> d & 1],
                      clock[0], clock[1], text)
-            return [{"type": "time_add", "kind": "remind", "text": lang.cut_bytes(text, 63), "minute": minute, "days": days}], None
+            return [{"type": "time_add", "kind": "remind", "text": text[:63], "minute": minute, "days": days}], None
 
         if not clock:
-            return [], lang.t("At what time should I remind you?", "באיזו שעה להזכיר לך?")
+            return [], "At what time should I remind you?"
         hour, minute = clock
         m = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", w)
         if m:
@@ -322,14 +306,14 @@ class TimeKeeper:
                     date += dt.timedelta(days=1)
         at = dt.datetime.combine(date, dt.time(hour, minute))
         if at <= now:
-            return [], lang.t("That time has already passed. When should I remind you?", "השעה הזאת כבר עברה. מתי להזכיר לך?")
+            return [], "That time has already passed. When should I remind you?"
         return self._remind_at(at, text)
 
     def _remind_at(self, at, text):
         epoch = int(at.timestamp())
         self.reminders.append({"id": None, "text": text, "when": at.strftime("%a %H:%M"), "repeat": False})
         log.info("reminder at %s: %s", at.strftime("%Y-%m-%d %H:%M"), text)
-        return [{"type": "time_add", "kind": "remind", "text": lang.cut_bytes(text, 63), "at": epoch}], None
+        return [{"type": "time_add", "kind": "remind", "text": text[:63], "at": epoch}], None
 
     def _cancel(self, value):
         v = " ".join(value.lower().split()).strip(" .")
@@ -337,29 +321,28 @@ class TimeKeeper:
         focus = [t for t in self.timers if t.get("kind") == "focus" and t.get("id")]
         reminders = [r for r in self.reminders if r.get("id")]
 
-        if v in ("everything", "all", "all of them", "הכל", "את הכל", "הכול"):
+        if v in ("everything", "all", "all of them"):
             chosen = timers + focus + reminders
         elif v in ("all timers", "timers", "every timer"):
             chosen = timers
         elif v in ("all reminders", "reminders", "every reminder"):
             chosen = reminders
-        elif v in ("focus", "focus session", "the focus session", "פוקוס", "הפוקוס"):
+        elif v in ("focus", "focus session", "the focus session"):
             chosen = focus
         elif v in ("timer", "the timer", "my timer"):
             if len(timers) > 1:
                 names = ", ".join(t.get("label", "") for t in timers)
-                return [], lang.t(f"I have {len(timers)} timers: {names}. Which one?", f"יש לי {len(timers)} טיימרים: {names}. איזה מהם?")
+                return [], f"I have {len(timers)} timers: {names}. Which one?"
             chosen = timers
         elif v in ("reminder", "the reminder", "my reminder"):
             if len(reminders) > 1:
-                return [], lang.t("I have a few reminders. Which one should I cancel?", "יש לי כמה תזכורות. איזו לבטל?")
+                return [], "I have a few reminders. Which one should I cancel?"
             chosen = reminders
         else:
-            skip = {"the", "my", "a", "timer", "reminder", "to", "about", "for", "one", "that",
-                    "את", "של", "על", "ה", "טיימר", "הטיימר", "תזכורת", "התזכורת", "שלי", "זה", "הזה", "הזאת"}
-            words = [w for w in re.findall(r"[\w']+", v) if w not in skip]
+            skip = {"the", "my", "a", "timer", "reminder", "to", "about", "for", "one", "that"}
+            words = [w for w in re.findall(r"[a-z0-9']+", v) if w not in skip]
             if not words:
-                return [], lang.t("Which one should I cancel?", "איזה לבטל?")
+                return [], "Which one should I cancel?"
 
             def matches(item):
                 hay = (item.get("label") or item.get("text") or "").lower()
@@ -370,7 +353,7 @@ class TimeKeeper:
                 chosen = [x for x in timers + focus + reminders
                           if any(w in (x.get("label") or x.get("text") or "").lower() for w in words if len(w) > 2)]
         if not chosen:
-            return [], lang.t("I couldn't find that one.", "לא מצאתי את זה.")
+            return [], "I couldn't find that one."
         log.info("cancel: %s", [c.get("label") or c.get("text") for c in chosen])
         ids = {c["id"] for c in chosen}
         self.timers = [t for t in self.timers if t.get("id") not in ids]

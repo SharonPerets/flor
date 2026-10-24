@@ -84,46 +84,4 @@ mood, spoken, actions = brain.parse_reply("[happy] Added! [todo: add buy milk | 
 print(mood, spoken, actions)
 assert spoken == "Added!" and actions == [("todo", "add buy milk | tomorrow"), ("todo", "done bank")]
 print(extract("Sure [TODO: remove milk]"))
-
-# ---- Hebrew (4.8)
-import lang  # noqa: E402
-
-lang.bind({"language": "he"})
-
-
-def heb(said, text, due=None, at=None, star=False, someday=False):
-    t = parse_spoken(said, now)
-    print(f"{said!r} ->", t)
-    assert t["text"] == text, t["text"]
-    assert t["due"] == due, t["due"]
-    assert (t["at"].strftime("%H:%M") if t["at"] else None) == at, t["at"]
-    assert t["star"] == star and t["someday"] == someday
-
-
-import datetime as _dt  # noqa: E402
-
-D = now.date()
-heb("תוסיף לקנות חלב מחר", "לקנות חלב", D + _dt.timedelta(days=1))
-heb("לקנות חלב מחר בחמש", "לקנות חלב", D + _dt.timedelta(days=1), "17:00")
-heb("אני צריך להתקשר לבנק היום ב-10:30", "להתקשר לבנק", D, "10:30")
-heb("תזכיר לי לשלם חשבון חשמל ביום שישי, זה חשוב", "לשלם חשבון חשמל", D + _dt.timedelta(days=6), star=True)
-heb("לסדר את המחסן מתישהו", "לסדר את המחסן", someday=True)
-heb("משימה חדשה: לקבוע תור לרופא שיניים בשבוע הבא", "לקבוע תור לרופא שיניים", D + _dt.timedelta(days=1))
-heb("לקנות מתנה לנועה", "לקנות מתנה לנועה")
-heb("מחר בשמונה בבוקר ריצה", "ריצה", D + _dt.timedelta(days=1), "08:00")
-long_text = "לסדר " * 40
-assert len(parse_spoken(long_text, now)["text"].encode()) <= 112
-
-k.update({"type": "todo_list", "today": "2026-10-24", "tasks": [
-    {"id": 11, "text": "להתקשר לבנק על הכרטיס"},
-    {"id": 12, "text": "לקנות חלב וביצים", "due": "2026-10-25"},
-    {"id": 13, "text": "לשלם חשבון חשמל", "done": True},
-]})
-assert go("done הבנק")[0] == [{"type": "todo_done", "id": 11, "done": True}]
-assert go("done חלב")[0] == [{"type": "todo_done", "id": 12, "done": True}]
-assert go("undone חשבון החשמל")[0] == [{"type": "todo_done", "id": 13, "done": False}]
-assert "לא מצאתי" in go("remove לטייל עם הכלב")[1]
-m, p = go("add לקנות פרחים | friday")
-assert m[0]["text"] == "לקנות פרחים" and m[0]["due"] == "2026-10-30"
-lang.bind({})
 print("ALL OK")

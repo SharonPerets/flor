@@ -1,4 +1,4 @@
-// Smooth (anti-aliased) fonts, made by tools/make_fonts.py from Nunito (+ Hebrew letters from Fredoka).
+// Smooth (anti-aliased) fonts, made by tools/make_fonts.py from Nunito.
 #pragma once
 
 #include <stdint.h>
@@ -20,14 +20,6 @@ struct Font {
   uint8_t ascent;       // baseline distance from the top of a line
   uint8_t height;       // line height
 };
-
-// Extra letters outside the font's own table (Hebrew), in gfont_hebrew.cpp.
-struct Extra {
-  const Glyph* glyphs;
-  const uint8_t* alpha;
-  uint16_t first, last;  // Unicode code points
-};
-const Extra* extraFor(const Font& f);  // nullptr if the font has none
 
 extern const Font SUBTITLE;  // 26 px bold
 extern const Font TITLE;     // 22 px extra bold

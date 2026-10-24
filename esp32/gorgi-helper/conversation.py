@@ -5,7 +5,6 @@ import asyncio
 import logging
 import time
 
-import lang
 import todolist
 import weather
 from brain import BrainError
@@ -42,12 +41,10 @@ class Conversation:
         if self.transcriber.ready:
             return None
         if self.transcriber.loading:
-            return lang.t("Give me a minute, I'm still learning to hear. Try again soon!",
-                          "רגע, אני עוד מתכוננת לשמוע. נסה שוב עוד רגע!")
+            return "Give me a minute, I'm still learning to hear. Try again soon!"
         await asyncio.to_thread(self.transcriber.load)
         if not self.transcriber.ready:
-            return lang.t("My ears aren't working. Please check the helper's log on your PC.",
-                          "האוזניים שלי לא עובדות. תבדוק את הלוג של התוכנה במחשב.")
+            return "My ears aren't working. Please check the helper's log on your PC."
         return None
 
     async def run_dictation(self):
@@ -65,7 +62,7 @@ class Conversation:
             await self.send({"type": "dictate_state", "state": "listening"})
             audio = await self.recorder.record(wait_for_speech=FIRST_WAIT_SECONDS, max_seconds=30.0, end_silence=1.5)
             if audio is None:
-                problem = lang.t("I didn't hear anything", "לא שמעתי כלום")
+                problem = "I didn't hear anything"
                 return
             await self.send({"type": "dictate_state", "state": "thinking"})
             text = await asyncio.to_thread(self.transcriber.transcribe, audio)
@@ -79,7 +76,7 @@ class Conversation:
             elif text:
                 await self.send({"type": "dictation", "text": text, "mode": "text"})
             else:
-                problem = lang.t("Sorry, I didn't catch that", "סליחה, לא הבנתי")
+                problem = "Sorry, I didn't catch that"
         finally:
             try:
                 msg = {"type": "dictate_state", "state": "idle"}
@@ -120,8 +117,7 @@ class Conversation:
                     audio = await self.recorder.record(wait_for_speech=wait)
                 if audio is None:
                     if not followup:
-                        await self._say("confused", lang.t("I didn't hear anything. Is the microphone on?",
-                                                           "לא שמעתי כלום. המיקרופון פועל?"))
+                        await self._say("confused", "I didn't hear anything. Is the microphone on?")
                     return
 
                 await self.send({"type": "voice", "state": "thinking"})
@@ -129,7 +125,7 @@ class Conversation:
                 log.info("heard: %r", text)
                 if not text:
                     if not followup:  # after a follow-up wait it was just noise: end quietly
-                        await self._say("confused", lang.t("Sorry, I didn't catch that.", "סליחה, לא הבנתי."))
+                        await self._say("confused", "Sorry, I didn't catch that.")
                     return
                 await self.send({"type": "heard", "text": text})
 

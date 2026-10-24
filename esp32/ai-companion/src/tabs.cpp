@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "bidi.h"
 #include "gfont.h"
 
 namespace tabs {
@@ -131,16 +130,10 @@ void drawMiniPlayer(Canvas& c, const char* title, const char* artist, bool playi
   if (artist && artist[0]) snprintf(line, sizeof line, "%s  -  %s", title, artist);
   else snprintf(line, sizeof line, "%s", title);
   const float maxW = m.w - 110;
-  if (Canvas::textWidth(gfont::SMALL, line) > maxW) {
-    char full[96];
-    memcpy(full, line, sizeof full);
-    size_t n = strlen(full);
-    while (n > 0) {
-      n = bidi::dropLast(full, n);  // a whole letter at a time (Hebrew letters are 2 bytes)
-      full[n] = 0;
-      snprintf(line, sizeof line, "%s...", full);
-      if (Canvas::textWidth(gfont::SMALL, line) <= maxW) break;
-    }
+  int n = (int)strlen(line);
+  while (n > 3 && Canvas::textWidth(gfont::SMALL, line) > maxW) {
+    line[--n] = 0;
+    line[n - 1] = line[n - 2] = line[n - 3] = '.';
   }
   c.text(gfont::SMALL, line, m.x + 52, (int)cy + 6, TEXT);
   // play / pause

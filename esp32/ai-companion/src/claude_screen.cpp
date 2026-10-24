@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "bidi.h"
 #include "gfont.h"
 
 namespace claudescreen {
@@ -38,11 +37,10 @@ void panel(Canvas& c, float x, float w) {
 void fit(const gfont::Font& f, const char* s, float maxW, char* out, int size) {
   snprintf(out, size, "%s", s);
   if (Canvas::textWidth(f, out) <= maxW) return;
-  size_t n = strlen(out);
+  int n = (int)strlen(out);
   while (n > 0) {
-    n = bidi::dropLast(out, n);  // a whole letter at a time (Hebrew letters are 2 bytes)
-    out[n] = 0;
-    char tmp[160];
+    out[--n] = 0;
+    char tmp[96];
     snprintf(tmp, sizeof tmp, "%s...", out);
     if (Canvas::textWidth(f, tmp) <= maxW) {
       snprintf(out, size, "%s", tmp);
@@ -76,7 +74,7 @@ void sessionRow(Canvas& c, const Session& s, float y) {
 
   char buf[96], ago[24] = "";
   fit(gfont::TITLE, s.name, 200, buf, sizeof buf);
-  c.textIn(gfont::TITLE, buf, x + 26, 200, (int)y + 30, TEXT);
+  c.text(gfont::TITLE, buf, x + 26, (int)y + 30, TEXT);
 
   if (s.ago >= 0) formatAgo(s.ago, ago, sizeof ago);
   const char* what = s.state == WORKING ? "Working" : s.state == WAITING ? "Waiting for you" : s.state == DONE ? "Done" : "Idle";

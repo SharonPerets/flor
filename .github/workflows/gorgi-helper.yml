@@ -51,13 +51,9 @@ jobs:
       - name: Self-test (voice -> Whisper round trip, imports)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\GorgiHelper\GorgiHelper.exe -ArgumentList "--selftest","$PWD\selftest.txt" -PassThru
-          $p | Wait-Process -Timeout 900 -ErrorAction SilentlyContinue
-          if (-not $p.HasExited) { Write-Output "::error::self-test hung (15 min)"; $p | Stop-Process -Force }
+          Start-Process -FilePath dist\GorgiHelper\GorgiHelper.exe -ArgumentList "--selftest","$PWD\selftest.txt" -Wait
           if (Test-Path selftest.txt) { Get-Content selftest.txt } else { Write-Output "no report written" }
           if (Test-Path selftest.crash.txt) { Write-Output "--- crash log ---"; Get-Content selftest.crash.txt }
-          # Hebrew hearing results as notes on the run (readable without the full log)
-          if (Test-Path selftest.txt) { Get-Content -Encoding utf8 selftest.txt | Where-Object { $_ -match "hebrew|WARNING" } | ForEach-Object { Write-Output "::notice title=Hebrew::$_" } }
           if (-not (Select-String -Path selftest.txt -Pattern "SELFTEST OK" -Quiet)) { exit 1 }
 
       - name: Check the version matches esp32/VERSION

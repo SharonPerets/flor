@@ -7,7 +7,6 @@
 #include <esp_heap_caps.h>
 #endif
 
-#include "bidi.h"
 #include "gfont.h"
 
 namespace music {
@@ -80,7 +79,7 @@ void drawPlaceholder(Canvas& c) {
 // Cuts text to fit, adding "..."
 String fit(const gfont::Font& f, String s, float maxW) {
   if (Canvas::textWidth(f, s.c_str()) <= maxW) return s;
-  while (s.length() > 0 && Canvas::textWidth(f, (s + "...").c_str()) > maxW) s.remove(bidi::dropLast(s.c_str(), s.length()));
+  while (s.length() > 0 && Canvas::textWidth(f, (s + "...").c_str()) > maxW) s.remove(s.length() - 1);
   s.trim();
   return s + "...";
 }
@@ -188,18 +187,13 @@ void draw(Canvas& c, const ui::MediaInfo& s, uint32_t now, const char* emptyTitl
   int y = n == 2 ? 118 : 138;
   c.text(gfont::SMALL, s.playing ? "NOW PLAYING" : "PAUSED", TEXT_X, y, s.playing ? ACCENT : DIM);
   y += 44;
-  // Hebrew titles sit at the right edge (both lines, even if the second starts with an English word)
-  const bool rtl = bidi::isRtl(s.title.c_str());
-  for (int i = 0; i < n; ++i, y += 40) {
-    const float x = rtl ? TEXT_R - Canvas::textWidth(gfont::HEADLINE, lines[i].c_str()) : TEXT_X;
-    c.text(gfont::HEADLINE, lines[i].c_str(), x, y, TEXT);
-  }
+  for (int i = 0; i < n; ++i, y += 40) c.text(gfont::HEADLINE, lines[i].c_str(), TEXT_X, y, TEXT);
   y -= 2;
   if (s.artist.length()) {
-    c.textIn(gfont::SUBTITLE, fit(gfont::SUBTITLE, s.artist, maxW).c_str(), TEXT_X, maxW, y, MUTED);
+    c.text(gfont::SUBTITLE, fit(gfont::SUBTITLE, s.artist, maxW).c_str(), TEXT_X, y, MUTED);
     y += 30;
   }
-  if (s.album.length() && s.album != s.title) c.textIn(gfont::SMALL, fit(gfont::SMALL, s.album, maxW).c_str(), TEXT_X, maxW, y, DIM);
+  if (s.album.length() && s.album != s.title) c.text(gfont::SMALL, fit(gfont::SMALL, s.album, maxW).c_str(), TEXT_X, y, DIM);
   drawProgress(c, s, now);
 }
 

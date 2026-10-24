@@ -2,7 +2,6 @@
 
 - Recorder: listens to the PC microphone and stops when you stop talking.
 - Transcriber: turns speech into text with Whisper, on your PC (free, private).
-  Ears: the cloud (Groq/OpenAI: Hebrew + English) or the English Whisper on this PC, see lang.py.
 - Speaker: says Gorgi's answers with a free Microsoft Edge voice and reports
   how loud each moment is, so Gorgi's mouth can follow the voice.
 """
@@ -10,13 +9,9 @@
 import asyncio
 import logging
 import re
-import os
-import threading
 import time
 
 import numpy as np
-
-import lang
 
 log = logging.getLogger("gorgi.voice")
 
@@ -104,27 +99,16 @@ def bundled_model_dir(model_name):
     return folder if (folder / "model.bin").exists() else None
 
 
-# What Whisper sometimes "hears" in silence
-NOT_SPEECH = {"", "you", "thank you", "thanks for watching", "bye",
-              "תודה", "תודה רבה", "תודה שצפיתם", "תודה רבה שצפיתם", "תודה על הצפייה", "כתוביות", "שלום"}
-
-
 class Transcriber:
-    def __init__(self, model_name, models_dir, language="en"):
+    def __init__(self, model_name, models_dir):
         self.model_name = model_name
         self.models_dir = models_dir
-        self.language = language
         self._model = None
         self.loading = False
         self.error = None
-        self._lock = threading.Lock()  # one load at a time (two downloads of the same files clash)
 
     def load(self):
         """Loads (and the first time downloads) the Whisper model. Slow: run in a thread."""
-        with self._lock:
-            self._load()
-
-    def _load(self):
         if self._model is not None:
             return
         self.loading = True
@@ -136,9 +120,9 @@ class Transcriber:
             if bundled:
                 model = str(bundled)  # shipped with the app: no download needed
                 log.info("loading bundled Whisper model from %s", bundled)
-            # All the PC's cores (the default is 4)
-            threads = min(os.cpu_count() or 4, 12)
-            self._model = WhisperModel(model, device="cpu", compute_type="int8", cpu_threads=threads,
+            else:
+                log.info("loading Whisper model %s (downloads once, ~150 MB)...", self.model_name)
+            self._model = WhisperModel(model, device="cpu", compute_type="int8",
                                        download_root=str(self.models_dir))
             log.info("Whisper model ready")
             self.error = None
@@ -159,157 +143,20 @@ class Transcriber:
         self.load()
         if self._model is None:
             return ""
-        started = time.monotonic()
-        segments, _info = self._model.transcribe(audio, language=self.language, beam_size=1, vad_filter=False,
-                                                 condition_on_previous_text=False, without_timestamps=True)
+        segments, _info = self._model.transcribe(audio, language="en", beam_size=1, vad_filter=False,
+                                                 condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments).strip()
-        log.info("transcribed %.1f s of speech in %.1f s (%s)", len(audio) / SAMPLE_RATE, time.monotonic() - started,
-                 self.language)
-        if text.lower().strip(" .!?,") in NOT_SPEECH:
+        # Whisper sometimes "hears" these in silence
+        if text.lower().strip(" .!?") in ("", "you", "thank you", "thanks for watching", "bye"):
             return ""
-        return text
-
-
-def forget_hebrew_model(models_dir):
-    """Deletes the 1.6 GB Hebrew model that 4.8 - 4.8.3 downloaded (Hebrew is heard in the cloud now)."""
-    import shutil
-    from pathlib import Path
-
-    for folder in Path(models_dir).glob("*ivrit-ai--*"):
-        log.info("deleting the old Hebrew model %s", folder)
-        shutil.rmtree(folder, ignore_errors=True)
-
-
-# Cloud hearing (Groq or OpenAI): fast, hears Hebrew and English and tells which one was spoken.
-# Both speak the same OpenAI-style API: POST audio, get text back.
-CLOUD_HEARING = {
-    "groq": ("https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3"),
-    "openai": ("https://api.openai.com/v1/audio/transcriptions", "gpt-4o-mini-transcribe"),
-}
-OTHER_SCRIPT_RE = re.compile(r"[\u0600-\u06ff\u0400-\u04ff\u3040-\u9fff]")  # Arabic, Cyrillic, ...
-
-
-def wav_bytes(audio):
-    """16 kHz float audio -> a small 16-bit WAV file in memory."""
-    import io
-    import wave
-
-    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
-    out = io.BytesIO()
-    with wave.open(out, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(SAMPLE_RATE)
-        w.writeframes(pcm)
-    return out.getvalue()
-
-
-def spoken_language(text):
-    """"he" when the words have Hebrew letters, else "en"."""
-    return "he" if lang.has_hebrew(text) else "en"
-
-
-class CloudTranscriber:
-    """Hears through Groq or OpenAI (config "hearing": groq | openai, keys "groq_api_key" / "openai_api_key").
-    No language is given, so it hears Hebrew or English, whichever was spoken."""
-
-    def __init__(self, config):
-        self.config = config
-        self.loading = False
-        self.error = None
-
-    def service(self):
-        name = (self.config.get("hearing") or "groq").lower()
-        key = (self.config.get(f"{name}_api_key") or "").strip()
-        return (name, key) if name in CLOUD_HEARING and key else (None, None)
-
-    @property
-    def ready(self):
-        return self.service()[0] is not None
-
-    def load(self):
-        pass
-
-    def _ask(self, audio, language=None):
-        import httpx
-
-        name, key = self.service()
-        url, model = CLOUD_HEARING[name]
-        data = {"model": model, "response_format": "json"}
-        if language:
-            data["language"] = language
-        r = httpx.post(url, headers={"Authorization": f"Bearer {key}"}, data=data,
-                       files={"file": ("speech.wav", wav_bytes(audio), "audio/wav")}, timeout=20)
-        if r.status_code >= 400:
-            raise RuntimeError(f"{name} {r.status_code}: {r.text[:200]}")
-        return (r.json().get("text") or "").strip()
-
-    def transcribe(self, audio):
-        """A web request: run in a thread. Raises when the service fails."""
-        started = time.monotonic()
-        text = self._ask(audio)
-        if OTHER_SCRIPT_RE.search(text):  # it guessed another language (short or mumbled words): Hebrew or English only
-            text = self._ask(audio, lang.code())
-        log.info("%s heard %.1f s of speech in %.1f s", self.service()[0], len(audio) / SAMPLE_RATE,
-                 time.monotonic() - started)
-        if text.lower().strip(" .!?,") in NOT_SPEECH:
-            return ""
-        return text
-
-
-class Ears:
-    """Hearing: the cloud service from Settings when it has a key (Hebrew or English, detected each time),
-    else the English Whisper on this PC. After each sentence, the language spoken becomes Gorgi's language
-    (lang.set_spoken), so the answer, the voice and later alerts follow it."""
-
-    def __init__(self, english, cloud=None):
-        self.english = english
-        self.cloud = cloud
-        self.cloud_failed = None  # why the cloud failed last time (None when it worked)
-
-    def current(self):
-        if self.cloud is not None and self.cloud.ready:
-            return self.cloud
-        return self.english
-
-    @property
-    def ready(self):
-        return self.current().ready
-
-    @property
-    def loading(self):
-        return self.current().loading
-
-    @property
-    def error(self):
-        return self.current().error
-
-    def load(self):
-        self.english.load()  # the backup, ready for when there's no key or no internet
-
-    def transcribe(self, audio):
-        ears = self.current()
-        if ears is self.cloud:
-            try:
-                text = ears.transcribe(audio)
-                self.cloud_failed = None
-            except Exception as e:
-                log.warning("cloud hearing failed (%s), using the English Whisper on this PC", e)
-                self.cloud_failed = str(e)
-                text = self.english.transcribe(audio)
-        else:
-            text = ears.transcribe(audio)
-        if text:
-            lang.set_spoken(spoken_language(text))
         return text
 
 
 class Speaker:
     OUTPUT_RATE = 24000
 
-    def __init__(self, voice, rate="+0%", pitch="+0Hz", voice_he="he-IL-HilaNeural"):
+    def __init__(self, voice, rate="+0%", pitch="+0Hz"):
         self.voice = voice
-        self.voice_he = voice_he  # used when the text has Hebrew letters
         self.rate = rate
         self.pitch = pitch
 
@@ -320,12 +167,11 @@ class Speaker:
         import miniaudio
 
         mp3 = bytearray()
-        voice = self.voice_he if lang.has_hebrew(text) else self.voice
         try:  # newer edge-tts only reports sentences unless asked for words
-            communicate = edge_tts.Communicate(text, voice, rate=self.rate, pitch=self.pitch,
+            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch,
                                                boundary="WordBoundary")
         except TypeError:
-            communicate = edge_tts.Communicate(text, voice, rate=self.rate, pitch=self.pitch)
+            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch)
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 mp3 += chunk["data"]
@@ -379,7 +225,7 @@ class Speaker:
 
 
 def _plain(word):
-    return re.sub(r"[\W_]", "", word.lower())  # letters and digits (Hebrew too)
+    return re.sub(r"[^a-z0-9]", "", word.lower())
 
 
 def word_timings(text, spoken, duration):
