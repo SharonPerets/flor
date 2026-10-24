@@ -10,7 +10,7 @@
 
 namespace tabs {
 
-enum Icon : uint8_t { MUSIC, FACE, WEATHER, TIME, SKETCH, CLAUDE };
+enum Icon : uint8_t { MUSIC, FACE, WEATHER, TIME, TODO, CLAUDE };
 
 constexpr int MAX_TABS = 8;
 constexpr float GAP = 54;  // distance between icons

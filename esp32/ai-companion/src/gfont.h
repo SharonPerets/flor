@@ -28,6 +28,6 @@ extern const Font Z_BIG;     // only the letter Z
 extern const Font Z_SMALL;   // only the letter Z
 extern const Font BIG;       // 76 px, only - and digits
 extern const Font HEADLINE;  // 34 px extra bold
-extern const Font NOTE;      // 21 px semi-bold (typed notes)
+extern const Font NOTE;      // 21 px semi-bold (to-do tasks)
 
 }  // namespace gfont

@@ -58,10 +58,15 @@ void clockIcon(Canvas& c, float cx, float cy, const Color& col) {
   c.fillCapsule(cx, cy, cx + 3.5f, cy + 2, 1.1f, col);
 }
 
-void pencil(Canvas& c, float cx, float cy, const Color& col) {
-  c.fillCapsule(cx - 5, cy + 5, cx + 6, cy - 6, 2.6f, col);
-  const Pt tip[3] = {{cx - 7.5f, cy + 3.5f}, {cx - 3.5f, cy + 7.5f}, {cx - 9, cy + 9}};
-  c.fillPolygon(tip, 3, col);
+// A ticked box (the To-do screen)
+void checkbox(Canvas& c, float cx, float cy, const Color& col) {
+  const float r = 8;
+  c.fillCapsule(cx - r, cy - r, cx + r, cy - r, 1.1f, col);
+  c.fillCapsule(cx - r, cy + r, cx + r, cy + r, 1.1f, col);
+  c.fillCapsule(cx - r, cy - r, cx - r, cy + r, 1.1f, col);
+  c.fillCapsule(cx + r, cy - r, cx + r, cy + r, 1.1f, col);
+  c.fillCapsule(cx - 4, cy, cx - 1, cy + 3.5f, 1.4f, col);
+  c.fillCapsule(cx - 1, cy + 3.5f, cx + 4.5f, cy - 3.5f, 1.4f, col);
 }
 
 // Claude's spark: thin rays from the middle
@@ -97,7 +102,7 @@ void draw(Canvas& c, const uint8_t* icons, int count, int current, uint32_t badg
       case FACE: face(c, x, y, col); break;
       case WEATHER: sun(c, x, y, col); break;
       case TIME: clockIcon(c, x, y, col); break;
-      case SKETCH: pencil(c, x, y, col); break;
+      case TODO: checkbox(c, x, y, col); break;
       case CLAUDE: spark(c, x, y, col); break;
     }
     if (badges & (1u << i)) {

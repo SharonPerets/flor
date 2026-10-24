@@ -21,7 +21,7 @@ static const gfx::Color DIM = gfx::rgb(0xC9D3DD), BORDER = gfx::rgb(0x1F2935), P
 static void topBar(gfx::Canvas& c, int current, bool dot) {
   c.fillRect(0, tabs::LINE_Y, 800, 1, LINE);
   c.text(gfont::TITLE, "23:08", 20, 30, DIM);
-  const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
+  const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::TODO, tabs::CLAUDE};
   tabs::draw(c, icons, 5, current, 0);
   panel::drawHandle(c, dot);
   const char* st = "Tap me to talk";

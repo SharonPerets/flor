@@ -10,8 +10,8 @@
 //   hold face 1 s     -> show the next expression (handy for testing)
 //   media buttons     -> control music on the PC
 //   hold clock 5 s    -> forget Wi-Fi and open the "Gorgi-Setup" network again
-//   swipe sideways    -> other screens: music (swipe right), weather, time, sketch (swipe left)
-//                        (on the sketch screen: swipe on the toolbar, the paper is for drawing)
+//   swipe sideways    -> other screens: music (swipe right), time, to-do, Claude (swipe left)
+//                        (or tap the icons at the top)
 //   when a timer or reminder goes off: tap anywhere to stop it
 
 #include <Arduino.h>
@@ -26,12 +26,12 @@
 #include "music_screen.h"
 #include "action_center.h"
 #include "pclink.h"
-#include <new>
+#include <LittleFS.h>
 
-#include "sketch.h"
-#include "sketch_store.h"
 #include "tabs.h"
 #include "time_screen.h"
+#include "todo_screen.h"
+#include "todos.h"
 #include "ui.h"
 #include "weather.h"
 #include "wallclock.h"
@@ -63,8 +63,8 @@ constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 // ---------- screens ----------
 // Swipe left/right in the middle of the screen to switch, in this order.
 // More screens can be added to this list later.
-enum class Page { Music, Face, Time, Sketch, Claude, Count };  // the weather moved to the Action Center in 4.3
-const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
+enum class Page { Music, Face, Time, Todo, Claude, Count };  // the weather moved to the Action Center in 4.3
+const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::TODO, tabs::CLAUDE};
 Page page = Page::Face;
 bool musicDirty = true;      // the music screen needs drawing
 int musicProgressKey = -2;   // what the progress bar showed last
@@ -90,9 +90,6 @@ uint32_t timeVersionSeen = 0;
 int timeConfirm = -1;        // reminder row asking "Delete?"
 String timeNote;             // short message at the top of the Time screen
 uint32_t timeNoteUntil = 0;
-
-bool sketchFull = true;  // the sketch screen needs drawing in full
-bool skDictating = false;  // voice typing on the Sketch screen is listening / writing
 
 // Claude Code on the PC (sessions and usage, sent by the helper)
 claudescreen::View claudeView;
@@ -259,7 +256,7 @@ void markPageDirty(Page p) {
   if (p == Page::Face) face.invalidate();
   if (p == Page::Music) musicDirty = true;
   if (p == Page::Time) timeDirty = true;
-  if (p == Page::Sketch) sketchFull = true;
+  if (p == Page::Todo) todoFull = true;
   if (p == Page::Claude) claudeDirty = true;
 }
 
@@ -269,19 +266,20 @@ void addMissed(uint8_t kind, const char* title, const String& what);
 void closeActionCenter();
 void goToSleep();
 void sendTimeList();
-void sketchShown();
-void sketchHidden();
+void todoShown();
+void todoHidden();
+void todoVoiceReset();
+void sendTodoList();
 void drawClaude(uint32_t now);
 
 // Switches screens right away (no animation)
 void showPage(Page p) {
   if (p == page) return;
-  if (page == Page::Sketch) sketchHidden();
+  if (page == Page::Todo) todoHidden();
   page = p;
   ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
-  ui::setTalkButton(p == Page::Sketch);
-  ui::setBottomHidden(p == Page::Sketch);  // the Sketch screen uses the whole height
+  ui::setBottomHidden(p == Page::Todo);  // the To-do screen uses the whole height
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
     display::render(gfx::Rect{0, ui::TOP_H, 800, ui::FACE_Y - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
@@ -294,8 +292,8 @@ void showPage(Page p) {
   }
   if (p == Page::Time) {
     timeConfirm = -1;
-  } else if (p == Page::Sketch) {
-    sketchShown();
+  } else if (p == Page::Todo) {
+    todoShown();
   }
   markPageDirty(p);
   drawFrame(millis());  // the new screen right away, in one go
@@ -463,15 +461,13 @@ void onVoice(const char* type, JsonObjectConst msg) {
 
 void onHelper(bool connected, const String& name) {
   gotMediaSinceConnect = false;
-  if (skDictating) {
-    skDictating = false;
-    showIdleStatus();
-  }
+  todoVoiceReset();  // (voice typing ended with the connection)
   if (inConversation) endConversation();
   if (connected) {
     pcName = name;
     sendWeather();
     sendTimeList();
+    sendTodoList();
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
   } else {
@@ -789,692 +785,479 @@ void onTime(const char* type, JsonObjectConst msg) {
   }
 }
 
-// ---------- sketch pad ----------
-// Write mode: a big writing box, the words land small on a lined page (sketch::Writer).
-// Draw mode: free drawing on the whole paper. Both work on the same picture.
+// ---------- to-do list ----------
+// The tasks live on Gorgi (todos.cpp). You add them by voice (the PC turns what you
+// say into a task with a day), with the on-screen keyboard, or by asking Gorgi.
 
-uint16_t* skPic = nullptr;  // the drawing (PSRAM)
-uint16_t* skBox = nullptr;  // the big writing in the Write box (PSRAM)
-// Undo: the last few states of the picture, newest = what's on the paper now. A copy is
-// made when a stroke (Draw) or a word (Write) is finished, never while the finger draws.
-constexpr int UNDO_STEPS = 6;
-constexpr uint32_t KEEP_PSRAM = 1500 * 1024;  // undo copies stop before PSRAM gets this low
-uint16_t* skUndo[UNDO_STEPS] = {};
-sketch::Cursor skUndoCursor[UNDO_STEPS];
-int skUndoSlots = 0;          // how many undo pictures could be made
-int skHistStart = 0, skHistCount = 0;
-uint16_t* skThumbs = nullptr;  // gallery pictures
-sketch::Tools skTools;
-sketch::Gallery skGallery;
-sketch::Writer skWriter;
-sketch::Smoother skSmooth;
-Preferences skPrefs;
-uint32_t skCurrent = 1, skNextId = 2;
-bool skLoaded = false;     // the current sketch was read from flash
-bool skChanged = false;    // drawn on since the last save
-bool skToolbarDirty = false;
-uint32_t skLastStroke = 0;
-uint32_t skClearAsked = 0;  // when "Clear" started asking "Sure?"
-bool sketchStroking = false;
-enum class SkStroke { Draw, Box, Erase };  // what the finger is doing
-SkStroke skStroke = SkStroke::Draw;
-gfx::Pt skLast = {0, 0};
-constexpr uint32_t SKETCH_SAVE_AFTER_MS = 20 * 1000;  // save after a pause in drawing
-constexpr uint32_t SKETCH_CLEAR_ASK_MS = 3000;
-constexpr size_t SKETCH_PIXELS = (size_t)sketch::PAPER_W * sketch::PAPER_H;
+todoscreen::View todoView;
+bool todoFull = true;  // the To-do screen needs drawing in full
+uint32_t todoHeaderKey = 0, todoListKey = 0, todoBottomKey = 0;
+uint32_t todoFieldKey = 0, todoWhenKey = 0, todoKeysKey = 0, todoKbBottomKey = 0;
+int todoPressedDrawn = -1;
+uint32_t todoVersionSeen = 0;
+uint32_t todoFreshId = 0, todoFreshUntil = 0;  // a task just added: highlighted for a moment
+uint32_t todoToastUntil = 0;
+enum class TodoUndo : uint8_t { None, Done, Delete };
+TodoUndo todoUndoKind = TodoUndo::None;
+todos::Task todoUndoTask;
+bool todoVoiceForKb = false;  // the words go into the keyboard's text box
+char todoKbNote[40] = "";
+uint32_t todoKbNoteUntil = 0;
+bool todoScrolled = false;   // this touch scrolls the list (it's no tap)
+int todoFirstAtDown = 0;
+constexpr uint32_t TODO_FRESH_MS = 4000;
+constexpr uint32_t TODO_UNDO_MS = 5000;
+constexpr uint32_t TODO_NOTE_MS = 3500;
 
-// Typed notes: each handwritten word goes to the PC, which answers with the text.
-// What happens on the page waits in a queue, in order (a word, a space, a new line...),
-// so a slow answer never mixes things up. No answer in INK_WAIT_MS: the handwriting stays.
-constexpr int WORD_SLOTS = 3;
-constexpr uint32_t INK_WAIT_MS = 2500;
-sketch::Word* skWords = nullptr;  // WORD_SLOTS words (PSRAM)
-bool skWordUsed[WORD_SLOTS] = {};
-enum class SkOpKind : uint8_t { Word, Text, Space, NewLine, Place };
-struct SkOp {
-  SkOpKind kind;
-  uint16_t id;     // Word: matches the PC's answer
-  int8_t slot;     // Word: which of skWords
-  bool ready;      // Word: the answer came
-  uint32_t sentAt;
-  int x, y;        // Place
-  String text;     // Text: the words; Word: the best guess
-  String alts[sketch::CHIPS];
-  int altCount;
-  SkOp() : kind(SkOpKind::Space), id(0), slot(-1), ready(false), sentAt(0), x(0), y(0), altCount(0) {}
-};
-constexpr int MAX_OPS = 8;
-SkOp skOps[MAX_OPS];
-int skOpCount = 0;
-uint16_t skInkId = 0;
-int skChipsHist = -1;  // the undo step that the guess chips belong to
-uint32_t skStatusUntil = 0;  // a short note in the status pill (e.g. "PC not connected")
+int32_t todoToday() { return wallclock::valid() ? todos::dayOf(wallclock::now()) : todos::NO_DAY; }
+uint32_t epochNow() { return wallclock::valid() ? (uint32_t)wallclock::now() : 0; }
 
-void sketchSetup() {
-  skPic = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
-  skBox = (uint16_t*)heap_caps_malloc((size_t)sketch::PAPER_W * sketch::BOX_H * 2, MALLOC_CAP_SPIRAM);
-  skThumbs = (uint16_t*)heap_caps_malloc((size_t)sketch::MAX_SKETCHES * sketch::THUMB_W * sketch::THUMB_H * 2,
-                                         MALLOC_CAP_SPIRAM);
-  skWords = (sketch::Word*)heap_caps_malloc(sizeof(sketch::Word) * WORD_SLOTS, MALLOC_CAP_SPIRAM);
-  if (skWords)
-    for (int i = 0; i < WORD_SLOTS; ++i) new (&skWords[i]) sketch::Word();
-  for (int i = 0; i < UNDO_STEPS; ++i) {
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < SKETCH_PIXELS * 2 + KEEP_PSRAM) break;
-    skUndo[i] = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
-    if (!skUndo[i]) break;
-    skUndoSlots = i + 1;
+// Tells the helper the list, so the AI knows it (and can tick tasks off by name)
+void sendTodoList() {
+  JsonDocument doc;
+  todos::toJson(doc, todoToday());
+  pclink::send(doc);
+}
+
+void todoToast(const String& text, bool undo) {
+  snprintf(todoView.toast, sizeof todoView.toast, "%s", ui::toAscii(text).c_str());
+  todoView.toastUndo = undo;
+  todoToastUntil = millis() + (undo ? TODO_UNDO_MS : TODO_NOTE_MS);
+  if (!undo) todoUndoKind = TodoUndo::None;
+}
+
+void todoKbSay(const char* text) {
+  snprintf(todoKbNote, sizeof todoKbNote, "%s", text);
+  todoKbNoteUntil = millis() + TODO_NOTE_MS;
+}
+
+// The reminder of a task rings like any other reminder (Time screen)
+void todoArmReminder(uint32_t id) {
+  const todos::Task* t = todos::find(id);
+  if (!t || !t->remindAt || t->done() || t->remindAt <= epochNow()) return;
+  if (alarms::remindAt((time_t)t->remindAt, t->text) == alarms::Result::Ok) todos::setAlarm(id, alarms::lastAddedId());
+}
+
+void todoDisarmReminder(uint32_t id) {
+  const todos::Task* t = todos::find(id);
+  if (!t || !t->alarmId) return;
+  alarms::cancel(t->alarmId);
+  todos::setAlarm(id, 0);
+}
+
+// Adds a task (from the keyboard, voice or Gorgi's AI) and shows where it landed
+bool todoAdd(const String& text, int32_t due, bool someday, bool star, uint32_t remindAt, bool show) {
+  uint32_t id = 0;
+  const todos::Result r = todos::add(ui::toAscii(text).c_str(), due, someday, star, remindAt, &id);
+  if (r == todos::Result::Full) {
+    todoToast(String("Your list is full (") + todos::MAX_OPEN + " tasks). Finish a few first!", false);
+    return false;
   }
-  skWriter.attach(skPic, skBox);
-  skPrefs.begin("sketch", false);
-  skCurrent = skPrefs.getUInt("cur", 1);
-  skNextId = skPrefs.getUInt("next", skCurrent + 1);
-  skTools.write = skPrefs.getUChar("mode", 1) != 0;
-  sketchstore::begin();
-  Serial.printf("sketch: ready, %d undo steps, free psram %u\n", skUndoSlots, ESP.getFreePsram());
-}
-
-void sketchClear() {
-  if (!skPic) return;
-  for (size_t i = 0; i < SKETCH_PIXELS; ++i) skPic[i] = sketch::PAPER_COLOR.c;
-}
-
-void sketchUpdateCanUndo() {
-  const bool can = skHistCount >= 2 || (skTools.write && skWriter.hasInk());
-  if (can == skTools.canUndo) return;
-  skTools.canUndo = can;
-  skToolbarDirty = true;
-}
-
-// Remembers the picture as it is now (the newest undo step)
-void sketchCheckpoint() {
-  if (!skUndoSlots || !skPic) return;
-  if (skHistCount == skUndoSlots) {  // full: forget the oldest
-    skHistStart = (skHistStart + 1) % skUndoSlots;
-    --skHistCount;
+  if (r != todos::Result::Ok) return false;
+  todoArmReminder(id);
+  todoFreshId = id;
+  todoFreshUntil = millis() + TODO_FRESH_MS;
+  if (show) {  // jump to its list and scroll to it
+    const todos::Task* t = todos::find(id);
+    const int32_t today = todoToday();
+    todoView.tab = t ? todos::sectionOf(*t, today) : todos::TODAY;
+    todoView.openRow = -1;
+    const todos::Task* list[todos::MAX_OPEN + todos::MAX_DONE];
+    const int n = todos::collect((todos::Section)todoView.tab, today, list, todos::MAX_OPEN + todos::MAX_DONE);
+    todoView.first = 0;
+    for (int i = 0; i < n; ++i)
+      if (list[i]->id == id) todoView.first = i - todoscreen::ROWS + 1;
   }
-  const int i = (skHistStart + skHistCount) % skUndoSlots;
-  memcpy(skUndo[i], skPic, SKETCH_PIXELS * 2);
-  skUndoCursor[i] = skWriter.cursor();
-  ++skHistCount;
-  sketchUpdateCanUndo();
+  return true;
 }
 
-void sketchForgetUndo() {
-  skHistCount = 0;
-  sketchCheckpoint();
-}
-
-void sketchRunOps();
-void sketchStartNew();
-void sketchFlushWriter();
-
-int sketchFreeWordSlot() {
-  for (int i = 0; i < WORD_SLOTS; ++i)
-    if (!skWordUsed[i]) return i;
-  return -1;
-}
-
-void sketchPushOp(const SkOp& op) {
-  if (skOpCount >= MAX_OPS) {  // (hardly possible) make room: the oldest goes on the page as it is
-    skOps[0].ready = true;
-    skOps[0].sentAt = millis() - INK_WAIT_MS;
-    sketchRunOps();
+// "Next week" on the keyboard: the coming Sunday (the Israeli week starts on Sunday)
+int32_t todoDueFor(uint8_t when, int32_t today) {
+  if (today == todos::NO_DAY) return todos::NO_DAY;
+  switch (when) {
+    case todoscreen::WHEN_TODAY: return today;
+    case todoscreen::WHEN_TOMORROW: return today + 1;
+    case todoscreen::WHEN_NEXT_WEEK: return today + 7 - todos::weekday(today);
+    default: return todos::NO_DAY;
   }
-  if (skOpCount < MAX_OPS) skOps[skOpCount++] = op;
 }
 
-// Sends a handwritten word to the PC: {"type":"ink","id":7,"strokes":[[x,y,x,y...],...]}
-void sketchSendInk(uint16_t id, const sketch::Word& w) {
-  String j;
-  j.reserve(64 + w.points * 9);
-  j = "{\"type\":\"ink\",\"id\":";
-  j += id;
-  j += ",\"strokes\":[";
-  for (int s = 0; s < w.strokes; ++s) {
-    const int a = w.start[s], b = s + 1 < w.strokes ? w.start[s + 1] : w.points;
-    j += s ? ",[" : "[";
-    for (int i = a; i < b; ++i) {
-      if (i > a) j += ',';
-      j += w.x[i];
-      j += ',';
-      j += w.y[i];
-    }
-    j += ']';
-  }
-  j += "]}";
-  pclink::sendText(j);
+void todoCloseKeyboard() {
+  if (todoView.kb.voice != todoscreen::VOICE_IDLE) pclink::sendSimple("cancel");
+  todoView.kb = todoscreen::Keyboard();
+  todoFull = true;
 }
 
-// Write mode: finishes the word in the box (the box moves on)
-void sketchCommitWord() {
-  if (!skWriter.commit()) return;
-  skChanged = true;
-  int slot = sketchFreeWordSlot();
-  if (slot < 0 && skWords) {  // all waiting: the oldest goes on the page as it is
-    skOps[0].sentAt = millis() - INK_WAIT_MS;
-    sketchRunOps();
-    slot = sketchFreeWordSlot();
-  }
-  if (slot >= 0 && skWords && skWriter.takeWord(skWords[slot])) {  // typed: ask the PC what it says
-    skWordUsed[slot] = true;
-    SkOp op;
-    op.kind = SkOpKind::Word;
-    op.id = ++skInkId;
-    op.slot = slot;
-    op.sentAt = millis();
-    sketchPushOp(op);
-    sketchSendInk(op.id, skWords[slot]);
+void todoAddFromKeyboard() {
+  todoscreen::Keyboard& kb = todoView.kb;
+  String text(kb.text);
+  text.trim();
+  if (!text.length()) {
+    todoKbSay("Type a task first");
     return;
   }
-  sketch::Word lost;  // (no room to keep it: shouldn't happen)
-  if (skWriter.takeWord(lost)) skWriter.placeHandwriting(lost);
-  sketchCheckpoint();  // the handwriting is on the page already
-}
-
-// Puts text on the page word by word (a full page carries on on a new one)
-void sketchType(const String& text, const gfx::Color& col) {
-  const String t = ui::toAscii(text);
-  int i = 0;
-  while (i < (int)t.length()) {
-    while (i < (int)t.length() && t[i] == ' ') ++i;
-    int j = i;
-    while (j < (int)t.length() && t[j] != ' ') ++j;
-    if (j > i) {
-      const String w = t.substring(i, j);
-      if (!skWriter.typeWord(w.c_str(), col) && skWriter.takePageFull()) {
-        sketchStartNew();
-        skWriter.typeWord(w.c_str(), col);
-      }
-    }
-    i = j;
+  if (kb.when != todoscreen::WHEN_NONE && kb.when != todoscreen::WHEN_SOMEDAY && !wallclock::valid()) {
+    todoKbSay("I don't know the date yet");
+    return;
   }
+  const bool someday = kb.when == todoscreen::WHEN_SOMEDAY;
+  if (todoAdd(text, todoDueFor(kb.when, todoToday()), someday, kb.star, 0, true)) todoCloseKeyboard();
+  else todoKbSay("My list is full");
 }
 
-// Does what's waiting in the queue, in order, as far as it can (a word waits for the PC's answer)
-void sketchRunOps() {
-  const uint32_t now = millis();
-  bool changed = false;
-  while (skOpCount > 0) {
-    SkOp& op = skOps[0];
-    if (op.kind == SkOpKind::Word && !op.ready && msSince(now, op.sentAt) < INK_WAIT_MS) break;
-    switch (op.kind) {
-      case SkOpKind::Word: {
-        sketch::Word& w = skWords[op.slot];
-        if (op.ready && op.text.length()) {
-          sketchType(op.text, w.color);
-          const char* alts[sketch::CHIPS];
-          for (int k = 0; k < op.altCount; ++k) alts[k] = op.alts[k].c_str();
-          sketchCheckpoint();
-          skWriter.setChips(alts, op.altCount);
-          skChipsHist = skHistCount;
-        } else {  // no answer (or unreadable): the handwriting stays, small
-          if (!skWriter.placeHandwriting(w) && skWriter.takePageFull()) {
-            sketchStartNew();
-            skWriter.placeHandwriting(w);
-          }
-          sketchCheckpoint();
-        }
-        skWordUsed[op.slot] = false;
-        break;
-      }
-      case SkOpKind::Text:
-        sketchType(op.text, sketch::COLORS[skTools.color]);
-        sketchCheckpoint();
-        break;
-      case SkOpKind::Space:
-        skWriter.space();
-        break;
-      case SkOpKind::NewLine:
-        skWriter.newLine();
-        if (skWriter.takePageFull()) sketchStartNew();
-        break;
-      case SkOpKind::Place:
-        skWriter.placeAt(op.x, op.y);
-        break;
-    }
-    for (int k = 1; k < skOpCount; ++k) skOps[k - 1] = skOps[k];
-    --skOpCount;
-    changed = true;
+void todoStartVoice(bool forKeyboard) {
+  if (!pclink::helperConnected()) {
+    if (forKeyboard) todoKbSay("The PC isn't connected");
+    else todoToast("The PC isn't connected. Tap Type to write it.", false);
+    return;
   }
-  if (changed) {
-    skChanged = true;
-    skLastStroke = now;
-    sketchFlushWriter();
-  }
+  todoVoiceForKb = forKeyboard;
+  pclink::sendText(forKeyboard ? "{\"type\":\"dictate\",\"mode\":\"text\"}" : "{\"type\":\"dictate\",\"mode\":\"todo\"}");
+  if (forKeyboard) todoView.kb.voice = todoscreen::VOICE_LISTENING;
+  else todoView.voice = todoscreen::VOICE_LISTENING;
 }
 
-// Space / new line / a tap on the page: right away, or after the words still waiting
-void sketchCursorOp(SkOpKind kind, int x = 0, int y = 0) {
-  sketchCommitWord();
-  SkOp op;
-  op.kind = kind;
-  op.x = x;
-  op.y = y;
-  sketchPushOp(op);
-  sketchRunOps();
+void todoVoiceReset() { todoView.voice = todoView.kb.voice = todoscreen::VOICE_IDLE; }
+
+void todoStopVoice() {
+  pclink::sendSimple("cancel");
+  todoView.voice = todoView.kb.voice = todoscreen::VOICE_IDLE;
 }
 
-// The PC's answer for a handwritten word: {"type":"ink_text","id":7,"guesses":["milk","mild"]}
-void onInkText(JsonObjectConst msg) {
-  const uint16_t id = msg["id"] | 0;
-  for (int i = 0; i < skOpCount; ++i) {
-    SkOp& op = skOps[i];
-    if (op.kind != SkOpKind::Word || op.id != id) continue;
-    op.ready = true;
-    op.altCount = 0;
-    int n = 0;
-    for (JsonVariantConst g : msg["guesses"].as<JsonArrayConst>()) {
-      const String t = ui::toAscii(String((const char*)(g | "")));
-      if (!t.length()) continue;
-      if (n++ == 0) op.text = t;
-      else if (op.altCount < sketch::CHIPS) op.alts[op.altCount++] = t;
-    }
-    break;
-  }
-  sketchRunOps();
-}
-
-void sketchStatusNote(const char* text) {
-  ui::setStatus(text, ui::COLOR_TEXT_DIM, false);
-  skStatusUntil = millis() + 3500;
-}
-
-// Voice typing (the Talk button on the Sketch screen)
+// Voice typing: {"type":"dictation","text":"Buy milk","mode":"todo","due":"2026-10-25","at":0,"star":false}
+// and its state: {"type":"dictate_state","state":"listening" | "thinking" | "idle","problem":"..."}
 void onDictation(const char* type, JsonObjectConst msg) {
   lastActivity = millis();
   if (strcmp(type, "dictation") == 0) {
-    SkOp op;
-    op.kind = SkOpKind::Text;
-    op.text = String((const char*)(msg["text"] | ""));
-    sketchCommitWord();
-    sketchPushOp(op);
-    sketchRunOps();
-    return;
-  }
-  const char* state = msg["state"] | "idle";  // dictate_state
-  skDictating = strcmp(state, "idle") != 0;
-  if (strcmp(state, "listening") == 0) ui::setStatus("Listening...", ui::COLOR_LISTEN, true);
-  else if (strcmp(state, "thinking") == 0) ui::setStatus("Writing...", ui::COLOR_THINK, false);
-  else if (msg["problem"].is<const char*>()) sketchStatusNote(msg["problem"]);
-  else showIdleStatus();
-}
-
-void sketchTalk() {
-  if (skDictating) {
-    pclink::sendSimple("cancel");
-    skDictating = false;
-    showIdleStatus();
-  } else if (!pclink::helperConnected()) {
-    sketchStatusNote("PC not connected");
-  } else {
-    pclink::sendSimple("dictate");
-    skDictating = true;
-    ui::setStatus("Listening...", ui::COLOR_LISTEN, true);
-  }
-}
-
-void sketchSave() {
-  if (!skChanged || !skPic) return;
-  skChanged = false;
-  sketchstore::save(skCurrent, skPic);
-}
-
-void sketchLoadCurrent() {
-  skLoaded = true;
-  if (!skPic) return;
-  if (!sketchstore::load(skCurrent, skPic)) sketchClear();
-  skWriter.clearBox();
-  skWriter.findCursor();  // carry on after the last writing
-  sketchForgetUndo();
-}
-
-void sketchStartNew() {
-  sketchCommitWord();
-  sketchSave();
-  skCurrent = skNextId++;
-  skPrefs.putUInt("cur", skCurrent);
-  skPrefs.putUInt("next", skNextId);
-  sketchClear();
-  skWriter.clearBox();
-  skWriter.setCursor(sketch::Cursor());
-  skWriter.takeLayoutChange();
-  sketchForgetUndo();
-  sketchFull = true;
-}
-
-void sketchShown() {
-  if (!skLoaded) sketchLoadCurrent();
-  skTools.gallery = false;
-  sketchFull = true;
-}
-
-void sketchHidden() {
-  sketchStroking = false;
-  skTools.gallery = false;
-  skTools.confirmClear = false;
-  sketchCommitWord();
-  sketchSave();
-}
-
-void sketchFillGallery() {
-  uint32_t ids[sketch::MAX_SKETCHES];
-  skGallery.count = sketchstore::list(ids, sketch::MAX_SKETCHES);
-  skGallery.current = skCurrent;
-  skGallery.confirm = -1;
-  for (int i = 0; i < skGallery.count; ++i) {
-    uint16_t* thumb = skThumbs ? skThumbs + (size_t)i * sketch::THUMB_W * sketch::THUMB_H : nullptr;
-    if (thumb && !sketchstore::loadThumb(ids[i], thumb)) thumb = nullptr;
-    skGallery.items[i] = sketch::GalleryItem{ids[i], thumb};
-  }
-}
-
-void sketchDrawSheet(gfx::Canvas& c) {
-  if (skTools.write) skWriter.draw(c);
-  else sketch::drawPaper(c, skPic);
-}
-
-void sketchRenderRect(const gfx::Rect& r) {
-  if (r.empty() || skTools.gallery || page != Page::Sketch || acOpen) return;
-  display::render(r, sketch::PAPER_COLOR, [](gfx::Canvas& c) { sketchDrawSheet(c); });
-}
-
-// Draws what the Write box changed (or everything, when the box moved to the other end)
-void sketchFlushWriter() {
-  gfx::Rect rects[8];
-  const int n = skWriter.takeDirty(rects, 8);
-  if (skWriter.takeLayoutChange()) {
-    sketchFull = true;
-    return;
-  }
-  if (sketchFull) return;
-  for (int i = 0; i < n; ++i) sketchRenderRect(rects[i]);
-}
-
-// Draws smoothed stroke pieces into the picture (Draw mode, or erasing in Write mode)
-void sketchInk(const gfx::Pt* pts, int n) {
-  if (n <= 0) return;
-  const bool erase = skTools.eraser;
-  const gfx::Color& col = erase ? sketch::PAPER_COLOR : sketch::COLORS[skTools.color];
-  const float r = sketch::SIZES[skTools.size] * (erase ? 2.5f : 1.0f);
-  gfx::Rect changed;
-  for (int i = 0; i < n; ++i) {
-    changed = gfx::unite(changed, sketch::stroke(skPic, skLast.x, skLast.y, pts[i].x, pts[i].y, col, r));
-    skLast = pts[i];
-  }
-  sketchRenderRect(changed);
-  skChanged = true;
-}
-
-bool sketchOnPaper(int x, int y) {
-  return x >= sketch::PAPER_X && y >= sketch::PAPER_Y && x < sketch::PAPER_X + sketch::PAPER_W &&
-         y < sketch::PAPER_Y + sketch::PAPER_H;
-}
-
-// Finger down on the paper: start a stroke (a dot so far). Taps on buttons and
-// on the page (Write mode: move the writing spot) are handled when the finger lifts.
-void sketchBegin(int x, int y) {
-  if (skTools.gallery || !skPic || !sketchOnPaper(x, y)) return;
-  if (skTools.confirmClear) {
-    skTools.confirmClear = false;
-    skToolbarDirty = true;
-  }
-  if (skTools.write) {
-    if (skWriter.inBox(x, y)) {
-      const gfx::Color& col = sketch::COLORS[skTools.color];
-      skWriter.setTyped(pclink::helperConnected() && skWords != nullptr);
-      skWriter.begin(x, y, col, skTools.size);
-      if (skWriter.takePageFull()) {  // no lines left: carry on on a new page
-        sketchStartNew();
-        skWriter.begin(x, y, col, skTools.size);
-      }
-      sketchStroking = true;
-      skStroke = SkStroke::Box;
-      skChanged = true;
-      sketchUpdateCanUndo();
-      sketchFlushWriter();
+    const String text = ui::toAscii(String((const char*)(msg["text"] | "")));
+    if (todoVoiceForKb && todoView.kb.open) {  // into the text box
+      todoscreen::Keyboard& kb = todoView.kb;
+      String t = String(kb.text);
+      if (t.length() && t[t.length() - 1] != ' ') t += " ";
+      t += text;
+      snprintf(kb.text, sizeof kb.text, "%s", t.c_str());
+      kb.shift = false;
       return;
     }
-    if (!skTools.eraser || skWriter.buttonAt(x, y) != sketch::BoxButton::None) return;
-    sketchCommitWord();
-    skStroke = SkStroke::Erase;  // the eraser works right on the page
-  } else {
-    skStroke = SkStroke::Draw;
-  }
-  sketchStroking = true;
-  gfx::Pt pts[sketch::Smoother::MAX_OUT];
-  skSmooth.start(x, y, pts);
-  skLast = pts[0];
-  sketchInk(pts, 1);
-}
-
-void sketchMove(int x, int y) {
-  if (skStroke == SkStroke::Box) {
-    skWriter.move(x, y);
-    sketchFlushWriter();
+    if (todoVoiceForKb) return;  // the keyboard was closed meanwhile
+    const bool someday = msg["someday"] | false;
+    const int32_t due = todos::parseDate(msg["due"] | "");
+    if (todoAdd(text, due, someday, msg["star"] | false, msg["at"] | 0u, page == Page::Todo)) {
+      todoToast(String("Added: ") + text, false);
+    }
     return;
   }
-  gfx::Pt pts[sketch::Smoother::MAX_OUT];
-  sketchInk(pts, skSmooth.add(x, y, pts));
-}
-
-void sketchEnd(uint32_t now) {
-  sketchStroking = false;
-  skLastStroke = now;
-  if (skStroke == SkStroke::Box) {
-    if (skWriter.end(now)) sketchCheckpoint();  // writing past the line: the box moved on
-    sketchFlushWriter();
-    return;
+  const char* state = msg["state"] | "idle";
+  const uint8_t v = strcmp(state, "listening") == 0  ? todoscreen::VOICE_LISTENING
+                    : strcmp(state, "thinking") == 0 ? todoscreen::VOICE_THINKING
+                                                     : todoscreen::VOICE_IDLE;
+  if (todoVoiceForKb) todoView.kb.voice = todoView.kb.open ? v : todoscreen::VOICE_IDLE;
+  else todoView.voice = v;
+  if (v == todoscreen::VOICE_IDLE && msg["problem"].is<const char*>()) {
+    if (todoVoiceForKb) todoKbSay(msg["problem"].as<const char*>());
+    else todoToast(String(msg["problem"].as<const char*>()), false);
   }
-  gfx::Pt pts[sketch::Smoother::MAX_OUT];
-  sketchInk(pts, skSmooth.finish(pts));
-  sketchCheckpoint();
 }
 
-void sketchUndo() {
-  if (skOpCount > 0 && !(skTools.write && skWriter.hasInk())) {  // not on the page yet: just forget it
-    SkOp& op = skOps[--skOpCount];
-    if (op.kind == SkOpKind::Word) skWordUsed[op.slot] = false;
-    return;
+// Gorgi's AI changed the list: {"type":"todo_add" | "todo_done" | "todo_remove", ...}
+void onTodoMessage(const char* type, JsonObjectConst msg) {
+  if (strcmp(type, "todo_add") == 0) {
+    todoAdd(String((const char*)(msg["text"] | "")), todos::parseDate(msg["due"] | ""), msg["someday"] | false,
+            msg["star"] | false, msg["at"] | 0u, false);
+  } else if (strcmp(type, "todo_done") == 0) {
+    const uint32_t id = msg["id"] | 0u;
+    const bool done = msg["done"] | true;
+    if (done) todoDisarmReminder(id);
+    todos::setDone(id, done, epochNow());
+    if (!done) todoArmReminder(id);
+  } else if (strcmp(type, "todo_remove") == 0) {
+    const uint32_t id = msg["id"] | 0u;
+    todoDisarmReminder(id);
+    todos::remove(id);
+  } else if (strcmp(type, "todo_star") == 0) {
+    todos::setStar(msg["id"] | 0u, msg["star"] | true);
   }
-  skWriter.clearChips();
-  if (skTools.write && skWriter.hasInk()) {
-    skWriter.clearBox();  // the word being written goes; the page goes back to before it
-  } else {
-    if (skHistCount < 2) return;
-    --skHistCount;
-  }
-  if (!skHistCount) return;
-  const int i = (skHistStart + skHistCount - 1) % skUndoSlots;
-  memcpy(skPic, skUndo[i], SKETCH_PIXELS * 2);
-  skWriter.setCursor(skUndoCursor[i]);
-  skWriter.takeLayoutChange();
-  skChanged = true;
-  skLastStroke = millis();
-  sketchUpdateCanUndo();
-  sketchFull = true;
+  sendTodoList();  // (also when nothing changed, so the helper knows)
 }
 
-void sketchClearPage() {
-  skWriter.clearBox();
-  sketchClear();
-  skWriter.setCursor(sketch::Cursor());
-  skWriter.takeLayoutChange();
-  skChanged = true;
-  skLastStroke = millis();
-  sketchCheckpoint();  // Undo brings it back
-  sketchFull = true;
-}
-
-void onSketchTap(int x, int y) {
-  if (x < sketch::TOOLBAR_RIGHT) {
-    const sketch::ToolTap t = sketch::toolbarTap(x, y);
-    if (t.what == sketch::Tool::None) return;
-    const bool wasAsking = skTools.confirmClear;
-    skTools.confirmClear = false;
-    switch (t.what) {
-      case sketch::Tool::Write:
-      case sketch::Tool::Draw: {
-        const bool write = t.what == sketch::Tool::Write;
-        if (write != skTools.write) {
-          sketchCommitWord();
-          skTools.write = write;
-          skPrefs.putUChar("mode", write ? 1 : 0);
-          if (write) skWriter.takeLayoutChange();
-          sketchUpdateCanUndo();
-          sketchFull = true;
+void todoSetup() {
+  todos::begin();
+  todoVersionSeen = todos::version();
+  // The Sketch screen is gone (4.6): its drawings go too (the user said so)
+  Preferences old;
+  if (old.begin("sketch", false)) {
+    if (old.getUInt("cur", 0) != 0) {
+      if (LittleFS.begin(false)) {
+        File dir = LittleFS.open("/sketch");
+        String names[32];
+        int n = 0;
+        if (dir) {
+          for (File f = dir.openNextFile(); f && n < 32; f = dir.openNextFile()) {
+            String name = f.name();
+            f.close();
+            const int slash = name.lastIndexOf('/');
+            names[n++] = String("/sketch/") + (slash >= 0 ? name.substring(slash + 1) : name);
+          }
+          dir.close();
         }
-        break;
+        for (int i = 0; i < n; ++i) LittleFS.remove(names[i]);
+        LittleFS.rmdir("/sketch");
+        LittleFS.end();
+        Serial.printf("todo: removed %d old drawing file(s)\n", n);
       }
-      case sketch::Tool::Color:
-        skTools.color = t.index;
-        skTools.eraser = false;
-        break;
-      case sketch::Tool::Eraser:
-        skTools.eraser = !skTools.eraser;
-        break;
-      case sketch::Tool::Size:
-        skTools.size = (skTools.size + 1) % sketch::SIZE_COUNT;
-        break;
-      case sketch::Tool::Undo:
-        if (!skTools.gallery) sketchUndo();
-        break;
-      case sketch::Tool::Gallery:
-        skTools.gallery = !skTools.gallery;
-        if (skTools.gallery) {
-          sketchCommitWord();
-          sketchSave();
-          sketchFillGallery();
-        }
-        sketchFull = true;
-        break;
-      case sketch::Tool::Clear:
-        if (wasAsking) {
-          skTools.gallery = false;
-          sketchClearPage();
-        } else {
-          skTools.confirmClear = true;
-          skClearAsked = millis();
-        }
-        break;
-      case sketch::Tool::NewPage:
-        skTools.gallery = false;
-        sketchStartNew();
-        break;
-      case sketch::Tool::None:
+      old.clear();
+    }
+    old.end();
+  }
+}
+
+void todoShown() {
+  todoView.openRow = -1;
+  todoFull = true;
+}
+
+void todoHidden() {
+  if (todoView.voice != todoscreen::VOICE_IDLE || todoView.kb.voice != todoscreen::VOICE_IDLE) todoStopVoice();
+  todoView.kb = todoscreen::Keyboard();
+  todoView.openRow = -1;
+  todoScrolled = false;
+}
+
+// Finger down on the To-do screen: a key lights up; on the list, maybe a scroll starts
+void todoBegin(int x, int y) {
+  todoScrolled = false;
+  todoFirstAtDown = todoView.first;
+  if (todoView.kb.open) todoView.kb.pressed = todoscreen::keyAt(x, y);
+}
+
+// Finger moving: the list scrolls with it (row by row)
+void todoMove(int x, int y) {
+  if (todoView.kb.open) {
+    if (todoView.kb.pressed >= 0 && todoscreen::keyAt(x, y) != todoView.kb.pressed) todoView.kb.pressed = -1;
+    return;
+  }
+  const int dy = y - touchY0, dx = x - touchX0;
+  if (!todoScrolled && touchY0 >= todoscreen::LIST_AREA.y && touchY0 < todoscreen::LIST_AREA.bottom() &&
+      abs(dy) > 14 && abs(dy) > abs(dx))
+    todoScrolled = true;
+  if (todoScrolled) {
+    const int steps = (dy >= 0 ? dy + todoscreen::ROW_STEP / 2 : dy - todoscreen::ROW_STEP / 2) / todoscreen::ROW_STEP;
+    todoView.first = todoFirstAtDown - steps;
+    todoView.openRow = -1;
+  }
+}
+
+void onTodoTap(int x, int y) {
+  todoscreen::Keyboard& kb = todoView.kb;
+  if (todoScrolled) {
+    todoScrolled = false;
+    return;
+  }
+  const int pressedKey = kb.pressed;
+  kb.pressed = -1;
+  const todoscreen::TapResult t = todoscreen::tap(x, y, todoView);
+  const todoscreen::Row* row = (t.index >= 0 && t.index < todoView.rowCount) ? &todoView.rows[t.index] : nullptr;
+  switch (t.what) {
+    case todoscreen::Tap::KbKey:
+      if (pressedKey == t.index && todoscreen::press(kb, t.index) == todoscreen::Press::Add) todoAddFromKeyboard();
+      return;
+    case todoscreen::Tap::KbWhen:
+      kb.when = kb.when == t.index ? todoscreen::WHEN_NONE : (uint8_t)t.index;
+      return;
+    case todoscreen::Tap::KbStar:
+      kb.star = !kb.star;
+      return;
+    case todoscreen::Tap::KbCancel:
+      todoCloseKeyboard();
+      return;
+    case todoscreen::Tap::KbVoice:
+      if (kb.voice != todoscreen::VOICE_IDLE) todoStopVoice();
+      else todoStartVoice(true);
+      return;
+    case todoscreen::Tap::Tab:
+      if (todoView.tab != t.index) {
+        todoView.tab = (uint8_t)t.index;
+        todoView.first = 0;
+      }
+      todoView.openRow = -1;
+      return;
+    case todoscreen::Tap::Check: {
+      if (!row) return;
+      const uint32_t id = row->id;
+      todoView.openRow = -1;
+      if (row->done) {
+        todos::setDone(id, false, 0);
+        todoArmReminder(id);
         return;
-    }
-    if (skTools.gallery && t.what != sketch::Tool::Gallery && t.what != sketch::Tool::Clear) {
-      skTools.gallery = false;  // picking a colour closes the gallery
-      sketchFull = true;
-    }
-    skToolbarDirty = true;
-    return;
-  }
-  if (!skTools.gallery) {
-    if (skTools.confirmClear) {
-      skTools.confirmClear = false;
-      skToolbarDirty = true;
-    }
-    if (!skTools.write || !sketchOnPaper(x, y)) return;
-    const int chip = skWriter.chipAt(x, y);
-    if (chip >= 0) {  // another guess for the last word: swap it in
-      if (skChipsHist == skHistCount && skOpCount == 0 && skHistCount >= 2) {
-        const String pick = skWriter.chip(chip);
-        sketchUndo();  // back to before the word (it also hides the chips)
-        sketchType(pick, sketch::COLORS[skTools.color]);
-        sketchCheckpoint();
       }
-      skWriter.clearChips();
-      sketchFlushWriter();
+      const todos::Task* task = todos::find(id);
+      if (!task) return;
+      todoUndoTask = *task;
+      todoDisarmReminder(id);
+      todos::setDone(id, true, epochNow());
+      todoToast(String("Done: ") + todoUndoTask.text, true);
+      todoUndoKind = TodoUndo::Done;
       return;
     }
-    switch (skWriter.buttonAt(x, y)) {
-      case sketch::BoxButton::Space:
-        sketchCursorOp(SkOpKind::Space);
-        break;
-      case sketch::BoxButton::NewLine:
-        sketchCursorOp(SkOpKind::NewLine);
-        break;
-      case sketch::BoxButton::None:
-        if (skWriter.inBox(x, y)) return;
-        sketchCursorOp(SkOpKind::Place, x, y);  // the writing spot goes where you tapped
-        break;
-    }
-    sketchFlushWriter();
-    return;
-  }
-  const sketch::GalleryTap g = sketch::galleryTap(x, y, skGallery);
-  switch (g.what) {
-    case sketch::GTap::New:
-      sketchStartNew();
-      skTools.gallery = false;
-      break;
-    case sketch::GTap::Open:
-      sketchSave();
-      skCurrent = skGallery.items[g.index].id;
-      skPrefs.putUInt("cur", skCurrent);
-      sketchLoadCurrent();
-      skTools.gallery = false;
-      break;
-    case sketch::GTap::AskDelete:
-      skGallery.confirm = g.index;
-      break;
-    case sketch::GTap::Delete: {
-      const uint32_t id = skGallery.items[g.index].id;
-      sketchstore::remove(id);
-      if (id == skCurrent) {  // the one on the paper: start a fresh page
-        skChanged = false;
-        sketchStartNew();
-      }
-      sketchFillGallery();
-      break;
-    }
-    case sketch::GTap::Keep:
-      skGallery.confirm = -1;
-      break;
-    case sketch::GTap::Close:
-      skTools.gallery = false;
-      break;
-    case sketch::GTap::None:
+    case todoscreen::Tap::Star:
+      if (row) todos::setStar(row->id, !row->star);
       return;
-  }
-  sketchFull = true;
-}
-
-void drawSketch() {
-  if (sketchFull) {
-    sketchFull = skToolbarDirty = false;
-    skWriter.takeDirty(nullptr, 0);  // all of it is drawn now
-    skWriter.takeLayoutChange();
-    display::render(sketch::AREA, ui::BACKGROUND, [](gfx::Canvas& c) {
-      sketch::drawToolbar(c, skTools);
-      if (skTools.gallery) sketch::drawGallery(c, skGallery);
-      else sketchDrawSheet(c);
-    });
-  } else if (skToolbarDirty) {
-    skToolbarDirty = false;
-    display::render(sketch::TOOLBAR, ui::BACKGROUND, [](gfx::Canvas& c) { sketch::drawToolbar(c, skTools); });
+    case todoscreen::Tap::Row:
+      todoView.openRow = todoView.openRow == t.index ? -1 : t.index;
+      return;
+    case todoscreen::Tap::Action: {
+      if (!row) return;
+      const uint32_t id = row->id;
+      const int32_t today = todoToday();
+      todoView.openRow = -1;
+      switch (t.action) {
+        case todoscreen::ACT_STAR:
+          todos::setStar(id, !row->star);
+          break;
+        case todoscreen::ACT_TODAY:
+        case todoscreen::ACT_TOMORROW:
+          if (today == todos::NO_DAY) {
+            todoToast("I don't know the date yet", false);
+            break;
+          }
+          todos::setDue(id, today + (t.action == todoscreen::ACT_TOMORROW ? 1 : 0), false);
+          todoFreshId = id;
+          todoFreshUntil = millis() + 1500;
+          break;
+        case todoscreen::ACT_NOT_DONE:
+          todos::setDone(id, false, 0);
+          todoArmReminder(id);
+          break;
+        case todoscreen::ACT_DELETE: {
+          const todos::Task* task = todos::find(id);
+          if (!task) break;
+          todoDisarmReminder(id);
+          todoUndoTask = *todos::find(id);
+          todos::remove(id);
+          todoToast(String("Deleted: ") + todoUndoTask.text, true);
+          todoUndoKind = TodoUndo::Delete;
+          break;
+        }
+      }
+      return;
+    }
+    case todoscreen::Tap::Undo:
+      if (todoUndoKind == TodoUndo::Done) {
+        todos::setDone(todoUndoTask.id, false, 0);
+        todoArmReminder(todoUndoTask.id);
+      } else if (todoUndoKind == TodoUndo::Delete) {
+        todoUndoTask.alarmId = 0;
+        todos::restore(todoUndoTask);
+        todoArmReminder(todoUndoTask.id);
+      }
+      todoUndoKind = TodoUndo::None;
+      todoView.toast[0] = 0;
+      todoToastUntil = 0;
+      return;
+    case todoscreen::Tap::Voice:
+      if (todoView.voice != todoscreen::VOICE_IDLE) todoStopVoice();
+      else todoStartVoice(false);
+      return;
+    case todoscreen::Tap::Type:
+      todoView.kb = todoscreen::Keyboard();
+      todoView.kb.open = true;
+      todoView.openRow = -1;
+      if (todoView.tab == todos::UPCOMING) todoView.kb.when = todoscreen::WHEN_TOMORROW;
+      todoFull = true;
+      return;
+    case todoscreen::Tap::Elsewhere:
+      todoView.openRow = -1;
+      return;
+    case todoscreen::Tap::None:
+      return;
   }
 }
 
-// Saves after a pause in drawing (writing to flash can make the screen jump
-// for a moment, so not while the finger is drawing)
-void updateSketch(uint32_t now) {
-  if (page == Page::Sketch && skTools.write && !sketchStroking && skWriter.tick(now)) {  // a pause: the box moves on
-    skChanged = true;
-    sketchCheckpoint();
-    sketchFlushWriter();
+// Today is empty because everything on it got ticked today (a little celebration)
+bool todoAllDoneToday(int32_t today) {
+  if (today == todos::NO_DAY) return false;
+  const todos::Task* list[todos::MAX_DONE + todos::MAX_OPEN];
+  const int n = todos::collect(todos::FINISHED, today, list, todos::MAX_DONE + todos::MAX_OPEN);
+  for (int i = 0; i < n; ++i)
+    if (list[i]->doneAt && todos::dayOf((time_t)list[i]->doneAt) == today) return true;
+  return false;
+}
+
+void drawTodo() {
+  const int32_t today = todoToday();
+  todoscreen::View& v = todoView;
+  todoscreen::fill(v, today, todoFreshUntil ? todoFreshId : 0);
+  v.allDone = v.counts[todos::TODAY] == 0 && todoAllDoneToday(today);
+  v.kb.note = todoKbNoteUntil ? todoKbNote : "";
+  auto draw = [](gfx::Canvas& c) { todoscreen::draw(c, todoView); };
+  if (v.kb.open) {
+    const uint32_t field = mixText(2166136261u, v.kb.text);
+    const uint32_t when = mix(mix(2166136261u, v.kb.when), v.kb.star);
+    const uint32_t keys = mix(mix(2166136261u, v.kb.shift), v.kb.symbols);
+    const uint32_t bottom = mixText(mix(2166136261u, v.kb.voice), v.kb.note);
+    if (todoFull) {
+      display::render(todoscreen::AREA, ui::BACKGROUND, draw);
+    } else {
+      if (field != todoFieldKey) display::render(todoscreen::KB_FIELD_AREA, ui::BACKGROUND, draw);
+      if (when != todoWhenKey) display::render(todoscreen::KB_WHEN_AREA, ui::BACKGROUND, draw);
+      if (keys != todoKeysKey) {
+        display::render(todoscreen::KB_KEYS_AREA, ui::BACKGROUND, draw);
+      } else if (v.kb.pressed != todoPressedDrawn) {  // just the key that lit up / went out
+        if (todoPressedDrawn >= 0)
+          display::render(gfx::inflate(todoscreen::keyRect(todoPressedDrawn), 1), ui::BACKGROUND, draw);
+        if (v.kb.pressed >= 0)
+          display::render(gfx::inflate(todoscreen::keyRect(v.kb.pressed), 1), ui::BACKGROUND, draw);
+      }
+      if (bottom != todoKbBottomKey) display::render(todoscreen::KB_BOTTOM_AREA, ui::BACKGROUND, draw);
+    }
+    todoFieldKey = field;
+    todoWhenKey = when;
+    todoKeysKey = keys;
+    todoKbBottomKey = bottom;
+    todoPressedDrawn = v.kb.pressed;
+    todoFull = false;
+    return;
   }
-  if (skOpCount > 0) sketchRunOps();  // words whose answer is late go on the page as handwriting
-  if (skStatusUntil && msSince(now, skStatusUntil) > 0) {
-    skStatusUntil = 0;
-    if (!skDictating) showIdleStatus();
+  uint32_t header = mix(mix(mix(2166136261u, v.tab), v.counts[0]), mix(v.counts[1], v.counts[2]));
+  uint32_t list = mix(mix(mix(2166136261u, v.first), v.total), mix(v.openRow + 1, v.allDone));
+  list = mixText(mix(list, v.toastUndo), v.toast);
+  for (int i = 0; i < v.rowCount; ++i) {
+    const todoscreen::Row& r = v.rows[i];
+    list = mix(mix(list, r.id), (r.star ? 1 : 0) | (r.done ? 2 : 0) | (r.fresh ? 4 : 0) | r.chipKind << 3);
+    list = mixText(mixText(list, r.text), r.chip);
   }
-  if (skTools.confirmClear && msSince(now, skClearAsked) > SKETCH_CLEAR_ASK_MS) {
-    skTools.confirmClear = false;
-    skToolbarDirty = true;
+  const uint32_t bottom = mix(2166136261u, v.voice);
+  if (todoFull) {
+    display::render(todoscreen::AREA, ui::BACKGROUND, draw);
+  } else {
+    if (header != todoHeaderKey) display::render(todoscreen::HEADER_AREA, ui::BACKGROUND, draw);
+    if (list != todoListKey) display::render(todoscreen::LIST_AREA, ui::BACKGROUND, draw);
+    if (bottom != todoBottomKey) display::render(todoscreen::BOTTOM_AREA, ui::BACKGROUND, draw);
   }
-  if (skChanged && !touching && msSince(now, skLastStroke) > SKETCH_SAVE_AFTER_MS) sketchSave();
+  todoHeaderKey = header;
+  todoListKey = list;
+  todoBottomKey = bottom;
+  todoFull = false;
+}
+
+void updateTodo(uint32_t now) {
+  todos::loop(now, !touching);
+  if (todoFreshUntil && (int32_t)(now - todoFreshUntil) >= 0) todoFreshUntil = 0;
+  if (todoToastUntil && (int32_t)(now - todoToastUntil) >= 0) {
+    todoToastUntil = 0;
+    todoView.toast[0] = 0;
+    todoUndoKind = TodoUndo::None;
+  }
+  if (todoKbNoteUntil && (int32_t)(now - todoKbNoteUntil) >= 0) todoKbNoteUntil = 0;
+  static uint32_t lastTidy = 0;
+  if (msSince(now, lastTidy) > 60 * 1000) {  // finished tasks older than a week go
+    lastTidy = now;
+    todos::tidy(epochNow());
+  }
+  if (todos::version() != todoVersionSeen) {
+    todoVersionSeen = todos::version();
+    sendTodoList();
+  }
 }
 
 // ---------- notifications (shown in the Action Center) ----------
@@ -1569,8 +1352,8 @@ void showClaudeAlert(const String& name, bool waiting, const String& text) {
 }
 
 void onOther(const char* type, JsonObjectConst msg) {
-  if (strcmp(type, "ink_text") == 0) {
-    onInkText(msg);
+  if (strncmp(type, "todo_", 5) == 0) {
+    onTodoMessage(type, msg);
     return;
   }
   if (strcmp(type, "dictation") == 0 || strcmp(type, "dictate_state") == 0) {
@@ -1877,7 +1660,7 @@ void handleTouch(uint32_t now) {
       ui::openMusicBar();  // using it keeps it open
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
-    if (page == Page::Sketch && touchTarget == ui::Target::Face) sketchBegin(tp.x, tp.y);
+    if (page == Page::Todo && touchTarget == ui::Target::Face) todoBegin(tp.x, tp.y);
 
     bool wasAsleep = isSleeping();
     lastActivity = now;
@@ -1896,10 +1679,6 @@ void handleTouch(uint32_t now) {
 
   if (tp.pressed && touching) {
     lastActivity = now;
-    if (sketchStroking) {  // drawing with the finger
-      sketchMove(tp.x, tp.y);
-      return;
-    }
     // pulling down from the top bar opens the Action Center
     if (touchY0 < ui::TOP_H && tp.y - touchY0 > 50 && abs(tp.y - touchY0) > abs(tp.x - touchX0)) {
       touchUsed = true;
@@ -1910,13 +1689,15 @@ void handleTouch(uint32_t now) {
     const int dx = tp.x - touchX0;
     // A sideways drag in the middle of the screen moves the screens
     if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(dx) > 16 &&
-        abs(dx) * 5 > abs(tp.y - touchY0) * 6 && !(page == Page::Sketch && touchX0 >= sketch::TOOLBAR_RIGHT)) {
+        abs(dx) * 5 > abs(tp.y - touchY0) * 6 &&
+        !(page == Page::Todo && (todoView.kb.open || todoScrolled))) {
       swiping = true;
     }
     if (swiping) {
       touchEndX = tp.x;
       return;
     }
+    if (page == Page::Todo && touchTarget == ui::Target::Face) todoMove(tp.x, tp.y);
     if (touchTarget == ui::Target::Volume) {
       media.volume = ui::volumeFromX(tp.x);
       ui::setVolume(media.volume);
@@ -1945,10 +1726,6 @@ void handleTouch(uint32_t now) {
     touching = false;
     ui::Target released = touchTarget;
     touchTarget = ui::Target::None;
-    if (sketchStroking) {
-      sketchEnd(now);
-      return;
-    }
     if (swiping) {
       swiping = false;
       // A long enough sideways swipe changes screens
@@ -1966,13 +1743,9 @@ void handleTouch(uint32_t now) {
       ui::openMusicBar();
       return;
     }
-    if (released == ui::Target::Talk) {  // the Talk button (Sketch screen): voice typing
-      if (page == Page::Sketch) {
-        sketchTalk();
-      } else {
-        showPage(Page::Face);
-        if (!inConversation) onTap(ui::Target::Face);
-      }
+    if (released == ui::Target::Talk) {  // a Talk button in the top bar: to the face, listening
+      showPage(Page::Face);
+      if (!inConversation) onTap(ui::Target::Face);
       return;
     }
     if (released == ui::Target::CallMute) {
@@ -1981,7 +1754,7 @@ void handleTouch(uint32_t now) {
     }
     if (released == ui::Target::Face && page != Page::Face) {
       if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
-      if (page == Page::Sketch) onSketchTap(touchX0, touchY0);
+      if (page == Page::Todo) onTodoTap(touchX0, touchY0);
       return;
     }
     if (released == ui::Target::Volume)
@@ -2098,8 +1871,8 @@ void drawFrame(uint32_t now) {
     face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
   } else if (page == Page::Time) {
     drawTime(now);
-  } else if (page == Page::Sketch) {
-    drawSketch();
+  } else if (page == Page::Todo) {
+    drawTodo();
   } else if (page == Page::Claude) {
     drawClaude(now);
   } else if (page == Page::Music) {
@@ -2158,7 +1931,7 @@ void setup() {
   pclink::begin(h);
   wallclock::begin();
   alarms::begin();
-  sketchSetup();
+  todoSetup();
 
   wxPrefs.begin("weather", false);
   wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
@@ -2187,7 +1960,7 @@ void loop() {
   updatePhase(millis());
   updateWeather(millis());
   updateTime(millis());
-  updateSketch(millis());
+  updateTodo(millis());
 
   // Gorgi barely moves while asleep, so it is redrawn less often (less load on the screen memory)
   const uint32_t interval = phase == Phase::Asleep ? SLEEP_FRAME_MS : FRAME_MS;

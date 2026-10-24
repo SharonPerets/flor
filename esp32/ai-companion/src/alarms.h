@@ -35,6 +35,9 @@ Result remindAt(time_t at, const char* text);
 // A repeating reminder: minuteOfDay 0..1439 (local time), days = bit 0 Sunday .. bit 6 Saturday
 Result remindRepeat(int minuteOfDay, uint8_t days, const char* text);
 
+// The id of the timer or reminder added last (for the To-do screen to cancel it later)
+uint32_t lastAddedId();
+
 bool cancel(uint32_t id);       // a timer, focus session or reminder
 bool togglePause(uint32_t id);  // a timer or focus session
 
