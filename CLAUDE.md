@@ -261,6 +261,7 @@ Done and confirmed:
   open file 'model.bin'" in the Hugging Face cache (`models--ivrit-ai--.../snapshots/...`; likely Windows symlinks).
   Now `Transcriber._download()` uses `snapshot_download(local_dir=models/ivrit-ai--whisper-large-v3-turbo-ct2)` (plain
   files), writes `download-complete.txt` (no internet needed later), deletes the old cache folder, logs model.bin size.
+  Released as gorgi-v4.8.1, waiting for the user to try Hebrew again.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -274,7 +275,7 @@ Done and confirmed:
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
-- **4.8 (Hebrew hearing/speaking)** is on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
+- **4.8 + 4.8.1 (Hebrew hearing/speaking)** are on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
   confirmed, merge, then plan 4.9 (Hebrew keyboard). If Hebrew hearing is slow/wrong, ask for `gorgi-helper.log`
   ("transcribed in ..." lines) and `hebrew-test.txt`.
 
