@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.6.1 To-do screen confirmed and merged to main)
+## Where things stand (4.6.2 subtitle-with-voice released, waiting for the user; 4.6.1 confirmed and merged)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -223,6 +223,13 @@ Done and confirmed:
   Cause (since 4.1!): `pclink.cpp` sent "voice"/"heard"/"say"/"level" to `onOther` (checked first), so the face
   never got the conversation and waited for the 60 s safety timeout. Now the voice branch comes before onOther.
   Confirmed ("ok good").
+- **4.6.2 - reply text with the voice** (user: listening / thinking / reply text showed before the voice, "looks
+  buggy"; picked option B "words appear as spoken"). Helper `Speaker.say(on_start=...)` makes the Edge voice first
+  (`boundary="WordBoundary"`, edge-tts 7), then `Conversation._say` sends `say` {text, mood, words: [[ms, words shown]]}
+  right before playback (`voice.word_timings`, guesses from word lengths without boundaries). Firmware:
+  `ui::setSubtitleReveal(n)` draws only the first n words of the (fully wrapped) subtitle, two lines at a time, turning
+  to the next two lines for long replies (no more "..." cut); main `updateSayWords` each frame. Rejected option C
+  (hide "You: ..." / "Thinking...") for now.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -232,7 +239,9 @@ Done and confirmed:
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
 - **4.3.4 is confirmed** (plan % works) and merged to main.
 - **4.6 + 4.6.1 (To-do screen, face follows the conversation) are confirmed** ("ok good") and merged to main
-  (with 4.4/4.5). When confirmed: mark it here, merge the branch to main. If voice tasks
+  (with 4.4/4.5).
+- **4.6.2** (reply text appears word by word with the voice) is released from `claude/project-thread-fs7qq5`
+  (restarted from main), waiting for the user's test. When confirmed: mark it here, merge to main. When confirmed: mark it here, merge the branch to main. If voice tasks
   come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
