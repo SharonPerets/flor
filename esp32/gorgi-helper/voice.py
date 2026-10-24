@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+import re
 import time
 
 import numpy as np
@@ -159,16 +160,23 @@ class Speaker:
         self.rate = rate
         self.pitch = pitch
 
-    async def synthesize(self, text):
-        """Text -> float32 audio at 24 kHz, using a free Edge voice (needs internet)."""
+    async def synthesize(self, text, words=None):
+        """Text -> float32 audio at 24 kHz, using a free Edge voice (needs internet).
+        words: a list that gets (seconds, word) for each spoken word, when the voice service says them."""
         import edge_tts
         import miniaudio
 
         mp3 = bytearray()
-        communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch)
+        try:  # newer edge-tts only reports sentences unless asked for words
+            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch,
+                                               boundary="WordBoundary")
+        except TypeError:
+            communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch)
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 mp3 += chunk["data"]
+            elif chunk["type"] == "WordBoundary" and words is not None:
+                words.append((chunk["offset"] / 1e7, chunk.get("text", "")))  # offset: 100 ns steps
         decoded = miniaudio.decode(bytes(mp3), output_format=miniaudio.SampleFormat.FLOAT32,
                                    nchannels=1, sample_rate=self.OUTPUT_RATE)
         return np.frombuffer(decoded.samples, dtype=np.float32).copy()
@@ -205,7 +213,53 @@ class Speaker:
             if on_level:
                 on_level(0.0)
 
-    async def say(self, text, on_level=None, cancel=None):
-        audio = await self.synthesize(text)
-        log.info("voice ready (%.1f s of audio), playing", len(audio) / self.OUTPUT_RATE)
+    async def say(self, text, on_level=None, cancel=None, on_start=None):
+        """Says text. on_start(timings) (async) runs right before the sound starts, with
+        word_timings() for the subtitle."""
+        words = []
+        audio = await self.synthesize(text, words)
+        log.info("voice ready (%.1f s of audio, %d word times), playing", len(audio) / self.OUTPUT_RATE, len(words))
+        if on_start is not None:
+            await on_start(word_timings(text, words, len(audio) / self.OUTPUT_RATE))
         await self.play(audio, on_level, cancel)
+
+
+def _plain(word):
+    return re.sub(r"[^a-z0-9]", "", word.lower())
+
+
+def word_timings(text, spoken, duration):
+    """When each word of `text` is said: [[ms, words shown], ...] for Gorgi's subtitle.
+    spoken: (seconds, word) from the voice service; without them, a guess from the word lengths."""
+    tokens = text.split()
+    if not tokens:
+        return []
+    out = []
+    if spoken:
+        at = 0  # next text word to match
+        for seconds, word in spoken:
+            w = _plain(word)
+            if not w or at >= len(tokens):
+                continue
+            # the next text word containing it (a few words ahead at most: numbers may be read differently)
+            found = None
+            for j in range(at, min(at + 4, len(tokens))):
+                t = _plain(tokens[j])
+                if t and (w in t or t in w):
+                    found = j
+                    break
+            j = found if found is not None else at
+            at = j + 1
+            ms = int(seconds * 1000)
+            if out and out[-1][1] >= at:
+                continue
+            out.append([ms, at])
+    if not out:  # no word times: spread the words over the sound by their length
+        total = sum(len(t) + 1 for t in tokens)
+        pos = 0
+        for i, t in enumerate(tokens):
+            out.append([int(duration * 1000 * pos / total), i + 1])
+            pos += len(t) + 1
+    if out[-1][1] < len(tokens):  # the rest by the end
+        out.append([max(out[-1][0] + 200, int(duration * 1000) - 300), len(tokens)])
+    return out

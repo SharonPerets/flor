@@ -1137,6 +1137,9 @@ def self_test(out_path):
         task = todolist.parse_spoken("buy milk tomorrow")
         assert task["text"] == "Buy milk" and task["due"], task
         lines.append(f"to-do from speech: {task}")
+        from voice import word_timings
+
+        assert word_timings("Hi there", [(0.1, "Hi"), (0.4, "there")], 1.0) == [[100, 1], [400, 2]]
         if IS_WINDOWS:  # the updates window starts and can talk back (its buttons use that)
             import queue as _queue
 

@@ -57,6 +57,7 @@ bool talkButton = false;
 bool bottomHidden = false;
 constexpr float TALK_W = 104;  // the Talk button, right-aligned at x 780
 String subtitle = "";
+int subtitleReveal = -1;  // words of the subtitle shown so far (-1 = all)
 int progress = -1;  // progress bar under the subtitle, -1 = none
 MediaInfo media;
 Target pressed = Target::None;
@@ -193,9 +194,12 @@ void drawSubtitle(Canvas& c) {
     if (progress > 0) c.fillRRect(bx, by, 400 * gfx::imin(progress, 100) / 100.0f, 10, 5, ACCENT);
     return;
   }
-  // Word wrap into at most two lines
+  // Word wrap the whole text into lines. Two lines show at a time; while Gorgi speaks, the words
+  // appear as they are said (subtitleReveal = words shown) and a long reply turns to its next two lines.
   const float maxW = 700;
-  String lines[2];
+  constexpr int MAX_LINES = 8;
+  String lines[MAX_LINES];
+  int lineWords[MAX_LINES] = {0};  // words on each line
   int line = 0;
   String word;
   String text = subtitle + " ";
@@ -208,28 +212,70 @@ void drawSubtitle(Canvas& c) {
     }
     if (word.length() == 0) continue;
     String candidate = lines[line].length() ? lines[line] + " " + word : word;
-    if (Canvas::textWidth(gfont::SUBTITLE, candidate.c_str()) <= maxW) {
+    if (Canvas::textWidth(gfont::SUBTITLE, candidate.c_str()) <= maxW || lines[line].length() == 0) {
       lines[line] = candidate;
-    } else if (line == 0) {
-      line = 1;
-      lines[1] = word;
+      ++lineWords[line];
+    } else if (line + 1 < MAX_LINES) {
+      ++line;
+      lines[line] = word;
+      lineWords[line] = 1;
     } else {
       truncated = true;
       break;
     }
     word = "";
   }
-  if (truncated) lines[1] = fit(gfont::SUBTITLE, lines[1] + " ...", maxW);
+  const int lineCount = line + 1;
+  // which two lines: the ones with the newest spoken word
+  int first = 0;
+  if (subtitleReveal >= 0) {
+    int words = 0, at = 0;
+    for (int l = 0; l < lineCount; ++l) {
+      words += lineWords[l];
+      at = l;
+      if (words >= subtitleReveal) break;
+    }
+    first = (at / 2) * 2;
+  } else if (lineCount > 2) {
+    truncated = true;  // (all of it at once: the first two lines)
+  }
+  String show[2] = {lines[first], first + 1 < lineCount ? lines[first + 1] : String("")};
+  if (truncated && subtitleReveal < 0 && show[1].length()) show[1] = fit(gfont::SUBTITLE, show[1] + " ...", maxW);
+  // words before this page, then cut each line to the words spoken so far
+  int before = 0;
+  for (int l = 0; l < first; ++l) before += lineWords[l];
+  int visible[2] = {-1, -1};  // characters of each line to draw (-1 = all)
+  if (subtitleReveal >= 0) {
+    int left = subtitleReveal - before;
+    for (int k = 0; k < 2; ++k) {
+      const int n = first + k < lineCount ? lineWords[first + k] : 0;
+      if (left >= n) {
+        left -= n;
+        continue;
+      }
+      // the first `left` words of this line
+      int chars = 0, seen = 0;
+      while (seen < left && chars < (int)show[k].length()) {
+        while (chars < (int)show[k].length() && show[k][chars] != ' ') ++chars;
+        ++seen;
+        if (seen < left) ++chars;  // the space
+      }
+      visible[k] = left > 0 ? chars : 0;
+      left = 0;
+    }
+  }
 
-  auto centered = [&](const String& s, int baseline) {
+  auto centered = [&](const String& s, int baseline, int chars) {
     const float w = Canvas::textWidth(gfont::SUBTITLE, s.c_str());
-    c.text(gfont::SUBTITLE, s.c_str(), SUB_X + (SUB_W - w) * 0.5f, baseline, TEXT);
+    if (chars == 0) return;
+    const String part = chars < 0 ? s : s.substring(0, chars);
+    c.text(gfont::SUBTITLE, part.c_str(), SUB_X + (SUB_W - w) * 0.5f, baseline, TEXT);
   };
-  if (lines[1].length() == 0) {
-    centered(lines[0], SUB_Y + 38);
+  if (show[1].length() == 0) {
+    centered(show[0], SUB_Y + 38, visible[0]);
   } else {
-    centered(lines[0], SUB_Y + 26);
-    centered(lines[1], SUB_Y + 53);
+    centered(show[0], SUB_Y + 26, visible[0]);
+    centered(show[1], SUB_Y + 53, visible[1]);
   }
 }
 
@@ -376,9 +422,16 @@ void setTalkButton(bool on) {
 
 void setSubtitle(const String& text) {
   String t = toAscii(text);
-  if (t == subtitle && progress < 0) return;
+  if (t == subtitle && progress < 0 && subtitleReveal < 0) return;
   subtitle = t;
   progress = -1;
+  subtitleReveal = -1;
+  dirtySub = true;
+}
+
+void setSubtitleReveal(int words) {
+  if (words == subtitleReveal) return;
+  subtitleReveal = words;
   dirtySub = true;
 }
 

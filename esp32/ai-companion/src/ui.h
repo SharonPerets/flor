@@ -42,6 +42,9 @@ void setTalkButton(bool on);
 // No music bar or slim line at the bottom (the Sketch screen uses all of it)
 void setBottomHidden(bool hidden);
 void setSubtitle(const String& text);
+// While Gorgi speaks: show only the first `words` words of the subtitle (-1 = all of it).
+// Call after setSubtitle (which shows all of it).
+void setSubtitleReveal(int words);
 void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
