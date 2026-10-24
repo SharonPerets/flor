@@ -21,8 +21,10 @@ PORT = 47811
 MARK = f"127.0.0.1:{PORT}/claude"
 HOOK_COMMAND = f"curl.exe -s -m 2 --data-binary @- http://{MARK}/hook"
 STATUS_COMMAND = f"curl.exe -s -m 2 --data-binary @- http://{MARK}/status"
-EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"]
-WITH_MATCHER = {"PostToolUse"}  # tool events need a matcher ("*" = every tool)
+EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Notification",
+          "Stop", "SessionEnd"]
+# tool events need a matcher ("*" = every tool); before a tool, only the ones that wait for you
+MATCHERS = {"PreToolUse": "AskUserQuestion|ExitPlanMode", "PostToolUse": "*", "PermissionRequest": "*"}
 
 
 def settings_path():
@@ -79,6 +81,44 @@ def _write(path, data):
     tmp.replace(path)
 
 
+def _add_hooks(data):
+    """Adds our missing hooks to the settings. Returns a problem message, or ""."""
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        return "Your Claude Code settings have an unusual \"hooks\" section, so I didn't change them."
+    for event in EVENTS:
+        entries = hooks.get(event, [])
+        if not isinstance(entries, list):
+            return f"Your Claude Code settings have an unusual \"{event}\" hook, so I didn't change them."
+    for event in EVENTS:
+        entries = hooks.setdefault(event, [])
+        if _has_our_hook(entries):
+            continue
+        entry = {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5}]}
+        if event in MATCHERS:
+            entry = {"matcher": MATCHERS[event], **entry}
+        entries.append(entry)
+    return ""
+
+
+def upgrade(path=None):
+    """Connected by an older helper (some of our hooks, not all)? Quietly adds the new ones.
+    Returns True if the file was changed."""
+    path = path or settings_path()
+    try:
+        data = _load(path)
+    except Exception:
+        return False
+    hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
+    ours = [e for e in EVENTS if _has_our_hook(hooks.get(e))]
+    if not ours or len(ours) == len(EVENTS):
+        return False
+    if _add_hooks(data):
+        return False
+    _write(path, data)
+    return True
+
+
 def connect(path=None, replace_status_line=False):
     """Adds Gorgi's hooks (and status line). Returns a message for the user."""
     path = path or settings_path()
@@ -86,19 +126,9 @@ def connect(path=None, replace_status_line=False):
         data = _load(path)
     except Exception as e:
         return f"Your Claude Code settings file couldn't be read, so I didn't change it.\n\n{path}\n{e}"
-    hooks = data.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        return "Your Claude Code settings have an unusual \"hooks\" section, so I didn't change them."
-    for event in EVENTS:
-        entries = hooks.setdefault(event, [])
-        if not isinstance(entries, list):
-            return f"Your Claude Code settings have an unusual \"{event}\" hook, so I didn't change them."
-        if _has_our_hook(entries):
-            continue
-        entry = {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5}]}
-        if event in WITH_MATCHER:
-            entry = {"matcher": "*", **entry}
-        entries.append(entry)
+    problem = _add_hooks(data)
+    if problem:
+        return problem
 
     line = data.get("statusLine")
     other = isinstance(line, dict) and not _ours(line.get("command"))

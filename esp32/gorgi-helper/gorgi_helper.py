@@ -591,6 +591,9 @@ class Helper:
         """Something on Gorgi is due: a pop-up, and Gorgi's voice says it."""
         if not text:
             return
+        if self.ws is None:  # Gorgi isn't connected: no pop-up or voice either
+            log.info("Gorgi not connected, not saying: %s", text)
+            return
         if self.on_call:  # quiet during calls: Gorgi's screen shows it
             log.info("on a call, not saying: %s", text)
             return
@@ -1063,6 +1066,11 @@ def main():
         if not config.get("ollama_api_key") and not config.get("ollama_url"):
             show_settings(config)  # first run: ask for the Ollama key
     log.info("%s started", APP_NAME)
+    try:
+        if claude_setup.upgrade():  # connected by an older helper: add the new hooks
+            log.info("added Gorgi's new hooks to Claude Code's settings")
+    except Exception as e:
+        log.warning("couldn't update Claude Code's hooks: %s", e)
     try:
         usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),
