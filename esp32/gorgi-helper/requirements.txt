@@ -19,3 +19,4 @@ winrt-Windows.Foundation ; sys_platform == "win32"
 winrt-Windows.Foundation.Collections ; sys_platform == "win32"
 winrt-Windows.Media.Control ; sys_platform == "win32"
 winrt-Windows.Storage.Streams ; sys_platform == "win32"
+winrt-Windows.UI.Input.Inking ; sys_platform == "win32"  # reads handwriting (Sketch screen)

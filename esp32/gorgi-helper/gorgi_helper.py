@@ -1117,6 +1117,14 @@ def self_test(out_path):
 
         assert upd.is_newer("3.10", "3.9") and not upd.is_newer("3.4", "3.4")
         lines.append("imports: ok")
+        if IS_WINDOWS:  # handwriting recognition (Sketch screen): report only, build machines may lack it
+            import ink_reader
+
+            try:
+                lines.append(f"handwriting languages: {ink_reader.recognizers()}")
+                lines.append(f"handwriting 'hello' read as: {asyncio.run(ink_reader.read(ink_reader.SAMPLE_HELLO))}")
+            except Exception as e:
+                lines.append(f"handwriting: not available here ({e!r})")
         if IS_WINDOWS:  # the updates window starts and can talk back (its buttons use that)
             import queue as _queue
 
