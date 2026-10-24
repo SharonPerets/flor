@@ -80,8 +80,16 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
     The PC says it out loud if Gorgi Helper is running.
   - Everything is saved on Gorgi (up to 20 reminders), so it survives restarts and works without the PC.
     Anything that went off while Gorgi was off is shown once when it starts again.
-- **Sketch screen** (swipe left from the time screen): draw with your finger.
-  - Left toolbar: 8 colours, eraser, brush size (tap to cycle 3 sizes), undo (last 5 strokes), gallery.
+- **Sketch screen** (swipe left from the time screen): quick notes and drawings. **Write** or **Draw** at the top
+  of the toolbar.
+  - **Write** (since 4.4): write big in the box; the words land at a third of the size on the lined page, at the
+    teal writing spot, which moves along after a short pause (or at once when you write past the dashed line).
+    **space** / **new line** buttons; tap the page to move the writing spot. On the lower lines the box moves to
+    the top. When the page is full, a new page starts. With the eraser on, rub the page itself.
+  - **Draw**: free drawing on the whole paper.
+  - Left toolbar: 4 colours, eraser, pen size (tap to cycle 3 sizes), undo (Write: the last word; Draw: the last
+    stroke; up to 5), gallery, **Clear** (tap twice: "Sure?"; undo brings it back), **New page**.
+  - The **Talk** button (top right) goes to the face and listens.
   - On the sketch screen, **swipe on the toolbar** to change screens (on the paper, a swipe draws).
   - Drawings save by themselves (after a 20-second pause, or when you leave). The **gallery** shows the
     last 10: tap one to open it, **New page** for a fresh one, the small **x** to delete one. When there

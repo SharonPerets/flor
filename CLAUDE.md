@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.4 released and confirmed by the user; merged to main)
+## Where things stand (4.4 released, waiting for the user to try it; 4.3.4 confirmed and merged)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -183,6 +183,19 @@ Done and confirmed:
   Retry-After (5 min..1 h), 401/403 -> 5 min. Utilization 0..1 or 0..100 both accepted.
   **User doesn't want token counts at all** ("just the %, if we fail, drop it"): LogCounter / set_tokens removed;
   Gorgi shows "Plan usage not available right now" when there's no %. If it fails, ask for `claude-usage.json`.
+- **4.4 - notes on the Sketch screen** (user: finger notes came out huge; plan doc
+  https://claude.ai/artifact/PSdMeAMBBejgJGZKjvRspS, mock-up approved). `sketch::Writer` (sketch.cpp): **Write** mode =
+  big writing box (148 px, at the bottom; moves to the top for lines 5-9), ink lands at 1/3 size on a lined page
+  (10 lines, 30 px) at a writing spot that moves on after a 0.9 s pause or at once past the dashed slide line;
+  space / new line buttons; tap the page = move the spot; eraser rubs the page directly; full page -> new page;
+  after loading, `findCursor()` continues after the last writing. Box ink lives in a separate PSRAM picture
+  (`skBox`). **Draw** mode = the old free drawing. Both use `sketch::Smoother` (calmed points + curves).
+  Undo: a ring of 6 copies taken when a stroke / word ENDS (not at finger down); Write undo = last word.
+  Toolbar: Write / Draw, 4 colours, eraser, size, undo, gallery, Clear (twice: "Sure?"), New page. Mode in NVS
+  "sketch"/"mode". The idle "Tap me to talk" pill is gone everywhere (user: it looked like a button but wasn't);
+  the Sketch screen has a real teal **Talk** button (`ui::setTalkButton`, Target::Talk -> face + listen).
+  Status pill still shows Listening / Thinking / On a call. Not done: handwriting-to-text (unreliable),
+  voice notes (possible later).
 - Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -190,8 +203,10 @@ Done and confirmed:
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
-- **4.3.4 is confirmed** (plan % works) and merged to main. Nothing is waiting.
-- Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
+- **4.3.4 is confirmed** (plan % works) and merged to main.
+- **4.4 (sketch notes) is released from branch `claude/project-thread-fs7qq5`**, waiting for the user's test.
+  When confirmed: mark it here, merge the branch to main. Open questions the user may raise: 1/3 vs 1/2 size,
+  box pause length, which 4 colours.
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
 Lessons from 3.9 (keep for future screens):
