@@ -205,16 +205,91 @@ class Transcriber:
         return text
 
 
-class Ears:
-    """The English and the Hebrew Whisper; works like a Transcriber for the language chosen now.
-    The Hebrew one loads (and the first time downloads) only when Hebrew is used."""
+# Cloud hearing for Hebrew (the big Hebrew model is too slow on a PC without an NVIDIA card).
+# Both speak the same OpenAI-style API: POST audio, get text back.
+CLOUD_HEARING = {
+    "groq": ("https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3"),
+    "openai": ("https://api.openai.com/v1/audio/transcriptions", "gpt-4o-mini-transcribe"),
+}
 
-    def __init__(self, english, hebrew):
+
+def wav_bytes(audio):
+    """16 kHz float audio -> a small 16-bit WAV file in memory."""
+    import io
+    import wave
+
+    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes(pcm)
+    return out.getvalue()
+
+
+class CloudTranscriber:
+    """Hears through Groq or OpenAI (config "hearing_he": groq | openai | local, keys "groq_api_key" /
+    "openai_api_key"). Works like a Transcriber."""
+
+    def __init__(self, config, language="he"):
+        self.config = config
+        self.language = language
+        self.loading = False
+        self.error = None
+        self.last_problem = None  # why the last request failed (for the log / a spoken hint)
+
+    def service(self):
+        name = (self.config.get("hearing_he") or "local").lower()
+        key = (self.config.get(f"{name}_api_key") or "").strip()
+        return (name, key) if name in CLOUD_HEARING and key else (None, None)
+
+    @property
+    def ready(self):
+        return self.service()[0] is not None
+
+    def load(self):
+        pass
+
+    def transcribe(self, audio, prompt=None):
+        """Slow-ish (a web request): run in a thread. Raises when the service fails."""
+        import httpx
+
+        name, key = self.service()
+        url, model = CLOUD_HEARING[name]
+        started = time.monotonic()
+        data = {"model": model, "language": self.language, "response_format": "json"}
+        if prompt:
+            data["prompt"] = prompt
+        r = httpx.post(url, headers={"Authorization": f"Bearer {key}"}, data=data,
+                       files={"file": ("speech.wav", wav_bytes(audio), "audio/wav")}, timeout=20)
+        if r.status_code >= 400:
+            self.last_problem = f"{name} {r.status_code}: {r.text[:200]}"
+            raise RuntimeError(self.last_problem)
+        self.last_problem = None
+        text = (r.json().get("text") or "").strip()
+        log.info("%s heard %.1f s of speech in %.1f s", name, len(audio) / SAMPLE_RATE, time.monotonic() - started)
+        if text.lower().strip(" .!?,") in NOT_SPEECH:
+            return ""
+        return text
+
+
+class Ears:
+    """The English and the Hebrew hearing; works like a Transcriber for the language chosen now.
+    Hebrew goes to the cloud service chosen in Settings (fast), else the ivrit.ai model on this PC
+    (loads, and the first time downloads, only when needed). If the cloud fails, the PC model takes over."""
+
+    def __init__(self, english, hebrew, cloud=None):
         self.english = english
         self.hebrew = hebrew
+        self.cloud = cloud
 
     def current(self):
-        return self.hebrew if lang.hebrew() else self.english
+        if not lang.hebrew():
+            return self.english
+        if self.cloud is not None and self.cloud.ready:
+            return self.cloud
+        return self.hebrew
 
     @property
     def ready(self):
@@ -232,7 +307,14 @@ class Ears:
         self.current().load()
 
     def transcribe(self, audio):
-        return self.current().transcribe(audio)
+        ears = self.current()
+        if ears is self.cloud:
+            try:
+                return ears.transcribe(audio)
+            except Exception as e:
+                log.warning("cloud hearing failed (%s), using the PC's Hebrew model", e)
+                return self.hebrew.transcribe(audio)
+        return ears.transcribe(audio)
 
 
 class Speaker:

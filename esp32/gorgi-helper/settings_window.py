@@ -19,6 +19,16 @@ VOICES_HE = {
     "Avri - calm (male)": "he-IL-AvriNeural",
 }
 LANGUAGES = {"English": "en", "עברית (Hebrew)": "he"}
+HEARING = {
+    "Groq - fast, free (needs a key)": "groq",
+    "OpenAI - best Hebrew, paid (needs a key)": "openai",
+    "On this PC - slow without NVIDIA": "local",
+}
+HEARING_HINTS = {
+    "groq": "Groq key: console.groq.com → API Keys (free account)",
+    "openai": "OpenAI key: platform.openai.com → API keys (billing needed)",
+    "local": "No key needed. Downloads 1.6 GB the first time.",
+}
 SUGGESTED_MODELS = ["gpt-oss:20b", "gpt-oss:120b"]
 
 
@@ -81,12 +91,45 @@ def show_window(config, save_config, list_models, report_dir=None):
     ttk.Combobox(frame, textvariable=voice_he_var, values=list(VOICES_HE), state="readonly", width=34).grid(
         row=13, column=0, sticky="we", pady=(2, 10))
 
+    # Hebrew hearing: the big Hebrew model is slow on most PCs, so a cloud service can do it (needs a key)
+    ttk.Label(frame, text="Hebrew hearing").grid(row=14, column=0, sticky="w")
+    current_hearing = next((k for k, v in HEARING.items() if v == (config.get("hearing_he") or "groq")),
+                           list(HEARING)[0])
+    hearing_var = tk.StringVar(value=current_hearing)
+    hearing_box = ttk.Combobox(frame, textvariable=hearing_var, values=list(HEARING), state="readonly", width=34)
+    hearing_box.grid(row=15, column=0, sticky="we", pady=(2, 2))
+    hearing_key_var = tk.StringVar()
+    hearing_key = ttk.Entry(frame, textvariable=hearing_key_var, width=48, show="•")
+    hearing_key.grid(row=16, column=0, columnspan=2, sticky="we", pady=(2, 2))
+    hearing_hint = tk.StringVar()
+    ttk.Label(frame, textvariable=hearing_hint, foreground="#666").grid(row=17, column=0, columnspan=2,
+                                                                       sticky="w", pady=(0, 10))
+    keys = {"groq": config.get("groq_api_key", ""), "openai": config.get("openai_api_key", "")}
+    shown = [None]
+
+    def hearing_changed(_event=None):
+        if shown[0] in keys:
+            keys[shown[0]] = hearing_key_var.get().strip()
+        name = HEARING[hearing_var.get()]
+        shown[0] = name
+        if name in keys:
+            hearing_key.state(["!disabled"])
+            hearing_key_var.set(keys[name])
+            hearing_hint.set(HEARING_HINTS[name])
+        else:
+            hearing_key_var.set("")
+            hearing_key.state(["disabled"])
+            hearing_hint.set(HEARING_HINTS[name])
+
+    hearing_box.bind("<<ComboboxSelected>>", hearing_changed)
+    hearing_changed()
+
     # Hebrew test: asks a few AI models the same Hebrew requests, so you can pick the best one
     test_var = tk.StringVar(value="Which AI model speaks the best Hebrew?")
     ttk.Label(frame, textvariable=test_var, foreground="#666", wraplength=300).grid(
-        row=14, column=0, sticky="w", pady=(2, 14))
+        row=21, column=0, sticky="w", pady=(2, 14))
     test_button = ttk.Button(frame, text="Test Hebrew answers")
-    test_button.grid(row=14, column=1, padx=(8, 0), pady=(2, 14))
+    test_button.grid(row=21, column=1, padx=(8, 0), pady=(2, 14))
     best_model = []
 
     def run_test():
@@ -137,11 +180,11 @@ def show_window(config, save_config, list_models, report_dir=None):
     test_button.configure(command=start_test)
 
     # Claude Code: hooks so Gorgi shows your sessions and usage (changes take effect right away)
-    ttk.Label(frame, text="Claude Code").grid(row=15, column=0, sticky="w")
+    ttk.Label(frame, text="Claude Code").grid(row=22, column=0, sticky="w")
     claude_var = tk.StringVar()
-    ttk.Label(frame, textvariable=claude_var, foreground="#666").grid(row=16, column=0, sticky="w", pady=(2, 14))
+    ttk.Label(frame, textvariable=claude_var, foreground="#666").grid(row=23, column=0, sticky="w", pady=(2, 14))
     claude_button = ttk.Button(frame)
-    claude_button.grid(row=16, column=1, padx=(8, 0), pady=(2, 14))
+    claude_button.grid(row=23, column=1, padx=(8, 0), pady=(2, 14))
 
     def refresh_claude():
         connected, ours, other = claude_setup.status()
@@ -173,11 +216,15 @@ def show_window(config, save_config, list_models, report_dir=None):
         config["voice"] = VOICES[voice_var.get()]
         config["voice_he"] = VOICES_HE[voice_he_var.get()]
         config["language"] = LANGUAGES[lang_var.get()]
+        hearing_changed()  # keeps the key typed for the service shown now
+        config["hearing_he"] = HEARING[hearing_var.get()]
+        config["groq_api_key"] = keys["groq"]
+        config["openai_api_key"] = keys["openai"]
         save_config(config)
         root.destroy()
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=20, column=0, columnspan=2, sticky="e")
+    buttons.grid(row=30, column=0, columnspan=2, sticky="e")
     ttk.Button(buttons, text="Cancel", command=root.destroy).grid(row=0, column=0, padx=(0, 8))
     ttk.Button(buttons, text="Save", command=save).grid(row=0, column=1)
 

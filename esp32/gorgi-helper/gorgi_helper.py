@@ -73,6 +73,9 @@ DEFAULT_CONFIG = {
     "language": "en",             # "en" or "he": what Gorgi hears and speaks (Settings, or Gorgi's Action Center)
     "voice_he": "he-IL-HilaNeural",
     "whisper_model_he": "ivrit-ai/whisper-large-v3-turbo-ct2",  # ivrit.ai's Hebrew Whisper, downloaded on first use
+    "hearing_he": "groq",         # Hebrew hearing: "groq" / "openai" (cloud, fast, need a key) or "local" (slow)
+    "groq_api_key": "",
+    "openai_api_key": "",
 }
 
 
@@ -1137,7 +1140,7 @@ def make_voice(config):
     try:
         from brain import Brain
         from conversation import Conversation
-        from voice import Ears, Recorder, Speaker, Transcriber
+        from voice import CloudTranscriber, Ears, Recorder, Speaker, Transcriber
     except Exception as e:
         log.error("voice features unavailable: %s", e)
         return None, None
@@ -1148,7 +1151,7 @@ def make_voice(config):
     english = Transcriber(config.get("whisper_model") or "base.en", data_dir() / "models")
     hebrew = Transcriber(config.get("whisper_model_he") or DEFAULT_CONFIG["whisper_model_he"], data_dir() / "models",
                          language="he")
-    transcriber = Ears(english, hebrew)  # the one for the language chosen now
+    transcriber = Ears(english, hebrew, CloudTranscriber(config))  # the one for the language chosen now
     # Download/load Whisper in the background so the first chat is quick
     threading.Thread(target=transcriber.load, daemon=True).start()
 
