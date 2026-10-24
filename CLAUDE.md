@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.7 Hebrew on the screen confirmed and merged; everything on main; next 4.8 Hebrew hearing/speaking)
+## Where things stand (4.7 Hebrew on the screen confirmed and merged; 4.8 Hebrew hearing/speaking on branch claude/project-thread-vbs4n9)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -270,7 +270,9 @@ Done and confirmed:
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
-- Next: build **4.8** (Hebrew hearing/speaking, see the Hebrew plan above; already approved by the user).
+- **4.8 (Hebrew hearing/speaking)** is on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
+  confirmed, merge, then plan 4.9 (Hebrew keyboard). If Hebrew hearing is slow/wrong, ask for `gorgi-helper.log`
+  ("transcribed in ..." lines) and `hebrew-test.txt`.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
