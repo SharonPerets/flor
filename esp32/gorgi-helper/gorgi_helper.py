@@ -1300,7 +1300,7 @@ def self_test(out_path):
             started = time.monotonic()
             heard_he = th.transcribe(he16k)
             lines.append(f"hebrew heard ({attempt}): {heard_he!r} in {time.monotonic() - started:.1f} s "
-                         f"for {len(he16k) / 16000:.1f} s of speech")
+                         f"for {len(he16k) / 16000:.1f} s of speech ({os.cpu_count()} cores)")
         if "טיימר" not in heard_he:
             lines.append("WARNING: the Hebrew test sentence was not understood")
         # Talk to Ollama Cloud with a fake key: must come back as "key doesn't work"

@@ -10,6 +10,7 @@
 import asyncio
 import logging
 import re
+import os
 import time
 
 import numpy as np
@@ -134,7 +135,9 @@ class Transcriber:
             else:
                 log.info("loading Whisper model %s (downloads once, %s)...", self.model_name,
                          "~1.6 GB" if self.language == "he" else "~150 MB")
-            self._model = WhisperModel(model, device="cpu", compute_type="int8",
+            # All the PC's cores (the default is 4): the big Hebrew model is ~3x slower than the English one
+            threads = min(os.cpu_count() or 4, 12)
+            self._model = WhisperModel(model, device="cpu", compute_type="int8", cpu_threads=threads,
                                        download_root=str(self.models_dir))
             log.info("Whisper model ready")
             self.error = None
@@ -157,7 +160,7 @@ class Transcriber:
             return ""
         started = time.monotonic()
         segments, _info = self._model.transcribe(audio, language=self.language, beam_size=1, vad_filter=False,
-                                                 condition_on_previous_text=False)
+                                                 condition_on_previous_text=False, without_timestamps=True)
         text = " ".join(s.text.strip() for s in segments).strip()
         log.info("transcribed %.1f s of speech in %.1f s (%s)", len(audio) / SAMPLE_RATE, time.monotonic() - started,
                  self.language)
