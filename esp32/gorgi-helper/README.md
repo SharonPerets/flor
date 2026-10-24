@@ -90,9 +90,11 @@ made). Restart open Claude Code sessions afterwards. **Disconnect** in the same 
   with a question counts as "needs you". Permission prompts, questions with buttons and plans to approve
   are "needs you" at once. No pop-ups or voice while Gorgi isn't connected.
 - **Usage** (5-hour and weekly %, like Settings → Usage) is read for the Claude account signed in to Claude
-  **on this PC** (not your browser): the helper reads the PC's saved Claude sign-in and asks Anthropic for the
-  numbers every few minutes. This isn't an official feature and may stop working one day; then Gorgi shows the
-  tokens counted from Claude Code's own logs instead. The last result is in `claude-usage.json` (settings folder).
+  **on this PC** (not your browser). The helper reads the Claude desktop app's own sign-in (read-only; the app
+  renews it itself), or Claude Code's saved sign-in if it's still fresh, and asks Anthropic every 5 minutes. It
+  never renews a sign-in itself (that would sign Claude Code out). This isn't an official feature and may stop
+  working one day; then Gorgi shows "Plan usage not available" (or the last numbers with their age).
+  What happened last is in `claude-usage.json` (settings folder; it never contains the sign-in).
 - In the terminal version of Claude Code, the status line also shows the model and usage (e.g. `Opus | 5h 62% | week 23%`).
 - Ask Gorgi "how much Claude usage do I have left?" or "is Claude done?".
 
