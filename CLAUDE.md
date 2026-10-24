@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (Hebrew 4.7-4.8.4 dropped; 4.8.5 = back to 4.6.2, confirmed and merged)
+## Where things stand (Hebrew dropped, 4.8.5 confirmed and merged; 4.8.6 Hebrew song names on branch claude/project-thread-vbs4n9)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -237,6 +237,10 @@ Done and confirmed:
   (non-English letters dropped, Hebrew-only tasks lost), and the helper removes the Hebrew settings from config.json
   (`HEBREW_LEFTOVERS`) and any `models/*ivrit-ai--*` folder. Don't offer Hebrew again unless the user asks.
   4.8.5 confirmed ("Works") and merged to main.
+- **4.8.6 - Hebrew song names only** (user: "just bring back the hebrew support for media and thats it"): from 4.7 again
+  `bidi.cpp`, `gfont_hebrew.cpp` (Fredoka letters), `gfx` (`text` reorders Hebrew, `textIn` = right edge), `music_screen.cpp`,
+  `tabs.cpp` (mini player), and in `ui.cpp` the music bar (`textIn`, letter-safe `fit`). `ui::toAscii(text, keepHebrew)`:
+  only `setMedia` keeps Hebrew; everything else (face, to-dos, alerts, notifications) stays English-only.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -250,6 +254,8 @@ Done and confirmed:
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **Hebrew was dropped** by the user; **4.8.5 (= 4.6.2 + clean-ups) is confirmed** ("Works") and merged to main.
+- **4.8.6** (Hebrew song names on the music screen and bar) is on branch `claude/project-thread-vbs4n9`, waiting for the
+  user's test. On "works": mark confirmed, merge.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
