@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 
+import todolist
 import weather
 from brain import BrainError
 
@@ -15,17 +16,19 @@ FIRST_WAIT_SECONDS = 7.0  # how long to wait for you to start talking after a ta
 
 class Conversation:
     def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0, timekeeper=None,
-                 extra_context=None):
+                 extra_context=None, todos=None):
         self.send = send  # async fn(dict): message to Gorgi
         self.media = media
         self.timekeeper = timekeeper  # timers and reminders (see timekeeper.py)
+        self.todos = todos  # the to-do list (see todolist.py)
         self.extra_context = extra_context  # fn() -> more lines for the AI (Claude Code, calls)
         self.brain = brain
         self.recorder = recorder
         self.transcriber = transcriber
         self.speaker = speaker
         self.followup_seconds = followup_seconds
-        self.dictate = False  # True: just type what's said on the Sketch screen (no AI, no voice)
+        self.dictate = False  # True: just write down what's said (To-do screen; no AI, no voice)
+        self.dictate_mode = "todo"  # "todo": a new task (with its day); "text": words for the keyboard's text box
 
     async def run(self):
         if self.dictate:
@@ -45,7 +48,7 @@ class Conversation:
         return None
 
     async def run_dictation(self):
-        """Voice typing for the Sketch screen: listen once, send the words back to be typed."""
+        """Voice typing for the To-do screen: listen once, send the words back (as a task with its day)."""
         paused_music = False
         problem = None
         try:
@@ -64,8 +67,14 @@ class Conversation:
             await self.send({"type": "dictate_state", "state": "thinking"})
             text = await asyncio.to_thread(self.transcriber.transcribe, audio)
             log.info("dictation: %r", text)
-            if text:
-                await self.send({"type": "dictation", "text": text})
+            if text and self.dictate_mode == "todo":
+                task = todolist.parse_spoken(text)
+                log.info("new task: %s", task)
+                msg = todolist.to_message(task, "dictation")
+                msg["mode"] = "todo"
+                await self.send(msg)
+            elif text:
+                await self.send({"type": "dictation", "text": text, "mode": "text"})
             else:
                 problem = "Sorry, I didn't catch that"
         finally:
@@ -169,7 +178,14 @@ class Conversation:
         problem = None
         for action, value in actions:
             log.info("action: %s %s", action, value if value is not None else "")
-            if action in ("timer", "focus", "remind", "reminder", "cancel"):
+            if action == "todo":
+                if self.todos is None:
+                    continue
+                messages, trouble = self.todos.handle(value)
+                for message in messages:
+                    await self.send(message)
+                problem = problem or trouble
+            elif action in ("timer", "focus", "remind", "reminder", "cancel"):
                 if self.timekeeper is None:
                     continue
                 messages, trouble = self.timekeeper.handle(action, value)
@@ -207,6 +223,8 @@ class Conversation:
             lines.append(forecast)
         if self.timekeeper is not None:
             lines.append(self.timekeeper.prompt_block())
+        if self.todos is not None:
+            lines.append(self.todos.prompt_block())
         if self.extra_context is not None:
             try:
                 extra = self.extra_context()

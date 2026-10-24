@@ -91,6 +91,8 @@ int timeConfirm = -1;        // reminder row asking "Delete?"
 String timeNote;             // short message at the top of the Time screen
 uint32_t timeNoteUntil = 0;
 
+bool todoFull = true;  // the To-do screen needs drawing in full
+
 // Claude Code on the PC (sessions and usage, sent by the helper)
 claudescreen::View claudeView;
 int32_t claudeSince[claudescreen::MAX_SESSIONS];  // when each session's state changed (seconds since 1970)
@@ -790,7 +792,6 @@ void onTime(const char* type, JsonObjectConst msg) {
 // say into a task with a day), with the on-screen keyboard, or by asking Gorgi.
 
 todoscreen::View todoView;
-bool todoFull = true;  // the To-do screen needs drawing in full
 uint32_t todoHeaderKey = 0, todoListKey = 0, todoBottomKey = 0;
 uint32_t todoFieldKey = 0, todoWhenKey = 0, todoKeysKey = 0, todoKbBottomKey = 0;
 int todoPressedDrawn = -1;
