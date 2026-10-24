@@ -23,18 +23,18 @@ Gorgi and the PC must be on the same Wi-Fi network.
 
 ## Updates
 
-The helper checks GitHub once a day. When a new version is out, a message pops up near the clock.
-Right-click the Gorgi icon and choose:
+The helper checks GitHub once a day. When a new version is out, a message pops up near the clock and
+the top of the Gorgi icon's menu (right-click) says **Update to …** (otherwise **Check for updates…**).
 
-- **Update Gorgi Helper to …** — downloads the new installer (with a progress window), updates itself
-  quietly and restarts.
-- **Update Gorgi to …** — sends the new firmware to Gorgi over Wi-Fi, with a progress window on the PC.
-  Gorgi's screen goes dark while it installs, then it restarts.
+That opens the **Gorgi updates** window: both versions and one **Update all** button.
+1. Gorgi Helper downloads and installs itself. The window closes for a few seconds while it
+   reinstalls, and the new helper opens it again by itself.
+2. The new firmware goes to Gorgi over Wi-Fi (Gorgi's screen goes dark while it installs).
+3. "All done" only shows once Gorgi is back with the new version. If something fails, the window
+   says what and offers **Try again**.
 
-**Check for updates** in the same menu checks right away.
-
-Or update from Gorgi itself: swipe down from Gorgi's top bar and tap **Update**. The helper updates first,
-restarts, then sends the new version to Gorgi by itself.
+Tapping **Update** in Gorgi's Action Center (swipe down from the top bar) does the same, and opens
+the same window on the PC.
 
 Gorgi only accepts updates from the helper it paired with (the first one that connected to it).
 To pair it with a different PC, hold Gorgi's clock for 5 seconds: it forgets its Wi-Fi and the
@@ -86,6 +86,9 @@ Claude Code's settings (`%USERPROFILE%\.claude\settings.json`; your own settings
 made). Restart open Claude Code sessions afterwards. **Disconnect** in the same place removes them.
 
 - When a session needs your OK or answer, or finishes after working a while, Gorgi shows it and says it.
+  "Finished" waits 15 s of quiet first (Claude often stops between steps and carries on); a stop that ends
+  with a question counts as "needs you". Permission prompts, questions with buttons and plans to approve
+  are "needs you" at once. No pop-ups or voice while Gorgi isn't connected.
 - **Usage** (5-hour and weekly %, like Settings → Usage) is read for the Claude account signed in to Claude
   **on this PC** (not your browser): the helper reads the PC's saved Claude sign-in and asks Anthropic for the
   numbers every few minutes. This isn't an official feature and may stop working one day; then Gorgi shows the

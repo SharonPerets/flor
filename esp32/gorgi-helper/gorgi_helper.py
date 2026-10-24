@@ -41,7 +41,7 @@ import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.3.1"  # must match esp32/VERSION
+VERSION = "4.3.3"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -181,24 +181,23 @@ async def find_gorgi(config_address):
 
 
 class _NoWindow:
-    """Stand-in progress window (tests, or when windows can't be shown)."""
+    """Stand-in updates window (tests, or when windows can't be shown)."""
 
-    def update(self, percent, text=""):
+    open = False
+
+    def show(self, state):
         pass
 
-    def done(self, text):
-        pass
-
-    def fail(self, text):
+    def close(self):
         pass
 
 
-def make_progress_window(title):
+def make_update_window(on_word):
     if not IS_WINDOWS:
         return _NoWindow()
-    from progress_window import ProgressWindow
+    from update_window import UpdateWindow
 
-    return ProgressWindow(title)
+    return UpdateWindow(on_word)
 
 
 class Helper:
@@ -230,7 +229,10 @@ class Helper:
         self.latest = None        # newest release on GitHub
         self.updating = False
         self._offered = set()     # versions we already told the user about
-        self.make_progress = make_progress_window
+        self.make_update_window = make_update_window
+        self.update_window = None
+        self.marks = {}           # updates window: "helper"/"gorgi" -> todo, busy, ok, fail, offline
+        self._view = {}
 
     def set_status(self, text, connected):
         if (text, connected) != self.status:
@@ -262,6 +264,11 @@ class Helper:
                 backoff = min(backoff * 2, 15)
 
     # ------------------------------------------------------------ updates
+    #
+    # One "Gorgi updates" window does it all: tray "Update to ..." (or Gorgi's Update
+    # button) opens it, "Update all" updates the helper first (it restarts; the new
+    # helper reopens the window and carries on), then Gorgi, and it only says "All done"
+    # once Gorgi is back with the new version.
 
     @property
     def helper_update_available(self):
@@ -274,22 +281,36 @@ class Helper:
                     and updater.is_newer(self.latest.version, self.gorgi_version))
 
     async def update_loop(self):
-        await self._sleep(20)  # let everything start first
-        while not self.stop_event.is_set():
+        self._loop = asyncio.get_running_loop()
+        flow = self.config.pop("update_flow", None)
+        if self.config.pop("pending_gorgi_update", False) and not flow:
+            flow = {"version": VERSION}  # an older helper was updated from Gorgi's panel
+        if flow:
+            save_config(self.config)
+            await self.continue_after_restart(flow)
+        else:
+            await self._sleep(20)  # let everything start first
             await self.check_updates()
+        while not self.stop_event.is_set():
             await self._sleep(24 * 3600)
+            await self.check_updates()
 
-    async def check_updates(self, manual=False):
+    async def check_updates(self, notify=True):
+        """Asks GitHub for the newest release. Returns False if that didn't work."""
         try:
             async with httpx.AsyncClient() as client:
                 self.latest = await updater.fetch_latest(client)
             log.info("newest release: %s", self.latest.version if self.latest else "none yet")
         except Exception as e:
             log.warning("update check failed: %s", e)
-            if manual:
-                self.on_notify("Couldn't check for updates", "Is the internet working?")
-            return
-        self.offer_updates(manual)
+            return False
+        if notify:
+            self.offer_updates()
+        else:
+            self.on_changed()
+            self._send_soon(self.update_info())
+        self._push()
+        return True
 
     def _send_soon(self, msg):
         try:
@@ -298,53 +319,27 @@ class Helper:
             pass
 
     def update_info(self):
-        """For Gorgi's pull-down panel: is there something to update?"""
+        """For Gorgi's Action Center: is there something to update?"""
         return {"type": "update_info", "available": self.helper_update_available or self.gorgi_update_available,
                 "version": self.latest.version if self.latest else "", "busy": self.updating}
 
     async def update_all(self):
-        """Gorgi's "Update" button: the helper first (it restarts), then Gorgi."""
-        if self.updating:
-            return
-        if self.helper_update_available:
-            # after the restart, the new helper carries on with Gorgi (see offer_updates)
-            self.config["pending_gorgi_update"] = True
-            save_config(self.config)
-            await self.send({"type": "update_status", "text": "Updating the PC helper..."})
-            await self.update_helper()
-        elif self.gorgi_update_available:
-            await self.send({"type": "update_status", "text": "Sending the update to Gorgi..."})
-            await self.update_gorgi()
-        await self.send(self.update_info())  # done (or failed): Gorgi stops showing "Updating"
+        """Gorgi's "Update" button: the same as "Update all" in the window on the PC."""
+        self.open_updates(start=True)
 
     async def check_updates_soon(self):
-        """Gorgi's panel was opened: check again, at most every 10 minutes."""
+        """Gorgi's Action Center was opened: check again, at most every 10 minutes."""
         if time.monotonic() - getattr(self, "_last_check", -1e9) > 600:
             self._last_check = time.monotonic()
             await self.check_updates()
         else:
             await self.send(self.update_info())
 
-    def offer_updates(self, manual=False):
-        """Tells the user about new versions (once per version, or every time when asked)."""
+    def offer_updates(self):
+        """Tells the user about a new version (once per version)."""
         self.on_changed()
         self._send_soon(self.update_info())
-        if self.config.pop("pending_gorgi_update", False):  # the helper was just updated from Gorgi's panel
-            save_config(self.config)
-            if self.gorgi_update_available:
-                log.info("carrying on with Gorgi's update")
-                self._send_soon({"type": "update_status", "text": "Sending the update to Gorgi..."})
-                try:
-                    asyncio.get_running_loop().create_task(self.update_gorgi())
-                except RuntimeError:
-                    pass
-                return
-            if not self.latest:  # not checked yet: try again on the next offer
-                self.config["pending_gorgi_update"] = True
-                save_config(self.config)
         if not self.latest:
-            if manual:
-                self.on_notify("No updates yet", f"Gorgi Helper {VERSION}")
             return
         v = self.latest.version
         parts = []
@@ -352,67 +347,222 @@ class Helper:
             parts.append("Gorgi Helper")
         if self.gorgi_update_available:
             parts.append("Gorgi")
-        if parts and (manual or v not in self._offered):
+        if parts and v not in self._offered:
             self._offered.add(v)
             self.on_notify(f"Update {v} is ready",
-                           f"New version for {' and '.join(parts)}. Right-click the Gorgi icon to install.")
-        elif not parts and manual:
-            gorgi = f", Gorgi {self.gorgi_version}" if self.gorgi_version else ""
-            self.on_notify("Everything is up to date", f"Gorgi Helper {VERSION}{gorgi}")
+                           f"New version for {' and '.join(parts)}. Right-click the Gorgi icon and choose "
+                           f"\"Update to {v}\".")
 
-    async def update_gorgi(self):
-        if self.updating or not self.gorgi_update_available:
+    # ---- the window
+
+    def open_updates(self, start=False):
+        """Opens the updates window (or brings it to the front), checks GitHub, and with
+        start=True goes straight on to updating. Call it in the event loop."""
+        self._loop = asyncio.get_running_loop()
+        if not (self.update_window and self.update_window.open):
+            self.update_window = self.make_update_window(self._window_word)
+            if not self.updating:
+                self.marks = {}
+                self._view = {"text": "Checking for updates...", "percent": "wait", "button": ""}
+        self._push(raise_=True)
+        if start and self.updating:
             return
-        if not self.gorgi_paired:
-            self.on_notify("Can't update Gorgi",
-                           "Gorgi is paired with another helper. Hold Gorgi's clock for 5 seconds to reset it "
-                           "(this also forgets its Wi-Fi).")
-            return
-        self.updating = True
-        v = self.latest.version
-        self.set_status(f"Updating Gorgi to {v}...", True)
-        window = self.make_progress(f"Updating Gorgi to {v}")
+        if not self.updating and not getattr(self, "_checking", False):
+            self._loop.create_task(self._window_check(start))
+
+    def _window_word(self, word):
+        """A button in the window (called from a background thread)."""
+        loop = getattr(self, "_loop", None)
+        if loop:
+            loop.call_soon_threadsafe(self._on_word, word)
+
+    def _on_word(self, word):
+        log.info("updates window: %s", word)
+        if word in ("start", "retry"):
+            asyncio.get_running_loop().create_task(self.run_updates())
+        # "close": the window went away; an update already running carries on
+
+    async def _window_check(self, start):
+        self._checking = True
         try:
-            async with httpx.AsyncClient() as client:
-                data = await updater.download(client, self.latest.firmware_url,
-                                              lambda f: window.update(f * 30, "Downloading..."))
-                log.info("sending firmware %s (%d bytes) to Gorgi", v, len(data))
-                window.update(30, "Sending to Gorgi (its screen turns off for a moment)...")
-                ok, message = await updater.send_firmware(
-                    client, self.gorgi_address, self.config.get("helper_key", ""), data,
-                    lambda f: window.update(30 + f * 68, "Sending to Gorgi (its screen turns off for a moment)..."))
-        except Exception as e:
-            ok, message = False, f"download failed ({e})"
-        self.updating = False
-        log.info("Gorgi update: %s", message)
-        if ok:
-            window.done(f"Done! Gorgi is restarting with version {v}.")
+            self._show("Checking for updates...", "wait")
+            if not await self.check_updates(notify=False):
+                self._show("Couldn't check for updates. Is the internet working?", button="retry")
+                return
+        finally:
+            self._checking = False
+        if self.helper_update_available or self.gorgi_update_available:
+            if start:
+                await self.run_updates()
+            else:
+                self._show(f"Version {self.latest.version} is ready. Gorgi Helper updates first, then Gorgi.",
+                           button="start")
+        elif self.ws is None:
+            self._show("Gorgi Helper is up to date. Gorgi isn't connected, so I can't check it right now.",
+                       button="close")
         else:
-            window.fail(f"Gorgi update failed: {message}")
-        self.on_changed()
+            self._show("Everything is up to date.", button="close")
 
-    async def update_helper(self):
-        if self.updating or not self.helper_update_available:
+    def _rows(self):
+        new = self.latest.version if self.latest else ""
+        marks = getattr(self, "marks", {})
+        helper_new = new if self.helper_update_available or marks.get("helper") in ("busy", "fail") else ""
+        helper = {"name": "Gorgi Helper", "now": VERSION, "new": helper_new,
+                  "state": marks.get("helper") or ("todo" if helper_new else "same")}
+        gorgi_new = new if (self.gorgi_update_available or marks.get("gorgi") in ("busy", "fail")) else ""
+        if marks.get("gorgi"):
+            state = marks["gorgi"]
+        elif self.ws is None or not self.gorgi_version:
+            state = "offline"
+        else:
+            state = "todo" if gorgi_new else "same"
+        gorgi = {"name": "Gorgi", "now": self.gorgi_version or "?", "new": gorgi_new, "state": state}
+        return [helper, gorgi]
+
+    def _show(self, text, percent=None, button=""):
+        if isinstance(percent, float):
+            percent = int(percent)  # whole percents: fewer messages to the window
+        self._view = {"text": text, "percent": percent, "button": button}
+        self._push()
+
+    def _push(self, raise_=False):
+        window = getattr(self, "update_window", None)
+        if window and window.open:
+            state = dict(getattr(self, "_view", {}), rows=self._rows())
+            if raise_:
+                state["raise"] = True
+            window.show(state)
+
+    # ---- the steps
+
+    async def run_updates(self):
+        """"Update all": the helper first (it restarts and carries on), then Gorgi."""
+        if self.updating:
             return
+        if not self.latest:  # the check didn't work: check again first
+            await self._window_check(True)
+            return
+        self.marks = {}
+        if self.helper_update_available:
+            await self._update_helper_step()
+        else:
+            await self._update_gorgi_step()
+
+    async def _update_helper_step(self):
         self.updating = True
         v = self.latest.version
+        self.marks["helper"] = "busy"
         self.set_status(f"Downloading Gorgi Helper {v}...", self.ws is not None)
-        window = self.make_progress(f"Updating Gorgi Helper to {v}")
+        await self.send({"type": "update_status", "text": "Updating the PC helper..."})
         try:
             async with httpx.AsyncClient() as client:
-                data = await updater.download(client, self.latest.helper_url,
-                                              lambda f: window.update(f * 100, f"Downloading... {f * 100:.0f}%"))
+                data = await updater.download(client, self.latest.helper_url, lambda f: self._show(
+                    f"Downloading Gorgi Helper {v}... {f * 100:.0f}%", f * 100))
             path = updater.save_installer(data, v)
-            window.done("Downloaded. Installing - Gorgi Helper restarts by itself.")
+            self.config["update_flow"] = {"version": v}  # the new helper carries on with Gorgi
+            save_config(self.config)
+            self._show("Installing Gorgi Helper. This window closes for a few seconds and comes back by itself.",
+                       "wait")
             log.info("starting installer %s", path)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(2.5)
             updater.run_installer(path)
         except Exception as e:
             self.updating = False
+            self.config.pop("update_flow", None)
+            save_config(self.config)
             log.warning("helper update failed: %s", e)
-            window.fail(f"Update failed: {e}")
+            self.marks["helper"] = "fail"
+            self._show(f"Couldn't update Gorgi Helper: {e}", button="retry")
+            await self.send(self.update_info())
             return
         self.request_stop()  # quit, so the installer can replace this app
+
+    async def continue_after_restart(self, flow):
+        """The helper was just updated by "Update all": reopen the window and do Gorgi."""
+        v = str(flow.get("version") or "")
+        self.marks = {"helper": "ok" if v == VERSION else "fail"}
+        self._view = {"text": "Gorgi Helper is updated. Looking for Gorgi...", "percent": "wait", "button": ""}
+        self.open_window_only()
+        if v != VERSION:
+            self._show(f"Gorgi Helper didn't update (it's still {VERSION}).", button="retry")
+            return
+        for _ in range(3):
+            if await self.check_updates(notify=False) and self.latest:
+                break
+            await self._sleep(5)
+        if not self.latest:
+            self._show("Gorgi Helper is updated, but I couldn't check Gorgi's update. Is the internet working?",
+                       button="retry")
+            return
+        await self._update_gorgi_step()
+
+    def open_window_only(self):
+        self._loop = asyncio.get_running_loop()
+        if not (self.update_window and self.update_window.open):
+            self.update_window = self.make_update_window(self._window_word)
+        self._push(raise_=True)
+
+    async def _wait_for(self, check, seconds):
+        end = time.monotonic() + seconds
+        while not check():
+            if time.monotonic() > end or self.stop_event.is_set():
+                return False
+            await self._sleep(1)
+        return True
+
+    async def _update_gorgi_step(self):
+        self._show("Looking for Gorgi...", "wait")
+        if not await self._wait_for(lambda: self.ws is not None and self.gorgi_version, 60):
+            self.marks["gorgi"] = "offline"
+            self._show("Gorgi isn't connected. Turn it on (same Wi-Fi as this PC) and press Try again.",
+                       button="retry")
+            return
+        self.marks.pop("gorgi", None)
+        if not self.gorgi_update_available:
+            self._all_done()
+            return
+        if not self.gorgi_paired:
+            self.marks["gorgi"] = "fail"
+            self._show("Gorgi is paired with another helper. Hold Gorgi's clock for 5 seconds to reset it "
+                       "(this also forgets its Wi-Fi), then press Try again.", button="retry")
+            return
+        self.updating = True
+        v = self.latest.version
+        self.marks["gorgi"] = "busy"
+        self.set_status(f"Updating Gorgi to {v}...", True)
+        await self.send({"type": "update_status", "text": "Sending the update to Gorgi..."})
+        sending = "Sending to Gorgi (its screen turns off for a moment)..."
+        try:
+            async with httpx.AsyncClient() as client:
+                data = await updater.download(client, self.latest.firmware_url, lambda f: self._show(
+                    "Downloading Gorgi's update...", f * 30))
+                log.info("sending firmware %s (%d bytes) to Gorgi", v, len(data))
+                self._show(sending, 30)
+                ok, message = await updater.send_firmware(
+                    client, self.gorgi_address, self.config.get("helper_key", ""), data,
+                    lambda f: self._show(sending, 30 + f * 68))
+        except Exception as e:
+            ok, message = False, f"download failed ({e})"
+        log.info("Gorgi update: %s", message)
+        if ok:
+            self._show(f"Gorgi is restarting with version {v}...", "wait")
+            ok = await self._wait_for(lambda: self.ws is not None and self.gorgi_version == v, 180)
+            message = "it didn't come back with the new version in 3 minutes. Is it on?"
+        self.updating = False
+        self.on_changed()
+        if ok:
+            self.marks["gorgi"] = "ok"
+            self._all_done()
+        else:
+            self.marks["gorgi"] = "fail"
+            self._show(f"Gorgi's update didn't work: {message}", button="retry")
+            await self.send(self.update_info())
+
+    def _all_done(self):
+        gorgi = f" and Gorgi {self.gorgi_version}" if self.gorgi_version else ""
+        self._show(f"All done! Gorgi Helper {VERSION}{gorgi} are up to date.", button="close")
+        self.set_status(f"Connected to Gorgi ({self.gorgi_address})", True)
+        self._send_soon(self.update_info())
 
     def request_stop(self):
         """Quit (from the event loop). If something still holds the app open after a few
@@ -486,6 +636,7 @@ class Helper:
             self.gorgi_version = None
             self.timekeeper.forget()
             self.on_changed()
+            self._push()
             self.stop_conversation()
             for task in (sender, receiver, stopper):
                 task.cancel()
@@ -503,6 +654,7 @@ class Helper:
                 log.info("Gorgi firmware version: %s (%s)", self.gorgi_version,
                          "paired" if self.gorgi_paired else "paired with another helper")
                 self.offer_updates()
+                self._push()
                 continue
             if msg.get("type") == "weather":
                 weather.update(msg)
@@ -590,6 +742,9 @@ class Helper:
     async def announce(self, text):
         """Something on Gorgi is due: a pop-up, and Gorgi's voice says it."""
         if not text:
+            return
+        if self.ws is None:  # Gorgi isn't connected: no pop-up or voice either
+            log.info("Gorgi not connected, not saying: %s", text)
             return
         if self.on_call:  # quiet during calls: Gorgi's screen shows it
             log.info("on a call, not saying: %s", text)
@@ -778,21 +933,13 @@ def start_tray(helper, loop):
             path.write_text('{"facts": []}', encoding="utf-8")
         os.startfile(path)  # opens in Notepad (or whatever opens .json files)
 
-    def run_async(coro):
-        asyncio.run_coroutine_threadsafe(coro, loop)
-
     menu = pystray.Menu(
         pystray.MenuItem(lambda _item: helper.status[0], None, enabled=False),
         pystray.MenuItem(f"Version {VERSION}", None, enabled=False),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem(lambda _item: f"Update Gorgi to {helper.latest.version}" if helper.latest else "Update Gorgi",
-                         lambda _icon, _item: run_async(helper.update_gorgi()),
-                         visible=lambda _item: helper.gorgi_update_available),
-        pystray.MenuItem(lambda _item: f"Update Gorgi Helper to {helper.latest.version}" if helper.latest
-                         else "Update Gorgi Helper",
-                         lambda _icon, _item: run_async(helper.update_helper()),
-                         visible=lambda _item: helper.helper_update_available),
-        pystray.MenuItem("Check for updates", lambda _icon, _item: run_async(helper.check_updates(manual=True))),
+        pystray.MenuItem(lambda _item: f"Update to {helper.latest.version}..."
+                         if helper.helper_update_available or helper.gorgi_update_available else "Check for updates...",
+                         lambda _icon, _item: loop.call_soon_threadsafe(helper.open_updates)),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Settings...", open_settings_item, default=True),
         pystray.MenuItem("Memories...", open_memories),
@@ -932,7 +1079,7 @@ def self_test(out_path):
         import zeroconf  # noqa: F401
         import brain  # noqa: F401
         import memory  # noqa: F401
-        import progress_window  # noqa: F401
+        import update_window  # noqa: F401
         import conversation  # noqa: F401
         import timekeeper  # noqa: F401
         import claude_watch  # noqa: F401
@@ -951,6 +1098,19 @@ def self_test(out_path):
 
         assert upd.is_newer("3.10", "3.9") and not upd.is_newer("3.4", "3.4")
         lines.append("imports: ok")
+        if IS_WINDOWS:  # the updates window starts and can talk back (its buttons use that)
+            import queue as _queue
+
+            from update_window import UpdateWindow
+
+            words = _queue.Queue()
+            w = UpdateWindow(words.put)
+            w.show({"rows": [{"name": "Gorgi Helper", "now": VERSION, "state": "same"}], "text": "Self-test",
+                    "button": "close"})
+            word = words.get(timeout=30)
+            w.close()
+            lines.append(f"updates window: {word}")
+            assert word == "ready", word
 
         # Gorgi speaks a sentence, then Whisper listens to it: checks both ends
         import numpy as np
@@ -1007,7 +1167,7 @@ def main():
     parser.add_argument("--address", help="Gorgi's IP address (skips auto-discovery)")
     parser.add_argument("--selftest", metavar="FILE", help=argparse.SUPPRESS)
     parser.add_argument("--settings", action="store_true", help="only show the Settings window")
-    parser.add_argument("--progress", metavar="TITLE", help=argparse.SUPPRESS)
+    parser.add_argument("--updates", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.selftest:
@@ -1016,10 +1176,10 @@ def main():
     if args.settings:
         run_settings_window()
         return
-    if args.progress:
-        from progress_window import run_window
+    if args.updates:
+        from update_window import run_window
 
-        run_window(args.progress)
+        run_window()
         return
 
     setup_logging(console=args.no_tray or not getattr(sys, "frozen", False))
@@ -1063,6 +1223,11 @@ def main():
         if not config.get("ollama_api_key") and not config.get("ollama_url"):
             show_settings(config)  # first run: ask for the Ollama key
     log.info("%s started", APP_NAME)
+    try:
+        if claude_setup.upgrade():  # connected by an older helper: add the new hooks
+            log.info("added Gorgi's new hooks to Claude Code's settings")
+    except Exception as e:
+        log.warning("couldn't update Claude Code's hooks: %s", e)
     try:
         usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),

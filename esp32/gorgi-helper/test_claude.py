@@ -36,6 +36,21 @@ assert any(f.name.startswith("settings.json.gorgi-backup") for f in d.iterdir())
 (d / "broken.json").write_text("{not json")
 assert "couldn't be read" in cs.connect(d / "broken.json")
 assert cs.connect(d / "new" / "settings.json") and cs.status(d / "new" / "settings.json") == (True, True, False)
+data = json.loads((d / "new" / "settings.json").read_text())
+assert data["hooks"]["PreToolUse"][0]["matcher"] == "AskUserQuestion|ExitPlanMode"
+assert data["hooks"]["PermissionRequest"][0]["matcher"] == "*"
+# an older helper's connection (no PreToolUse / PermissionRequest yet) is upgraded quietly
+old_hook = {"hooks": [{"type": "command", "command": cs.HOOK_COMMAND, "timeout": 5}]}
+older = {"hooks": {e: [dict(old_hook, matcher="*") if e == "PostToolUse" else old_hook]
+                   for e in ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"]},
+         "statusLine": {"type": "command", "command": "my-status.sh"}}
+(d / "old.json").write_text(json.dumps(older))
+assert cs.status(d / "old.json")[0] is False
+assert cs.upgrade(d / "old.json") is True and cs.status(d / "old.json") == (True, False, True)
+assert cs.upgrade(d / "old.json") is False  # nothing more to add
+assert json.loads((d / "old.json").read_text())["statusLine"]["command"] == "my-status.sh"
+(d / "none.json").write_text(json.dumps({"model": "opus"}))
+assert cs.upgrade(d / "none.json") is False and json.loads((d / "none.json").read_text()) == {"model": "opus"}
 
 # ---- sessions
 t = [1000.0]
@@ -46,13 +61,42 @@ ev("SessionStart"); ev("UserPromptSubmit"); t[0] += 5; ev("PostToolUse")
 assert w.message()["sessions"][0] == {"name": "flor", "state": "working", "text": "", "since": 1000}
 ev("Notification", message="Claude needs your permission to use Bash")
 assert alerts[-1] == ("waiting", "flor", "Claude needs you in flor") and w.message()["sessions"][0]["text"] == "Needs your OK"
+n = len(alerts); ev("PermissionRequest", tool_name="Bash")
+assert len(alerts) == n  # the same wait: no second alert
 t[0] += 3; ev("PostToolUse"); t[0] += 30; ev("Stop")
-assert alerts[-1] == ("done", "flor", "Claude finished in flor")
+n = len(alerts); w.tick()
+assert len(alerts) == n and w.message()["sessions"][0]["state"] == "done"  # not yet: Claude may carry on
+t[0] += 5; ev("PostToolUse"); t[0] += 20; w.tick()
+assert len(alerts) == n  # it carried on: that Stop was only a step
+t[0] += 10; ev("Stop", last_assistant_message="All done, the tests pass."); t[0] += 16; w.tick()
+assert alerts[-1] == ("done", "flor", "Claude finished in flor") and len(alerts) == n + 1
+w.tick(); assert len(alerts) == n + 1  # only once
 n = len(alerts); ev("Notification", message="Claude is waiting for your input")
 assert len(alerts) == n and w.message()["sessions"][0]["state"] == "done"  # no second alert
-ev("UserPromptSubmit"); t[0] += 2; ev("Stop")
+ev("UserPromptSubmit"); t[0] += 2; ev("Stop"); t[0] += 16; w.tick()
 assert len(alerts) == n  # a quick answer: no alert
-w.hook({"hook_event_name": "UserPromptSubmit", "session_id": "s2", "cwd": "/home/x/api-server"})
+# a stop with a question (even a quick one) = needs you; read from the session log
+log_file = d / "session.jsonl"
+log_file.write_text("\n".join(json.dumps(x) for x in [
+    {"type": "user", "message": {"role": "user", "content": "fix it"}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Here's my plan:\n- step one"}]}},
+    {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read"}]}},
+    {"type": "user", "message": {"content": [{"type": "tool_result", "content": "..."}]}},
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "Plan:\n1. fix\n\n**Should I go ahead?**\n\nThe log helps."}]}},
+]) + "\n")
+ev("UserPromptSubmit"); t[0] += 2; ev("Stop", transcript_path=str(log_file)); t[0] += 16; w.tick()
+assert alerts[-1] == ("waiting", "flor", "Claude needs you in flor") and len(alerts) == n + 1
+assert w.message()["sessions"][0]["text"] == "Asked you something"
+# asking with buttons / a plan to approve: needs you at once
+n = len(alerts); ev("UserPromptSubmit"); ev("PreToolUse", tool_name="AskUserQuestion")
+assert len(alerts) == n + 1 and w.message()["sessions"][0]["text"] == "Has a question for you"
+ev("PostToolUse", tool_name="AskUserQuestion"); assert w.message()["sessions"][0]["state"] == "working"
+ev("PreToolUse", tool_name="ExitPlanMode"); assert len(alerts) == n + 2
+ev("PreToolUse", tool_name="Bash"); assert w.message()["sessions"][0]["state"] == "working"
+from claude_watch import _ends_with_question, _last_text
+assert _ends_with_question("Done.\nWant me to merge it?)") and not _ends_with_question("Fixed the ? bug.\nAll good.")
+assert _last_text(d / "missing.jsonl") == ""
+t[0] += 1; w.hook({"hook_event_name": "UserPromptSubmit", "session_id": "s2", "cwd": "/home/x/api-server"})
 assert [s["name"] for s in w.message()["sessions"]] == ["api-server", "flor"]
 ev("SessionEnd")
 assert [s["name"] for s in w.message()["sessions"]] == ["api-server"]

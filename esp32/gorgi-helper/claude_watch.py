@@ -9,6 +9,12 @@ Claude Code sends its events here through the hooks that claude_setup.py adds
 
 Each session is "working", "waiting" (for your answer or OK) or "done".
 Gorgi gets an alert when a session needs you, or finishes after working a while.
+
+Claude Code says "Stop" at the end of every reply, not only when the whole task
+is done (it also stops to report or to ask something, and may carry on by itself
+when a background job ends). So a "finished" alert waits STOP_QUIET seconds:
+if Claude works again in that time, there's no alert. If its last message ends
+with a question, the alert is "needs you" instead.
 """
 
 import asyncio
@@ -24,6 +30,8 @@ PORT = 47811
 MAX_SESSIONS = 5
 DONE_ALERT_AFTER = 20      # seconds of work before "finished" is worth an alert
 FORGET_AFTER = 3 * 3600    # done / idle sessions disappear after this
+STOP_QUIET = 15            # seconds of quiet after "Stop" before it counts as finished
+ASK_TOOLS = {"AskUserQuestion": "Has a question for you", "ExitPlanMode": "Plan ready for your OK"}
 
 
 def _project(cwd):
@@ -43,6 +51,47 @@ def _epoch(value):
         return int(dt.datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp())
     except ValueError:
         return 0
+
+
+def _ends_with_question(text):
+    """Does Claude's message end by asking something? (one of its last 3 lines ends with "?")"""
+    lines = [ln.strip().rstrip("*_`'\")” ").strip() for ln in str(text or "").splitlines()]
+    lines = [ln for ln in lines if ln]
+    return any(ln.endswith("?") for ln in lines[-3:])
+
+
+def _last_text(transcript_path, limit=256 * 1024):
+    """The text of Claude's last message in a session log (a .jsonl file), or ""."""
+    try:
+        with open(transcript_path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - limit))
+            tail = f.read().decode("utf-8", "replace")
+    except (OSError, TypeError, ValueError):
+        return ""
+    for line in reversed(tail.splitlines()):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") == "user" and not entry.get("isMeta"):
+            content = (entry.get("message") or {}).get("content")
+            if isinstance(content, str) or (isinstance(content, list) and any(
+                    isinstance(c, dict) and c.get("type") == "text" for c in content)):
+                return ""  # the user spoke after Claude's last text
+        if entry.get("type") != "assistant":
+            continue
+        content = (entry.get("message") or {}).get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            texts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+            if any(t.strip() for t in texts):
+                return "\n".join(texts)
+    return ""
 
 
 def _percent(window):
@@ -74,7 +123,7 @@ class ClaudeWatch:
         created = s is None
         if created:
             s = {"name": _project(data.get("cwd")), "state": "idle", "text": "", "since": self.clock(),
-                 "work_start": None, "seen": self.clock()}
+                 "work_start": None, "seen": self.clock(), "stop": None}
             self.sessions[sid] = s
         s["seen"] = self.clock()
         if data.get("cwd"):
@@ -86,6 +135,35 @@ class ClaudeWatch:
             return False
         s["state"], s["text"], s["since"] = state, text, self.clock()
         return True
+
+    def _need(self, s, text):
+        """The session needs you. Alerts only when it starts waiting (not again for the same wait)."""
+        was = s["state"]
+        changed = self._set(s, "waiting", text)
+        if changed and was != "waiting":
+            self.on_alert("waiting", s["name"], f"Claude needs you in {s['name']}")
+        return changed
+
+    def tick(self):
+        """Called every second or two: turns a quiet "Stop" into "finished" or "needs you"."""
+        now = self.clock()
+        changed = False
+        for s in list(self.sessions.values()):
+            stop = s.get("stop")
+            if not stop or now - stop["at"] < STOP_QUIET:
+                continue
+            s["stop"] = None
+            worked = stop["at"] - s["work_start"] if s["work_start"] else 0
+            s["work_start"] = None
+            last = stop["last"] if isinstance(stop["last"], str) else _last_text(stop["transcript"])
+            if s["state"] != "done":
+                continue
+            if _ends_with_question(last):
+                changed = self._need(s, "Asked you something") or changed
+            elif worked >= DONE_ALERT_AFTER:
+                self.on_alert("done", s["name"], f"Claude finished in {s['name']}")
+        if changed:
+            self.on_change()
 
     def hook(self, data):
         """A hook event from Claude Code."""
@@ -103,9 +181,17 @@ class ClaudeWatch:
             if event == "SessionStart":
                 changed = created
             elif event == "UserPromptSubmit":
+                s["stop"] = None
                 s["work_start"] = self.clock()
                 changed = self._set(s, "working")
+            elif event == "PreToolUse" and data.get("tool_name") in ASK_TOOLS:
+                s["stop"] = None
+                changed = self._need(s, ASK_TOOLS[data["tool_name"]])
+            elif event == "PermissionRequest":
+                s["stop"] = None
+                changed = self._need(s, "Needs your OK")
             elif event in ("PostToolUse", "PreToolUse"):
+                s["stop"] = None  # still working: that "Stop" wasn't the end
                 if s["state"] != "working":
                     if s["work_start"] is None:
                         s["work_start"] = self.clock()
@@ -121,15 +207,13 @@ class ClaudeWatch:
                     text = message[:40] or "Needs you"
                 # the "still waiting" reminder after a finished answer: it's already done
                 if not (s["state"] == "done" and "waiting for your input" in low):
-                    changed = self._set(s, "waiting", text)
-                    if changed:
-                        self.on_alert("waiting", s["name"], f"Claude needs you in {s['name']}")
+                    s["stop"] = None
+                    changed = self._need(s, text)
             elif event == "Stop":
-                worked = self.clock() - s["work_start"] if s["work_start"] else 0
-                s["work_start"] = None
                 changed = self._set(s, "done")
-                if changed and worked >= DONE_ALERT_AFTER:
-                    self.on_alert("done", s["name"], f"Claude finished in {s['name']}")
+                # decided later (tick), once Claude has been quiet for a while
+                s["stop"] = {"at": self.clock(), "transcript": data.get("transcript_path"),
+                             "last": data.get("last_assistant_message")}
         log.info("claude hook: %s (%s)", event, data.get("cwd") or "")
         if changed:
             self.on_change()
@@ -238,11 +322,17 @@ class ClaudeWatch:
             log.warning("can't listen for Claude Code on port %d: %s", PORT, e)
             return
         log.info("listening for Claude Code on 127.0.0.1:%d", PORT)
+        stop_event = stop_event or asyncio.Event()
         async with server:
-            if stop_event is None:
-                await server.serve_forever()
-            else:
-                await stop_event.wait()
+            while not stop_event.is_set():
+                try:
+                    await asyncio.wait_for(stop_event.wait(), 1)
+                except asyncio.TimeoutError:
+                    pass
+                try:
+                    self.tick()
+                except Exception as e:
+                    log.warning("claude tick failed: %s", e)
         log.info("stopped listening for Claude Code")
 
     async def _client(self, reader, writer):

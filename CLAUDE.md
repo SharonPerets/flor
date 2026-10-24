@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.1 released and confirmed by the user; merged to main)
+## Where things stand (4.3.3 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -150,11 +150,44 @@ Done and confirmed:
   - **Music bar folded** into a slim line (`tabs::drawMiniPlayer`, y 424); tap -> full bar for 10 s (`openMusicBar`).
     Face moved down a little (FACE_Y 56, subtitle 330..388, bar 392..476).
   - Time screen redraws only the changed part (rings / buttons / list): a full redraw flickered (start/stop focus).
+- **4.3.2 - Claude alert fixes** (helper only; confirmed: "finished a task and did not notify - looks good", i.e. no
+  alerts between steps):
+  - "Finished" fired after every step: Claude Code sends `Stop` at the end of every reply. Now a Stop waits
+    `STOP_QUIET` 15 s (`ClaudeWatch.tick()`, called each second by `serve()`); any tool use / prompt cancels it.
+    If the last message (`last_assistant_message`, else the transcript tail) ends with "?" in its last 3 lines
+    -> "needs you" ("Asked you something") instead of "finished".
+  - More "needs you": new hooks `PermissionRequest` and `PreToolUse` (matcher `AskUserQuestion|ExitPlanMode`).
+    `claude_setup.upgrade()` adds missing hooks at helper start for users connected by an older helper.
+    "Needs you" alerts only when a session starts waiting (no repeats for the same wait).
+  - No pop-up / spoken alerts at all while Gorgi isn't connected (`announce` checks `self.ws`; user asked
+    the same for timers/reminders).
+- **4.3.3 - one update window** (helper only; confirmed "updates looks good"; user chose "A": no auto-open, pop-up + one tray click):
+  - `update_window.py` (`--updates` process, replaces `progress_window.py`): JSON state lines on stdin
+    (rows helper/Gorgi now -> new + state, text, percent or "wait", button start/retry/close), words on stdout
+    ("ready", "start", "retry", "close"). The Windows self-test checks the "ready" round trip.
+  - Tray: one item "Update to X..." / "Check for updates..." -> `Helper.open_updates()`. Gorgi's Update button ->
+    `update_all()` -> `open_updates(start=True)`.
+  - `run_updates()`: helper step (download, `config["update_flow"] = {"version"}`, installer, quit) -> the new
+    helper's `update_loop()` sees `update_flow` (or the old `pending_gorgi_update`) -> `continue_after_restart()`
+    reopens the window -> `_update_gorgi_step()` (wait for Gorgi 60 s, send, then wait up to 180 s for `hello`
+    with the new version) -> "All done" + Close. Failures -> "Try again". Tests: `test_updates.py`.
+- **Still open: plan % on the Claude screen** shows only tokens. `claude-usage.json` said: "no saved Claude sign-in
+  found (or it has expired)", plan "Max" -> `~/.claude/.credentials.json` exists but its token is expired (the desktop
+  app doesn't refresh that file). Proposed to the user (waiting for A/B):
+  - **A (recommended)**: read the Claude desktop app's own claude.ai login cookie (`sessionKey`, Electron cookie DB in
+    %APPDATA%\Claude, DPAPI-protected key in "Local State"; read-only; may be locked while the app runs) and call
+    `https://claude.ai/api/organizations` -> `/api/organizations/{uuid}/usage` (`five_hour`/`seven_day` `utilization`,
+    `resets_at`), like github.com/jimdawdy-hub/claude-usage-tracker does with browser cookies (curl_cffi Firefox TLS
+    impersonation for Cloudflare). Fallbacks: OAuth file if fresh, then token counting.
+  - B: the helper refreshes the expired OAuth token itself (risk: can sign Claude Code out).
 - Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
 
-- **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main. Nothing is waiting.
+- **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
+- **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
+  ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
+- Waiting for the user's A/B choice for the plan % fix (see "Still open" above), then build it as 4.3.4.
 - Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
