@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.6 To-do screen released, waiting for the user to try it; 4.3.4 confirmed and merged)
+## Where things stand (4.6 To-do screen works ("Works good"); 4.6.1 face fix released, waiting for the user)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -219,6 +219,9 @@ Done and confirmed:
   fuzzy find by words (asks "Which one?" when unclear), `parse_spoken` ("buy milk tomorrow at 5" -> Buy milk, 17:00),
   list in the AI context. Old sketches (LittleFS /sketch, NVS "sketch") are deleted on first start (user OK'd).
   `ink_reader.py` and the Inking package removed. Tests: `tools/pc-tests` (todo_preview), `test_todolist.py`.
+- **4.6.1 - face fix**: user: "Works good" (4.6), but after adding from the face it stayed on "I'm listening...".
+  Cause (since 4.1!): `pclink.cpp` sent "voice"/"heard"/"say"/"level" to `onOther` (checked first), so the face
+  never got the conversation and waited for the 60 s safety timeout. Now the voice branch comes before onOther.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -227,8 +230,8 @@ Done and confirmed:
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
 - **4.3.4 is confirmed** (plan % works) and merged to main.
-- **4.6 (To-do screen) is released from branch `claude/project-thread-fs7qq5`** (with 4.4/4.5, whose Sketch it
-  replaces), waiting for the user's test. When confirmed: mark it here, merge the branch to main. If voice tasks
+- **4.6 (To-do screen) works** ("Works good"); **4.6.1** (face no longer stuck on "I'm listening...") released from
+  branch `claude/project-thread-fs7qq5` (with 4.4/4.5), waiting for the user's test. When confirmed: mark it here, merge the branch to main. If voice tasks
   come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
