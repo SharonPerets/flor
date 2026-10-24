@@ -58,13 +58,16 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
-- **Change screens**: tap an icon at the top (♪ music, face, weather, time, sketch, Claude), or swipe
-  sideways in the middle of the screen. Order: **Music ← Face → Weather → Time → Sketch → Claude**. Gorgi stays on the screen you leave it on (it switches to its face
-  when you talk to it or when a timer or reminder goes off).
-- **Music screen** (swipe right): album art, the song, and how far into it you are.
-- **Weather screen** (swipe left): now and the next 7 days. Tap the city name to pick another
-  city in Israel (Nahariya is the default). The forecast comes from
-  [Open-Meteo](https://open-meteo.com) and updates every 30 minutes.
+- **Change screens**: tap an icon in the top bar (music, face, time, sketch, Claude), or swipe sideways in the
+  middle of the screen. Order: **Music ← Face → Time → Sketch → Claude**. Gorgi stays on the screen you leave it on
+  (it switches to its face when you talk to it or when a timer or reminder goes off).
+- **Music line**: the music bar is folded into a slim "♪ Song - Artist ⏯" line at the bottom. Tap it to open the
+  full bar (buttons and volume) for 10 seconds.
+- **Action Center**: pull down from the top bar. A full screen with the time and date, **Sleep**, a small weather
+  chip (tap it for the forecast and to change the city) and **notifications**: an update that's ready (tap
+  **Update**: the PC helper first, then Gorgi) and things nobody saw (an alert that wasn't tapped within 10 minutes,
+  a Claude alert that came while Gorgi was busy). Clear one with its x. A small orange dot on the handle at the top
+  means there are notifications. Push it back up to close it.
 - **Time screen** (swipe left from the weather): timers, focus sessions and reminders.
   - Tap **1 / 5 / 10 min** to start a timer (up to 3 at once). Tap a ring to pause or resume it,
     tap its small **x** to cancel it.
@@ -92,13 +95,6 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **On a call**: when Teams uses your microphone, the top bar shows **On a call** in red, music pauses
   (and resumes after), Gorgi stays quiet (no spoken alerts), and a red **Mute / unmute** button next to
   the face toggles your Teams mic (Teams' Ctrl+Shift+M shortcut).
-- **Pull-down panel**: swipe down from the top bar (a tap there still switches screens). Push it back up or
-  tap outside to close it.
-  - **Sleep** turns the screen off. Any touch wakes Gorgi (that first touch only wakes it). A timer, reminder or
-    "Claude needs you" turns the screen on to show it, and it goes back to sleep once you tap it.
-  - **Update** (when a new version is out; a small orange dot at the top means one is waiting): one tap updates
-    the PC helper first, then Gorgi, by itself.
-  - A status line: Gorgi's version, Wi-Fi signal, and which PC is connected.
 - **The clock** comes from the internet (Israel time, summer/winter time automatic), or from the PC
   until the internet answers.
 - **Leave it alone**: after 1 minute Gorgi gets sleepy, after 3 minutes it falls asleep.
@@ -119,7 +115,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/wallclock.cpp` | The time of day from the internet (Israel time zone) |
 | `src/sketch.cpp` | The Sketch screen: toolbar, paper, gallery, packing drawings small |
 | `src/sketch_store.cpp` | Saves and loads sketches in flash (LittleFS) |
-| `src/tabs.cpp` | The screen icons in the top bar, and the Teams mute button |
+| `src/tabs.cpp` | The screen icons in the top bar, the slim music line, the Teams mute button |
+| `src/action_center.cpp` | The Action Center: notifications, weather, Sleep |
 | `src/claude_screen.cpp` | The Claude screen: sessions and usage |
 | `src/gfx.cpp` | Smooth-edged drawing (circles, rounded boxes, icons, text) |
 | `src/display.cpp` | Draws in fast memory, strip by strip, then copies to the screen |

@@ -24,7 +24,7 @@
 #include "display.h"
 #include "face.h"
 #include "music_screen.h"
-#include "panel.h"
+#include "action_center.h"
 #include "pclink.h"
 #include "sketch.h"
 #include "sketch_store.h"
@@ -61,8 +61,8 @@ constexpr uint32_t CONVERSATION_TIMEOUT_MS = 60 * 1000;
 // ---------- screens ----------
 // Swipe left/right in the middle of the screen to switch, in this order.
 // More screens can be added to this list later.
-enum class Page { Music, Face, Weather, Time, Sketch, Claude, Count };
-const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
+enum class Page { Music, Face, Time, Sketch, Claude, Count };  // the weather moved to the Action Center in 4.3
+const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
 Page page = Page::Face;
 bool musicDirty = true;      // the music screen needs drawing
 int musicProgressKey = -2;   // what the progress bar showed last
@@ -73,8 +73,6 @@ constexpr gfx::Rect MIDDLE{0, 44, 800, 332};  // the part of the screen that cha
 // Weather
 weather::Data wx;
 int wxCity = weather::DEFAULT_CITY;
-bool wxPicker = false;
-bool wxDirty = true;
 String wxStatus;
 uint32_t wxNextFetch = 0;  // 0 = as soon as Wi-Fi is up
 bool wxFetching = false;
@@ -100,16 +98,23 @@ int32_t claudeUsageAt = 0;
 bool claudeDirty = true;
 uint32_t claudeDrawnAt = 0;
 bool alertClaude = false;  // the alert on screen is from Claude Code
+String alertText, alertTitle;  // for a notification if nobody taps it
+uint8_t alertNotice = 0;
 String alertSession;       // ...for this session
 
 // A Teams call is going on (the helper notices the microphone)
 bool callOn = false;
 
-// The pull-down panel (swipe down from the top bar): Sleep, Update, status
-bool panelOpen = false, panelDirty = false;
-panel::View panelView;
+// The Action Center (pull down from the top bar): a full screen with notifications, weather, Sleep
+bool acOpen = false, acDirty = false;
+actioncenter::View acView;
+uint32_t acMinute = 0;      // the clock on it changes every minute
+char updateBusyText[48] = "";
+// Notifications (newest first): an update is ready, alerts nobody tapped...
+actioncenter::Notice notices[8];
+int noticeCount = 0;
 int touchEndY = 0;
-bool screenOff = false;        // put to sleep from the panel: backlight off until touched
+bool screenOff = false;        // put to sleep from the Action Center: backlight off until touched
 bool sleepAfterAlert = false;  // an alert woke the screen: back to sleep once it's dismissed
 bool updateAvailable = false, updateBusy = false;
 String updateVersion;
@@ -248,7 +253,6 @@ void endConversation() {
 // The screen's content will be drawn again in full on the next frame
 void markPageDirty(Page p) {
   if (p == Page::Face) face.invalidate();
-  if (p == Page::Weather) wxDirty = true;
   if (p == Page::Music) musicDirty = true;
   if (p == Page::Time) timeDirty = true;
   if (p == Page::Sketch) sketchFull = true;
@@ -256,7 +260,9 @@ void markPageDirty(Page p) {
 }
 
 void drawFrame(uint32_t now);
-void closePanel();
+void addNotice(uint8_t kind, const char* title, const char* text, const char* action);
+void addMissed(uint8_t kind, const char* title, const String& what);
+void closeActionCenter();
 void goToSleep();
 void sendTimeList();
 void sketchShown();
@@ -272,12 +278,15 @@ void showPage(Page p) {
   ui::setSubtitleVisible(p == Page::Face);
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
-    display::render(gfx::Rect{0, 44, ui::FACE_X, 274}, ui::BACKGROUND, [](gfx::Canvas&) {});
-    display::render(gfx::Rect{ui::FACE_X + 600, 44, 800 - ui::FACE_X - 600, 274}, ui::BACKGROUND,
-                    [](gfx::Canvas&) {});
-  } else if (p == Page::Weather) {
-    wxPicker = false;
-  } else if (p == Page::Time) {
+    display::render(gfx::Rect{0, ui::TOP_H, 800, ui::FACE_Y - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
+    display::render(gfx::Rect{0, ui::FACE_Y, ui::FACE_X, 330 - ui::FACE_Y}, ui::BACKGROUND, [](gfx::Canvas&) {});
+    display::render(gfx::Rect{ui::FACE_X + 600, ui::FACE_Y, 800 - ui::FACE_X - 600, 330 - ui::FACE_Y},
+                    ui::BACKGROUND, [](gfx::Canvas&) {});
+  } else {
+    // the subtitle reached a little lower than the other screens do
+    display::render(gfx::Rect{0, 376, 800, 12}, ui::BACKGROUND, [](gfx::Canvas&) {});
+  }
+  if (p == Page::Time) {
     timeConfirm = -1;
   } else if (p == Page::Sketch) {
     sketchShown();
@@ -317,7 +326,7 @@ void fetchWeather() {
   wxFetching = true;
   if (!wx.valid || wx.city != wxCity) {
     wxStatus = "Getting the weather...";
-    wxDirty = true;
+    acDirty = true;  // the Action Center shows the weather
   }
 }
 
@@ -325,7 +334,7 @@ void updateWeather(uint32_t now) {
   if (pclink::wifiState() != pclink::WifiState::Online) {
     if (!wx.valid && wxStatus != "Waiting for Wi-Fi...") {
       wxStatus = "Waiting for Wi-Fi...";
-      wxDirty = true;
+      acDirty = true;  // the Action Center shows the weather
     }
     return;
   }
@@ -341,35 +350,17 @@ void updateWeather(uint32_t now) {
     }
     wxNextFetch = now + (ok ? WX_REFRESH_MS : WX_RETRY_MS);
     if (!ok) wxStatus = "Can't get the weather right now (" + error + ")";
-    wxDirty = true;
+    acDirty = true;  // the Action Center shows the weather
     if (ok) sendWeather();
   }
 }
 
-void onWeatherTap(int x, int y) {
-  int city = wxCity;
-  switch (weather::tap(x, y, wxPicker, city)) {
-    case weather::Tap::OpenPicker:
-      wxPicker = true;
-      wxDirty = true;
-      break;
-    case weather::Tap::ClosePicker:
-      wxPicker = false;
-      wxDirty = true;
-      break;
-    case weather::Tap::PickCity:
-      wxPicker = false;
-      wxDirty = true;
-      if (city != wxCity) {
-        wxCity = city;
-        wxPrefs.putInt("city", city);
-        if (!wxFetching) fetchWeather();  // otherwise it fetches again when the current one ends
-        else if (!wx.valid || wx.city != wxCity) wxStatus = "Getting the weather...";
-      }
-      break;
-    case weather::Tap::None:
-      break;
-  }
+void setWeatherCity(int city) {
+  if (city == wxCity) return;
+  wxCity = city;
+  wxPrefs.putInt("city", city);
+  if (!wxFetching) fetchWeather();  // otherwise it fetches again when the current one ends
+  else if (!wx.valid || wx.city != wxCity) wxStatus = "Getting the weather...";
 }
 
 // ---------- firmware update over Wi-Fi ----------
@@ -396,7 +387,7 @@ void onUpdate(int percent, const String& message) {
   }
   if (!updating) {
     updating = true;
-    if (panelOpen) closePanel();
+    if (acOpen) closeActionCenter();
     if (screenOff) {
       screenOff = false;
       board::setBacklight(true);
@@ -544,7 +535,7 @@ void onTap(ui::Target target);
 void showTimeNote(const String& text) {
   timeNote = text;
   timeNoteUntil = millis() + 3000;
-  timeDirty = true;
+  // (drawTime notices what changed)
 }
 
 // Tells the helper what's set, so the AI knows (and can cancel things)
@@ -565,7 +556,7 @@ const char* dueKindName(alarms::Due::Kind k) {
 
 // An alert while the screen is off: turn it on, and back off once it's dismissed
 void alertWakesScreen() {
-  if (panelOpen) closePanel();
+  if (acOpen) closeActionCenter();
   if (!screenOff) return;
   screenOff = false;
   sleepAfterAlert = true;
@@ -580,6 +571,12 @@ void showAlert(const alarms::Due& d) {
   alertMoodBack = now + 2000;
   alertClaude = false;
   alertMood = d.kind == alarms::Due::Focus ? Mood::Excited : (d.kind == alarms::Due::Missed ? Mood::Sad : Mood::Happy);
+  alertText = d.text;
+  alertNotice = actioncenter::MISSED;
+  alertTitle = d.kind == alarms::Due::Timer      ? "Timer finished"
+               : d.kind == alarms::Due::Focus    ? "Focus session done"
+               : d.kind == alarms::Due::Reminder ? "Missed reminder"
+                                                 : "Missed while Gorgi was off";
   lastActivity = now;  // wakes Gorgi up
   moodHoldUntil = 0;
   showPage(Page::Face);
@@ -618,8 +615,11 @@ void endAlert(bool tapped) {
 }
 
 void updateAlert(uint32_t now) {
-  if (msSince(now, alertStart) > ALERT_GIVE_UP_MS) {
+  if (msSince(now, alertStart) > ALERT_GIVE_UP_MS) {  // nobody tapped it: keep it as a notification
+    const String text = alertText, title = alertTitle;
+    const uint8_t kind = alertNotice;
     endAlert(false);
+    addMissed(kind, title.c_str(), text);
     return;
   }
   if (alertMoodBack && (int32_t)(now - alertMoodBack) >= 0) {
@@ -655,14 +655,14 @@ void updateTime(uint32_t now) {
 
   if (alarms::version() != timeVersionSeen) {
     timeVersionSeen = alarms::version();
-    timeDirty = true;
+    // (drawTime notices what changed)
     timeConfirm = -1;
     sendTimeList();
   }
   if (timeNoteUntil && (int32_t)(now - timeNoteUntil) >= 0) {
     timeNoteUntil = 0;
     timeNote = "";
-    timeDirty = true;
+    // (drawTime notices what changed)
   }
 
   // something due: show it (after a conversation, not in the middle of one)
@@ -698,16 +698,16 @@ void onTimeTap(int x, int y) {
       break;
     case timescreen::Tap::Row:
       timeConfirm = t.index;
-      timeDirty = true;
+      // (drawTime notices what changed)
       break;
     case timescreen::Tap::Delete:
       timeConfirm = -1;
-      timeDirty = true;
+      // (drawTime notices what changed)
       alarms::cancel(timeView.rows[t.index].id);
       break;
     case timescreen::Tap::Keep:
       timeConfirm = -1;
-      timeDirty = true;
+      // (drawTime notices what changed)
       break;
     case timescreen::Tap::AskMe:  // talk right from here: back to the face, listening
       showPage(Page::Face);
@@ -718,23 +718,39 @@ void onTimeTap(int x, int y) {
   }
 }
 
+// Only the parts that changed are redrawn (a full redraw flickers on this screen)
+uint32_t timeButtonsKey = 0;
+
+uint32_t mix(uint32_t h, uint32_t v) { return (h ^ v) * 16777619u; }
+uint32_t mixText(uint32_t h, const char* s) {
+  while (s && *s) h = mix(h, (uint8_t)*s++);
+  return h;
+}
+
 void drawTime(uint32_t now) {
   alarms::fillView(timeView, now);
   timeView.confirmRow = timeConfirm;
   timeView.note = timeNoteUntil ? timeNote.c_str() : "";
-  uint32_t rings = timeView.ringCount;
-  for (int i = 0; i < timeView.ringCount; ++i)
-    rings = rings * 31 + timeView.rings[i].left * 2 + (timeView.rings[i].paused ? 1 : 0);
-  const uint32_t list = wallclock::valid() ? (uint32_t)(wallclock::now() / 60) : 1;
+  uint32_t rings = mixText(2166136261u + timeView.ringCount, timeView.note);
+  for (int i = 0; i < timeView.ringCount; ++i) {
+    const timescreen::Ring& r = timeView.rings[i];
+    rings = mix(mix(mix(rings, r.id), r.left * 2 + (r.paused ? 1 : 0)), r.total);
+  }
+  const uint32_t buttons = (timeView.focusRunning ? 1 : 0) | (timeView.timersFull ? 2 : 0) | (timeView.focusMinutes << 2);
+  uint32_t list = mix(wallclock::valid() ? (uint32_t)(wallclock::now() / 60) : 1, timeView.rowCount);
+  list = mix(mix(mix(list, timeView.confirmRow + 1), timeView.moreRows), timeView.focusToday);
+  for (int i = 0; i < timeView.rowCount; ++i) list = mixText(mix(list, timeView.rows[i].id), timeView.rows[i].when);
   auto draw = [](gfx::Canvas& c) { timescreen::draw(c, timeView); };
   if (timeDirty) {
     display::render(timescreen::AREA, ui::BACKGROUND, draw);
   } else {
     if (rings != timeRingsKey) display::render(timescreen::RINGS_AREA, ui::BACKGROUND, draw);
+    if (buttons != timeButtonsKey) display::render(timescreen::BUTTONS_AREA, ui::BACKGROUND, draw);
     if (list != timeListKey) display::render(timescreen::LIST_AREA, ui::BACKGROUND, draw);
   }
   timeDirty = false;
   timeRingsKey = rings;
+  timeButtonsKey = buttons;
   timeListKey = list;
 }
 
@@ -1001,6 +1017,49 @@ void updateSketch(uint32_t now) {
   if (skChanged && !touching && msSince(now, skLastStroke) > SKETCH_SAVE_AFTER_MS) sketchSave();
 }
 
+// ---------- notifications (shown in the Action Center) ----------
+
+void noticesChanged() {
+  ui::setNoticeDot(noticeCount > 0);
+  acDirty = true;
+}
+
+void removeNotice(int i) {
+  if (i < 0 || i >= noticeCount) return;
+  for (int k = i; k + 1 < noticeCount; ++k) notices[k] = notices[k + 1];
+  --noticeCount;
+  noticesChanged();
+}
+
+void removeNotices(uint8_t kind) {
+  for (int i = noticeCount - 1; i >= 0; --i)
+    if (notices[i].kind == kind) removeNotice(i);
+}
+
+// Newest first. Only one "update" notice at a time.
+void addNotice(uint8_t kind, const char* title, const char* text, const char* action) {
+  if (kind == actioncenter::UPDATE) removeNotices(actioncenter::UPDATE);
+  const int max = (int)(sizeof notices / sizeof notices[0]);
+  if (noticeCount == max) --noticeCount;  // the oldest goes
+  for (int k = noticeCount; k > 0; --k) notices[k] = notices[k - 1];
+  actioncenter::Notice& n = notices[0];
+  n.kind = kind;
+  snprintf(n.title, sizeof n.title, "%s", ui::toAscii(String(title)).c_str());
+  snprintf(n.text, sizeof n.text, "%s", ui::toAscii(String(text)).c_str());
+  snprintf(n.action, sizeof n.action, "%s", action);
+  ++noticeCount;
+  noticesChanged();
+}
+
+// Something nobody saw (an alert that gave up, or came while Gorgi was busy)
+void addMissed(uint8_t kind, const char* title, const String& what) {
+  char hm[8];
+  wallclock::hhmm(hm, sizeof hm);
+  String text = what;
+  if (hm[0]) text += String("  (") + hm + ")";
+  addNotice(kind, title, text.c_str(), "");
+}
+
 // ---------- Claude Code and calls (from the helper) ----------
 
 uint8_t claudeState(const char* s) {
@@ -1033,6 +1092,9 @@ void showClaudeAlert(const String& name, bool waiting, const String& text) {
   alertOn = true;
   alertClaude = true;
   alertSession = name;
+  alertText = text;
+  alertNotice = actioncenter::CLAUDE;
+  alertTitle = waiting ? "Claude needed you" : "Claude finished";
   alertStart = alertNudge = now;
   alertMoodBack = now + 2000;
   alertMood = waiting ? Mood::Surprised : Mood::Excited;
@@ -1063,8 +1125,15 @@ void onOther(const char* type, JsonObjectConst msg) {
       if (alertOn && alertClaude && alertSession == out.name && out.state == claudescreen::WORKING) endAlert(false);
     }
     JsonObjectConst u = msg["usage"];
-    claudeView.usage.known = !u.isNull() && u["five"].is<float>();
-    if (claudeView.usage.known) {
+    const bool tokens = !u.isNull() && strcmp(u["mode"] | "percent", "tokens") == 0;
+    claudeView.usage.known = !u.isNull() && (tokens || u["five"].is<float>());
+    claudeView.usage.tokens = tokens;
+    snprintf(claudeView.usage.plan, sizeof claudeView.usage.plan, "%s", (const char*)(u["plan"] | ""));
+    if (tokens) {
+      claudescreen::formatTokens(u["five_tokens"] | 0u, claudeView.usage.fiveTokens, sizeof claudeView.usage.fiveTokens);
+      claudescreen::formatTokens(u["week_tokens"] | 0u, claudeView.usage.weekTokens, sizeof claudeView.usage.weekTokens);
+      claudeUsageAt = u["at"] | 0;
+    } else if (claudeView.usage.known) {
       claudeView.usage.five = u["five"] | 0.0f;
       claudeView.usage.week = u["week"] | 0.0f;
       formatWhen(u["five_reset"] | 0, claudeView.usage.fiveReset, sizeof claudeView.usage.fiveReset);
@@ -1074,21 +1143,31 @@ void onOther(const char* type, JsonObjectConst msg) {
     claudeDirty = true;
     updateClaudeBadge();
   } else if (strcmp(type, "claude_alert") == 0) {
-    if (inConversation || updating || (alertOn && !alertClaude)) return;  // the badge still shows it
     const bool waiting = strcmp(msg["kind"] | "done", "waiting") == 0;
+    if (inConversation || updating || (alertOn && !alertClaude)) {  // busy: keep it for the Action Center
+      addMissed(actioncenter::CLAUDE, waiting ? "Claude needed you" : "Claude finished",
+                String((const char*)(msg["text"] | "")));
+      return;
+    }
     showClaudeAlert(String((const char*)(msg["name"] | "")), waiting, String((const char*)(msg["text"] | "")));
   } else if (strcmp(type, "update_info") == 0) {
     updateAvailable = msg["available"] | false;
     updateBusy = msg["busy"] | false;  // the helper says when it's done (or failed)
     updateVersion = (const char*)(msg["version"] | "");
-    ui::setUpdateDot(updateAvailable);
-    panelDirty = true;
+    if (updateAvailable) {
+      char text[64];
+      snprintf(text, sizeof text, "Gorgi %s - the PC helper first, then Gorgi", updateVersion.c_str());
+      addNotice(actioncenter::UPDATE, "Update ready", text, "Update");
+    } else {
+      removeNotices(actioncenter::UPDATE);
+    }
+    acDirty = true;
   } else if (strcmp(type, "update_status") == 0) {
     updateBusy = true;
-    snprintf(panelView.busy, sizeof panelView.busy, "%s", (const char*)(msg["text"] | ""));
-    panelDirty = true;
+    snprintf(updateBusyText, sizeof updateBusyText, "%s", (const char*)(msg["text"] | ""));
+    acDirty = true;
     if (!alertOn && !inConversation) {
-      ui::setSubtitle(String("Updating: ") + panelView.busy);
+      ui::setSubtitle(String("Updating: ") + updateBusyText);
       moodHoldUntil = millis() + 60000;
     }
   } else if (strcmp(type, "call") == 0) {
@@ -1111,18 +1190,24 @@ void drawClaude(uint32_t now) {
   display::render(claudescreen::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { claudescreen::draw(c, claudeView); });
 }
 
-// ---------- pull-down panel, sleep ----------
+// ---------- Action Center, notifications, sleep ----------
 
-void openPanel() {
-  panelOpen = true;
-  panelDirty = true;
-  pclink::sendCommand("check_updates");  // so "Update" is up to date
+void openActionCenter() {
+  acOpen = true;
+  acDirty = true;
+  acView.weatherOpen = acView.cityPicker = false;
+  pclink::sendCommand("check_updates");  // so an update shows up if there is one
 }
 
-void closePanel() {
-  if (!panelOpen) return;
-  panelOpen = false;
-  markPageDirty(page);  // the screen underneath comes back
+void closeActionCenter() {
+  if (!acOpen) return;
+  acOpen = false;
+  // it covered everything: the top bar, the screen and the music line come back
+  ui::redrawAll();
+  if (page == Page::Face) {
+    display::render(gfx::Rect{0, ui::TOP_H, 800, 330 - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
+  }
+  markPageDirty(page);
 }
 
 void goToSleep() {
@@ -1141,31 +1226,52 @@ void wakeScreen() {
   wakeUp();
 }
 
-void onPanelRelease() {
-  if (touchEndY - touchY0 < -40) {  // pushed back up
-    closePanel();
+void onActionCenterRelease() {
+  if (touchEndY - touchY0 < -60) {  // pushed back up
+    closeActionCenter();
     return;
   }
-  switch (panel::tap(touchX0, touchY0)) {
-    case panel::Tap::Sleep:
-      closePanel();
+  const actioncenter::TapResult t = actioncenter::tap(touchX0, touchY0, acView);
+  switch (t.what) {
+    case actioncenter::Tap::Sleep:
+      closeActionCenter();
       goToSleep();
+      return;
+    case actioncenter::Tap::Weather:
+      acView.weatherOpen = true;
       break;
-    case panel::Tap::Update:
-      if (!updateAvailable || updateBusy || !pclink::helperConnected()) return;
-      pclink::sendCommand("update");
-      updateBusy = true;
-      snprintf(panelView.busy, sizeof panelView.busy, "Starting...");
-      closePanel();
-      showPage(Page::Face);
-      say(Mood::Happy, "Updating! The PC helper goes first, then me.");
+    case actioncenter::Tap::Back:
+      acView.weatherOpen = acView.cityPicker = false;
       break;
-    case panel::Tap::Outside:
-      closePanel();
+    case actioncenter::Tap::OpenPicker:
+      acView.cityPicker = true;
       break;
-    case panel::Tap::None:
+    case actioncenter::Tap::ClosePicker:
+      acView.cityPicker = false;
       break;
+    case actioncenter::Tap::PickCity:
+      acView.cityPicker = false;
+      setWeatherCity(t.index);
+      break;
+    case actioncenter::Tap::Action:  // only updates have a button for now
+      if (notices[t.index].kind == actioncenter::UPDATE && updateAvailable && !updateBusy &&
+          pclink::helperConnected()) {
+        pclink::sendCommand("update");
+        updateBusy = true;
+        snprintf(updateBusyText, sizeof updateBusyText, "Starting...");
+        closeActionCenter();
+        showPage(Page::Face);
+        say(Mood::Happy, "Updating! The PC helper goes first, then me.");
+        return;
+      }
+      break;
+    case actioncenter::Tap::Dismiss:
+      removeNotice(t.index);
+      break;
+    case actioncenter::Tap::None:
+      return;
   }
+  acDirty = true;
 }
 
 // ---------- touch ----------
@@ -1274,7 +1380,7 @@ void handleTouch(uint32_t now) {
     return;
   }
 
-  if (panelOpen) {  // the panel takes every touch until it closes
+  if (acOpen) {  // the Action Center takes every touch until it closes
     if (tp.pressed && !touching) {
       touching = true;
       touchX0 = tp.x;
@@ -1284,7 +1390,7 @@ void handleTouch(uint32_t now) {
       touchEndY = tp.y;
     } else if (touching) {
       touching = false;
-      onPanelRelease();
+      onActionCenterRelease();
     }
     return;
   }
@@ -1298,6 +1404,9 @@ void handleTouch(uint32_t now) {
     touchY0 = tp.y;
     swiping = false;
     ui::showPressed(touchTarget);
+    if (touchTarget == ui::Target::Prev || touchTarget == ui::Target::PlayPause || touchTarget == ui::Target::Next ||
+        touchTarget == ui::Target::Volume)
+      ui::openMusicBar();  // using it keeps it open
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
     if (page == Page::Sketch && touchTarget == ui::Target::Face) sketchBegin(tp.x, tp.y);
@@ -1323,11 +1432,11 @@ void handleTouch(uint32_t now) {
       sketchMove(tp.x, tp.y);
       return;
     }
-    // pulling down from the top bar opens the panel
-    if (touchY0 < ui::FACE_Y && tp.y - touchY0 > 50 && abs(tp.y - touchY0) > abs(tp.x - touchX0)) {
+    // pulling down from the top bar opens the Action Center
+    if (touchY0 < ui::TOP_H && tp.y - touchY0 > 50 && abs(tp.y - touchY0) > abs(tp.x - touchX0)) {
       touchUsed = true;
       touchTarget = ui::Target::None;
-      openPanel();
+      openActionCenter();
       return;
     }
     const int dx = tp.x - touchX0;
@@ -1385,12 +1494,15 @@ void handleTouch(uint32_t now) {
       if (t >= 0 && t < (int)Page::Count) showPage((Page)t);
       return;
     }
+    if (released == ui::Target::Mini) {  // the slim music line: open the full bar for a while
+      ui::openMusicBar();
+      return;
+    }
     if (released == ui::Target::CallMute) {
       pclink::sendCommand("teams_mute");
       return;
     }
     if (released == ui::Target::Face && page != Page::Face) {
-      if (!longPressDone && page == Page::Weather) onWeatherTap(touchX0, touchY0);
       if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
       if (page == Page::Sketch) onSketchTap(touchX0, touchY0);
       return;
@@ -1467,39 +1579,46 @@ void fatal(const char* msg) {
   while (true) delay(1000);
 }
 
-void drawPanel() {
-  panelView.update = updateBusy ? panel::Update::Busy
-                     : updateAvailable ? panel::Update::Available
-                     : pclink::helperConnected() ? panel::Update::UpToDate : panel::Update::Unknown;
-  snprintf(panelView.newVersion, sizeof panelView.newVersion, "%s", updateVersion.c_str());
+void drawActionCenter() {
+  char hm[8];
+  wallclock::hhmm(hm, sizeof hm);
+  snprintf(acView.time, sizeof acView.time, "%s", hm[0] ? hm : "--:--");
+  acView.date[0] = 0;
+  if (wallclock::valid()) {
+    const time_t t = wallclock::now();
+    struct tm lt;
+    localtime_r(&t, &lt);
+    strftime(acView.date, sizeof acView.date, "%a, %d %b", &lt);
+    if (acView.date[5] == '0') memmove(acView.date + 5, acView.date + 6, strlen(acView.date + 5));  // "Fri, 4 Oct"
+  }
+  acView.wx = &wx;
+  acView.city = wxCity;
+  acView.wxStatus = wxStatus.c_str();
+  acView.noticeCount = noticeCount < actioncenter::MAX_NOTICES ? noticeCount : actioncenter::MAX_NOTICES;
+  for (int i = 0; i < acView.noticeCount; ++i) acView.notices[i] = notices[i];
+  acView.busy = updateBusy;
   const int rssi = pclink::wifiRssi();
   const char* wifi = rssi == 0 ? "no Wi-Fi" : rssi > -60 ? "Wi-Fi good" : rssi > -72 ? "Wi-Fi OK" : "Wi-Fi weak";
   if (pclink::helperConnected())
-    snprintf(panelView.status, sizeof panelView.status, "Gorgi %s  -  %s  -  PC: %s connected", GORGI_VERSION, wifi,
+    snprintf(acView.status, sizeof acView.status, "Gorgi %s  -  %s  -  PC: %s connected", GORGI_VERSION, wifi,
              ui::toAscii(pcName).c_str());
   else
-    snprintf(panelView.status, sizeof panelView.status, "Gorgi %s  -  %s  -  PC not connected", GORGI_VERSION, wifi);
-  if (!pclink::helperConnected() && !updateBusy) panelView.update = panel::Update::Unknown;
-  display::render(panel::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { panel::draw(c, panelView); });
+    snprintf(acView.status, sizeof acView.status, "Gorgi %s  -  %s  -  PC not connected", GORGI_VERSION, wifi);
+  display::render(actioncenter::AREA, ui::BACKGROUND, [](gfx::Canvas& c) { actioncenter::draw(c, acView); });
 }
 
 void drawFrame(uint32_t now) {
-  if (panelOpen) {  // the screen underneath waits until the panel closes
-    if (panelDirty) {
-      panelDirty = false;
-      drawPanel();
+  if (acOpen) {  // it covers the whole screen: everything else waits until it closes
+    const uint32_t minute = wallclock::valid() ? (uint32_t)(wallclock::now() / 60) : 0;
+    if (acDirty || minute != acMinute) {
+      acDirty = false;
+      acMinute = minute;
+      drawActionCenter();
     }
-    ui::update(now);
     return;
   }
   if (page == Page::Face) {
     face.render(lcd, ui::FACE_X, ui::FACE_Y, now);
-  } else if (page == Page::Weather) {
-    if (wxDirty) {
-      wxDirty = false;
-      display::render(weather::AREA, ui::BACKGROUND,
-                      [](gfx::Canvas& c) { weather::draw(c, wx, wxCity, wxPicker, wxStatus.c_str()); });
-    }
   } else if (page == Page::Time) {
     drawTime(now);
   } else if (page == Page::Sketch) {

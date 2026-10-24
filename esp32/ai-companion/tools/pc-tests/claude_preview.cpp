@@ -23,6 +23,9 @@ int main() {
   v.sessions[2] = S("scripts", DONE, "", 3000, "12:05"); v.sessions[3] = S("a-very-long-project-name-here", IDLE, "", -1, ""); v.count = 4;
   v.usage.known = true; v.usage.five = 62; v.usage.week = 93; snprintf(v.usage.fiveReset, 20, "18:40"); snprintf(v.usage.weekReset, 20, "Fri 09:00"); v.usage.age = 130;
   save("claude.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &v);
+  snprintf(v.usage.plan, 12, "Max");
+  View t2 = v; t2.usage.tokens = true; formatTokens(1234567, t2.usage.fiveTokens, 12); formatTokens(18400000, t2.usage.weekTokens, 12);
+  save("claude_tokens.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &t2);
   View e; e.pc = true; e.hooked = false;
   save("claude_empty.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &e);
   save("tabs.ppm", 0, 300, [](gfx::Canvas& c, void*) {

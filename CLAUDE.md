@@ -22,6 +22,10 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - The user is not a programmer: explain in plain language, short, outcome first. Mobile app.
 - **Updates go over Wi-Fi only** (the user asked, after 3.8.90): ship every change as a normal release
   (3.9, 3.9.1, ...), not a USB test build.
+- **When the user confirms a release works** ("ok", "works", "looks good"), always, without asking: mark it
+  confirmed in this file (Where things stand + Handover), merge the branch to main (PR via `gh api`, merge), check
+  that the release job on main only skipped, and confirm that everything is pushed. The user starts new sessions
+  often, so this file must always say where things stand.
 - The user tests on the real device and reports back. You can't see the device: ask for photos or
   the Serial log when something's off.
 - Personality: Gorgi is a cheerful buddy, English. The user does **not** want greetings or break reminders.
@@ -68,8 +72,13 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
 - The backlight is only on/off (CH422G pin), it can't be dimmed in hardware: "dim" means darker drawing.
 - 4.0 helper update: "Update Gorgi Helper" seemed to do nothing at first (no progress window visible);
   it sorted itself out. If it comes back, ask for `gorgi-helper.log` (tray -> Open settings folder).
+- **The helper must be able to quit**: every task in the main `gather` must end when `stop_event` is set. In 4.1-4.3
+  `claude_watch.serve()` ran forever, so after starting its installer the old helper stayed alive ("Downloading..."
+  in the tray), and the new one quit at once ("already running"). Fixed in 4.3.1: serve stops with the event,
+  `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
+  runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.2 released and confirmed by the user ("looks good"); 4.1 + 4.2 merged to main)
+## Where things stand (4.3.1 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -110,7 +119,7 @@ Done and confirmed:
     alerts or pop-ups, red mute button next to the face -> `cmd teams_mute` -> Ctrl+Shift+M sent to the Teams
     window. Mute is a "try" (no mute state shown). Better later: Teams' third-party device API
     (ws://127.0.0.1:8124, needs enabling in Teams) gives real mute state and in-meeting status.
-- **4.2 - pull-down panel** (`panel.cpp`): swipe down from the top bar (drag > 50 px down from y < 44), close by
+- **4.2 - pull-down panel** (replaced by the Action Center in 4.3; `panel.cpp` now only draws the top handle): swipe down from the top bar (drag > 50 px down from y < 44), close by
   pushing up or tapping outside; drawn over the page (page drawing paused, page marked dirty on close).
   - **Sleep**: backlight off, phase Asleep; any touch wakes (consumed). Timer/reminder/Claude alerts turn the screen
     on and it goes back to sleep after the alert is dismissed (`sleepAfterAlert`).
@@ -120,7 +129,34 @@ Done and confirmed:
     the firmware to Gorgi by itself. Orange dot on the top handle when an update is waiting.
   - Status line: version, Wi-Fi signal (RSSI), PC name.
   - The pull-down panel from the ideas list is partly done; still open: quiet mode, lock/sleep PC, big volume.
-- Screens now: **Music ← Face → Weather → Time → Sketch → Claude** (icon tabs at the top).
+- **4.2.1 - usage fix**: the user runs Claude Code in the **Claude desktop app** (Code tab), which has **no status
+  line**, so usage never arrived (hooks work fine there). Now `usage_fetch.py` reads the PC app's saved sign-in
+  (`~/.claude/.credentials.json`, `claudeAiOauth.accessToken`, read-only, never refreshed) and asks
+  `https://api.anthropic.com/api/oauth/usage` (unofficial, `anthropic-beta: oauth-2025-04-20`) every 3 min
+  (`five_hour`/`seven_day` `utilization` + `resets_at`). Fallback: tokens from `~/.claude/projects/*/*.jsonl`
+  (input+output+cache creation, last 5 h / 7 days) shown as amounts. Plan name ("Max") next to "Usage" so the
+  user can see which account it is: only the PC app's account, never the browser one (user asked for that).
+  Last result in `claude-usage.json` (helper settings folder, no token) for debugging. The user has a Max plan.
+- **4.3 - top bar vs Action Center** (user's notes from a video):
+  - Top bar = icons only (clock, countdown chip, tabs ♪ ☺ ⏱ ✎ ✳ with highlight + teal underline, talk pill, a thin
+    line under it). Handle dot = there are notifications. `CLOCK_AREA` now stops at x 248 (it used to wipe the
+    first tab icon when the countdown appeared - fixed).
+  - **Action Center** (`action_center.cpp`) replaces the 4.2 panel: a full 800x480 screen (ui::update is paused
+    while open, `ui::redrawAll()` on close): big time + date, small weather chip (tap -> forecast with Back and the
+    city picker; the user rarely uses weather, so it's hidden until tapped), Sleep, full-width notifications.
+    Notifications (main.cpp `notices[]`): UPDATE (from `update_info`, button "Update"), MISSED (an alert nobody
+    tapped in 10 min), CLAUDE (a Claude alert while Gorgi was busy). x clears one.
+  - **No Weather tab** any more (fetching continues: the chip, the AI).
+  - **Music bar folded** into a slim line (`tabs::drawMiniPlayer`, y 424); tap -> full bar for 10 s (`openMusicBar`).
+    Face moved down a little (FACE_Y 56, subtitle 330..388, bar 392..476).
+  - Time screen redraws only the changed part (rings / buttons / list): a full redraw flickered (start/stop focus).
+- Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
+
+## Handover for the next session (2026-10-24)
+
+- **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main. Nothing is waiting.
+- Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
+- Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
@@ -128,7 +164,7 @@ Lessons from 3.9 (keep for future screens):
 
 ## Next steps (chosen by the user, in this order; plan each one with the user before coding)
 
-Planned screen order when all exist: **Music ← Face → Weather → Time → Sketch** (dots in the top bar).
+Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs; weather lives in the Action Center).
 
 1. ~~**Time screen**~~ - done in 3.9 (see above).
 2. ~~**Sketch pad**~~ - done in 4.0 (the AI-guess bonus was declined).
@@ -145,7 +181,7 @@ Planned screen order when all exist: **Music ← Face → Weather → Time → S
 - **Next meeting countdown** (Outlook calendar, "Join" button) - suggested with 4.1, a good next step.
 - **Gorgi dances** to the music beat; **focus music** (playlist starts with a focus session);
   **build/PR watcher** (GitHub CI results) - suggested with 4.1.
-- **More for the pull-down panel**: quiet mode, lock/sleep PC, big volume.
+- **More for the Action Center**: quiet mode, lock/sleep PC, big volume; more notification kinds.
 - **Smooth sliding between screens**: tried twice (3.7 slide, 3.7.9x new driver) and dropped; see lessons.
 
 Not wanted (don't suggest again): greetings, break reminders.

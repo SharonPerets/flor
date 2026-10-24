@@ -64,6 +64,7 @@ class ClaudeWatch:
         self.usage = None    # {"five", "five_reset", "week", "week_reset", "at"}
         self.model = ""
         self.hooked = False  # we've heard from Claude Code
+        self.log_dirs = set()  # folders with Claude Code's session logs
 
     # ------------------------------------------------------------ events
 
@@ -91,6 +92,8 @@ class ClaudeWatch:
         if not isinstance(data, dict):
             return
         self.hooked = True
+        if data.get("transcript_path"):  # where this Claude keeps its logs (for counting tokens)
+            self.log_dirs.add(str(PurePath(str(data["transcript_path"])).parent.parent))
         event = data.get("hook_event_name") or ""
         changed = False
         if event == "SessionEnd":
@@ -144,23 +147,43 @@ class ClaudeWatch:
             five, week = limits.get("five_hour"), limits.get("seven_day")
             p5, p7 = _percent(five), _percent(week)
             if p5 is not None or p7 is not None:
-                old = self.usage
-                self.usage = {
-                    "five": round(p5 if p5 is not None else (old or {}).get("five", 0), 1),
-                    "five_reset": _epoch((five or {}).get("resets_at")),
-                    "week": round(p7 if p7 is not None else (old or {}).get("week", 0), 1),
-                    "week_reset": _epoch((week or {}).get("resets_at")),
-                    "at": int(self.clock()),
-                }
-                if (not old or round(old["five"]) != round(self.usage["five"])
-                        or round(old["week"]) != round(self.usage["week"])
-                        or self.clock() - old["at"] > 300):
-                    self.on_change()
+                self.set_percent(p5, (five or {}).get("resets_at"), p7, (week or {}).get("resets_at"), "status line")
         return self.status_line()
+
+    # ------------------------------------------------------------ usage (from the status line, Anthropic, or logs)
+
+    def set_percent(self, p5, reset5, p7, reset7, source, plan=None):
+        """Plan usage in percent (the best kind)."""
+        old = self.usage or {}
+        self.usage = {
+            "mode": "percent",
+            "five": round(p5 if p5 is not None else old.get("five", 0), 1),
+            "five_reset": _epoch(reset5),
+            "week": round(p7 if p7 is not None else old.get("week", 0), 1),
+            "week_reset": _epoch(reset7),
+            "at": int(self.clock()),
+            "plan": plan or old.get("plan", ""),
+            "source": source,
+        }
+        if (old.get("mode") != "percent" or round(old.get("five", -1)) != round(self.usage["five"])
+                or round(old.get("week", -1)) != round(self.usage["week"]) or self.clock() - old.get("at", 0) > 300
+                or old.get("plan") != self.usage["plan"]):
+            self.on_change()
+
+    def set_tokens(self, five_tokens, week_tokens, plan=None):
+        """Only token amounts from the logs (used when percentages can't be had)."""
+        old = self.usage or {}
+        if old.get("mode") == "percent" and self.clock() - old.get("at", 0) < 15 * 60:
+            return  # recent percentages are better
+        self.usage = {"mode": "tokens", "five_tokens": int(five_tokens), "week_tokens": int(week_tokens),
+                      "at": int(self.clock()), "plan": plan or old.get("plan", ""), "source": "logs"}
+        if (old.get("mode") != "tokens" or old.get("five_tokens") != self.usage["five_tokens"]
+                or old.get("week_tokens") != self.usage["week_tokens"]):
+            self.on_change()
 
     def status_line(self):
         parts = [self.model] if self.model else []
-        if self.usage:
+        if self.usage and self.usage.get("mode") == "percent":
             parts.append(f"5h {self.usage['five']:.0f}%")
             parts.append(f"week {self.usage['week']:.0f}%")
         return " | ".join(parts) or "Gorgi"
@@ -181,7 +204,7 @@ class ClaudeWatch:
                "sessions": [{"name": s["name"][:27], "state": s["state"], "text": s["text"][:47],
                              "since": int(s["since"])} for s in self._visible()]}
         if self.usage:
-            msg["usage"] = dict(self.usage)
+            msg["usage"] = {k: v for k, v in self.usage.items() if k != "source"}
         return msg
 
     def summary(self):
@@ -196,15 +219,19 @@ class ClaudeWatch:
                         "done": f"done {mins} min ago"}.get(s["state"], "idle")
                 parts.append(f"{s['name']}: {what}")
             lines.append("Claude Code sessions on the PC: " + "; ".join(parts) + ".")
-        if self.usage:
-            u = self.usage
+        u = self.usage
+        if u and u.get("mode") == "percent":
             lines.append(f"Claude plan usage: {u['five']:.0f}% of the 5-hour limit, {u['week']:.0f}% of the weekly "
                          "limit.")
+        elif u:
+            lines.append(f"Claude Code used about {u['five_tokens']:,} tokens in the last 5 hours and "
+                         f"{u['week_tokens']:,} in the last 7 days (plan percentages aren't available).")
         return "\n".join(lines)
 
     # ------------------------------------------------------------ the little web server
 
-    async def serve(self):
+    async def serve(self, stop_event=None):
+        """Listens until stop_event is set (it must stop, or the helper can't quit to update itself)."""
         try:
             server = await asyncio.start_server(self._client, "127.0.0.1", PORT)
         except OSError as e:
@@ -212,7 +239,11 @@ class ClaudeWatch:
             return
         log.info("listening for Claude Code on 127.0.0.1:%d", PORT)
         async with server:
-            await server.serve_forever()
+            if stop_event is None:
+                await server.serve_forever()
+            else:
+                await stop_event.wait()
+        log.info("stopped listening for Claude Code")
 
     async def _client(self, reader, writer):
         try:

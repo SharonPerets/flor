@@ -86,7 +86,11 @@ Claude Code's settings (`%USERPROFILE%\.claude\settings.json`; your own settings
 made). Restart open Claude Code sessions afterwards. **Disconnect** in the same place removes them.
 
 - When a session needs your OK or answer, or finishes after working a while, Gorgi shows it and says it.
-- Claude Code's status line shows the model and usage (e.g. `Opus | 5h 62% | week 23%`).
+- **Usage** (5-hour and weekly %, like Settings → Usage) is read for the Claude account signed in to Claude
+  **on this PC** (not your browser): the helper reads the PC's saved Claude sign-in and asks Anthropic for the
+  numbers every few minutes. This isn't an official feature and may stop working one day; then Gorgi shows the
+  tokens counted from Claude Code's own logs instead. The last result is in `claude-usage.json` (settings folder).
+- In the terminal version of Claude Code, the status line also shows the model and usage (e.g. `Opus | 5h 62% | week 23%`).
 - Ask Gorgi "how much Claude usage do I have left?" or "is Claude done?".
 
 ## Teams calls

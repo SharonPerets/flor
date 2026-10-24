@@ -50,6 +50,8 @@ struct View {
 constexpr gfx::Rect AREA{0, 44, 800, 332};
 // Redrawn every second while something counts down
 constexpr gfx::Rect RINGS_AREA{0, 44, 536, 264};
+// The buttons under the rings ("Start focus" turns into "Focusing...")
+constexpr gfx::Rect BUTTONS_AREA{0, 308, 536, 68};
 // The reminder list (redrawn every minute: "In 5 min" changes)
 constexpr gfx::Rect LIST_AREA{536, 44, 264, 332};
 

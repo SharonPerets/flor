@@ -30,15 +30,15 @@ const Color ACCENT = gfx::rgb(0x4FE3D6);
 const Color ACCENT_PRESSED = gfx::rgb(0x8FF0E8);
 
 // Subtitle area
-constexpr int SUB_X = 16, SUB_Y = 318, SUB_W = 768, SUB_H = 58;
+constexpr int SUB_X = 16, SUB_Y = 330, SUB_W = 768, SUB_H = 58;
 // Media bar
-constexpr int BAR_X = 16, BAR_Y = 376, BAR_W = 768, BAR_H = 88;
+constexpr int BAR_X = 16, BAR_Y = 392, BAR_W = 768, BAR_H = 84;
 constexpr int BAR_CY = BAR_Y + BAR_H / 2;
 constexpr int TEXT_X = 106, TEXT_W = 250;
 constexpr int PREV_X = 396, PLAY_X = 462, NEXT_X = 528;
 constexpr int VOL_X0 = 598, VOL_X1 = 738;
 
-constexpr Rect CLOCK_AREA{0, 0, 300, 44};
+constexpr Rect CLOCK_AREA{0, 0, 248, 44};  // stops before the tabs (it used to wipe the first icon)
 constexpr Rect STATUS_AREA{540, 0, 260, 44};
 constexpr Rect SUB_AREA{SUB_X, SUB_Y, SUB_W, SUB_H};
 constexpr Rect BAR_AREA{BAR_X, BAR_Y, BAR_W, BAR_H};
@@ -63,7 +63,12 @@ uint8_t tabIcons[tabs::MAX_TABS];
 int tabCount = 0, tabCurrent = 0;
 uint32_t tabBadges = 0;
 bool callVisible = false, callShown = false, dirtyCall = false;
-bool updateDot = false;
+bool noticeDot = false;
+bool barOpen = false;
+uint32_t barOpenUntil = 0;
+constexpr uint32_t BAR_OPEN_MS = 10000;
+constexpr Rect BOTTOM_AREA{0, 388, 800, 92};  // the music bar or the slim line
+const Color LINE = gfx::rgb(0x161D27);
 bool subtitleVisible = true;
 bool dirtyTabs = true;
 bool dirtyClock = true, dirtyStatus = true, dirtySub = true;
@@ -133,6 +138,7 @@ String fit(const gfont::Font& f, const String& s, float maxW) {
 // ---------------------------------------------------------------- parts (drawn in screen coordinates)
 
 void drawClock(Canvas& c) {
+  c.fillRect(0, tabs::LINE_Y, 800, 1, LINE);
   c.text(gfont::TITLE, clockText.c_str(), 20, 30, COLOR_TEXT_DIM);
   if (chipText.length() == 0) return;
   // countdown chip: a little ring and the time left
@@ -147,6 +153,7 @@ void drawClock(Canvas& c) {
 }
 
 void drawStatus(Canvas& c) {
+  c.fillRect(0, tabs::LINE_Y, 800, 1, LINE);
   if (statusText.length() == 0) return;
   const String text = fit(gfont::SMALL, statusText, 190);
   const float tw = Canvas::textWidth(gfont::SMALL, text.c_str());
@@ -159,7 +166,7 @@ void drawStatus(Canvas& c) {
 
 void drawTabs(Canvas& c) {
   tabs::draw(c, tabIcons, tabCount, tabCurrent, tabBadges);
-  panel::drawHandle(c, updateDot);
+  panel::drawHandle(c, noticeDot);
 }
 
 void drawCall(Canvas& c) {
@@ -250,6 +257,8 @@ void drawBar(Canvas& c) {
   iconSpeaker(c, 760, BAR_CY, TEXT_MUTED, true);
 }
 
+void drawMini(Canvas& c) { tabs::drawMiniPlayer(c, media.title.c_str(), media.artist.c_str(), media.playing); }
+
 void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
   display::render(area, bg, [&](Canvas& c) { draw(c); });
 }
@@ -281,10 +290,25 @@ void setTabBadges(uint32_t badges) {
 
 int tabAt(int x, int y) { return tabs::at(x, y, tabCount); }
 
-void setUpdateDot(bool on) {
-  if (on == updateDot) return;
-  updateDot = on;
+void setNoticeDot(bool on) {
+  if (on == noticeDot) return;
+  noticeDot = on;
   dirtyTabs = true;
+}
+
+void openMusicBar() {
+  barOpenUntil = millis() + BAR_OPEN_MS;
+  if (barOpen) return;
+  barOpen = true;
+  dirtyBar = true;
+}
+
+bool musicBarOpen() { return barOpen; }
+
+void redrawAll() {
+  display::render(Rect{0, 0, SCREEN_W, TOP_H}, BG, [](Canvas&) {});
+  display::render(Rect{0, subtitleVisible ? SUB_Y + SUB_H : 376, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
+  dirtyClock = dirtyStatus = dirtyTabs = dirtySub = dirtyBar = dirtyCall = true;
 }
 
 void setCallButton(bool visible) {
@@ -395,9 +419,17 @@ void update(uint32_t now) {
   }
   if (subtitleVisible) dirtyCall = false;
   if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
-  if (dirtyBar) {  // the whole bar (first time): it also covers the parts below
-    redraw(BAR_AREA, BG, drawBar);
+  if (barOpen && (int32_t)(now - barOpenUntil) >= 0) {  // fold the bar away again
+    barOpen = false;
+    dirtyBar = true;
+  }
+  if (dirtyBar) {  // the whole bar, or the slim line: it also covers the parts below
+    redraw(BOTTOM_AREA, BG, barOpen ? drawBar : drawMini);
     dirtyBar = dirtyText = dirtyButtons = dirtyVolume = false;
+  }
+  if (!barOpen) {  // the slim line shows the song and play / pause only
+    if (dirtyText || dirtyButtons) redraw(tabs::MINI, BG, drawMini);
+    dirtyText = dirtyButtons = dirtyVolume = false;
   }
   if (dirtyText) { redraw(TEXT_AREA, BG, drawBar); dirtyText = false; }
   if (dirtyButtons) { redraw(BUTTON_AREA, BG, drawBar); dirtyButtons = false; }
@@ -405,7 +437,11 @@ void update(uint32_t now) {
 }
 
 Target hitTest(int x, int y) {
-  if (y >= BAR_Y - 8) {
+  if (!barOpen && y >= tabs::MINI.y - 10) {
+    const Rect& m = tabs::MINI;
+    return x >= m.x - 10 && x < m.right() + 10 ? Target::Mini : Target::None;
+  }
+  if (barOpen && y >= BAR_Y - 8) {
     auto near = [&](int cx, int r) { return abs(x - cx) <= r && abs(y - BAR_CY) <= r; };
     if (near(PREV_X, 32)) return Target::Prev;
     if (near(PLAY_X, 34)) return Target::PlayPause;
@@ -413,10 +449,10 @@ Target hitTest(int x, int y) {
     if (x >= VOL_X0 - 20 && x <= VOL_X1 + 20) return Target::Volume;
     return Target::None;
   }
-  if (y < FACE_Y && x < 240) return Target::Clock;
-  if (y < FACE_Y && tabAt(x, y) >= 0) return Target::Tab;
+  if (y < TOP_H && x < 240) return Target::Clock;
+  if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
   if (callVisible && subtitleVisible && tabs::onCallButton(x, y)) return Target::CallMute;
-  if (y >= FACE_Y && y < SUB_Y + SUB_H) return Target::Face;
+  if (y >= TOP_H && y < SUB_Y + SUB_H) return Target::Face;
   return Target::None;
 }
 

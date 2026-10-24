@@ -9,10 +9,11 @@
 namespace ui {
 
 // Screen layout (pixels)
+constexpr int TOP_H = 44;   // the top bar
 constexpr int FACE_X = 100;
-constexpr int FACE_Y = 44;
+constexpr int FACE_Y = 56;  // a little lower since 4.3: the music bar folds away
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini };
 
 struct MediaInfo {
   String title;
@@ -47,8 +48,13 @@ void setTabBadges(uint32_t badges);  // bit i: a small dot on tab i
 int tabAt(int x, int y);             // -1 if none
 // The big Teams mute button next to the face (only during a call)
 void setCallButton(bool visible);
-// The small handle at the top (pull down for the panel); dot = an update is waiting
-void setUpdateDot(bool on);
+// The small handle at the top (pull down for the Action Center); dot = there are notifications
+void setNoticeDot(bool on);
+// The music bar: folded into a slim "now playing" line, opened by tapping it
+void openMusicBar();     // opens it for 10 s (again: another 10 s)
+bool musicBarOpen();
+// Everything was covered (the Action Center): draw all of it again
+void redrawAll();
 // Draws the subtitle right away (used to draw the face screen into a picture)
 void drawSubtitleNow();
 // The subtitle only shows on the face screen
