@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.4 released, waiting for the user to try it; 4.3.4 confirmed and merged)
+## Where things stand (4.5 released, waiting for the user to try it; 4.4 tried, 4.3.4 confirmed and merged)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -194,8 +194,17 @@ Done and confirmed:
   Toolbar: Write / Draw, 4 colours, eraser, size, undo, gallery, Clear (twice: "Sure?"), New page. Mode in NVS
   "sketch"/"mode". The idle "Tap me to talk" pill is gone everywhere (user: it looked like a button but wasn't);
   the Sketch screen has a real teal **Talk** button (`ui::setTalkButton`, Target::Talk -> face + listen).
-  Status pill still shows Listening / Thinking / On a call. Not done: handwriting-to-text (unreliable),
-  voice notes (possible later).
+  Status pill still shows Listening / Thinking / On a call.
+- **4.5 - typed notes** (user tried 4.4 with a photo; asked for no music bar, a bigger page, handwriting -> real text,
+  voice typing). `ui::setBottomHidden` on Sketch: paper 680x424 (13 lines, box 170 px, flips to the top from line 7);
+  old 320-row files still load (`OLD_PAPER_H`), thumbs 160x100. Typed mode (helper connected): the Writer records the
+  word's points (`sketch::Word`, box px, y from the guide line), main sends `{"type":"ink","id","strokes":[[x,y..]]}`
+  (`pclink::sendText`), helper `ink_reader.py` = Windows `InkRecognizerContainer` (pywinrt
+  `winrt-Windows.UI.Input.Inking`; the CI self-test reads a sample "hello" -> ['hello','hallo',...]) -> `ink_text`
+  {id, guesses}. Main keeps an op queue (Word / Text / Space / NewLine / Place) so order holds; no answer in 2.5 s
+  -> handwriting placed small. Text in the new `gfont::NOTE` (Nunito 21 px, 600). Other guesses = chips in the box
+  (tap = undo + type it). Talk on Sketch = `dictate` -> helper `Conversation.dictate` (Whisper only) ->
+  `dictate_state` (listening / thinking / idle + problem) and `dictation` {text}. English only (fonts are ASCII).
 - Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -204,9 +213,9 @@ Done and confirmed:
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
 - **4.3.4 is confirmed** (plan % works) and merged to main.
-- **4.4 (sketch notes) is released from branch `claude/project-thread-fs7qq5`**, waiting for the user's test.
-  When confirmed: mark it here, merge the branch to main. Open questions the user may raise: 1/3 vs 1/2 size,
-  box pause length, which 4 colours.
+- **4.4 + 4.5 (sketch notes, typed notes) are released from branch `claude/project-thread-fs7qq5`**, waiting for the
+  user's test of 4.5. When confirmed: mark it here, merge the branch to main. If words are read wrong a lot, ask
+  for `gorgi-helper.log` (lines "handwriting read as ...").
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
 Lessons from 3.9 (keep for future screens):
