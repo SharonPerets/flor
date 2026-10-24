@@ -1,5 +1,7 @@
 #include "gfx.h"
 
+#include "bidi.h"
+
 namespace gfx {
 
 static const float DEG2RAD = 0.017453292519943295f;
@@ -215,22 +217,47 @@ void Canvas::strokeArc(float cx, float cy, float R, float thick, float a0, float
   fillCircle(cx + R * cosf(a1 * DEG2RAD), cy + R * sinf(a1 * DEG2RAD), t2, col, alpha);
 }
 
+namespace {
+
+// The glyph for one letter, and where its pixels are. nullptr = the font can't draw it (skipped).
+const gfont::Glyph* glyphFor(const gfont::Font& f, const gfont::Extra* ex, uint32_t cp, const uint8_t** alpha) {
+  switch (cp) {  // stand-ins for letters the fonts don't have
+    case 0x2018: case 0x2019: case 0x05F3: cp = '\''; break;
+    case 0x201C: case 0x201D: case 0x05F4: cp = '"'; break;
+    case 0x2013: case 0x2014: case 0x05BE: cp = '-'; break;
+    case 0xA0: case '\t': cp = ' '; break;
+    default: break;
+  }
+  if (cp >= f.first && cp <= f.last) {
+    *alpha = f.alpha;
+    return &f.glyphs[cp - f.first];
+  }
+  if (ex && cp >= ex->first && cp <= ex->last) {
+    *alpha = ex->alpha;
+    return &ex->glyphs[cp - ex->first];
+  }
+  return nullptr;
+}
+
+}  // namespace
+
 float Canvas::textWidth(const gfont::Font& f, const char* s) {
+  const gfont::Extra* ex = gfont::extraFor(f);
   float w = 0;
-  for (; *s; ++s) {
-    unsigned char ch = (unsigned char)*s;
-    if (ch < f.first || ch > f.last) continue;
-    w += f.glyphs[ch - f.first].adv16 * (1.0f / 16.0f);
+  const uint8_t* alpha;
+  while (uint32_t cp = bidi::next(s)) {
+    const gfont::Glyph* g = glyphFor(f, ex, cp, &alpha);
+    if (g) w += g->adv16 * (1.0f / 16.0f);
   }
   return w;
 }
 
-void Canvas::blitGlyph(const gfont::Font& f, const gfont::Glyph& g, int gx, int gy, const Color& col, float alpha) {
+void Canvas::blitGlyph(const uint8_t* alphaBase, const gfont::Glyph& g, int gx, int gy, const Color& col, float alpha) {
   const int x0 = imax(gx, ox_), x1 = imin(gx + g.w, ox_ + w_);
   const int y0 = imax(gy, oy_), y1 = imin(gy + g.h, oy_ + h_);
   if (x0 >= x1 || y0 >= y1) return;
   const uint32_t scale = (uint32_t)(alpha * 256.0f + 0.5f);
-  const uint8_t* src = f.alpha + g.offset;
+  const uint8_t* src = alphaBase + g.offset;
   for (int y = y0; y < y1; ++y) {
     const uint8_t* s = src + (size_t)(y - gy) * g.w + (x0 - gx);
     uint16_t* d = row(y) + (x0 - ox_);
@@ -243,14 +270,21 @@ void Canvas::blitGlyph(const gfont::Font& f, const gfont::Glyph& g, int gx, int 
 }
 
 void Canvas::text(const gfont::Font& f, const char* s, float x, int baseline, const Color& col, float alpha) {
+  char ordered[400];
+  if (bidi::hasRtl(s)) s = bidi::visual(s, ordered, sizeof ordered);  // Hebrew: put the line in drawing order
+  const gfont::Extra* ex = gfont::extraFor(f);
   float pen = x;
-  for (; *s; ++s) {
-    unsigned char ch = (unsigned char)*s;
-    if (ch < f.first || ch > f.last) continue;
-    const gfont::Glyph& g = f.glyphs[ch - f.first];
-    if (g.w) blitGlyph(f, g, (int)floorf(pen + 0.5f) + g.xoff, baseline + g.yoff, col, alpha);
-    pen += g.adv16 * (1.0f / 16.0f);
+  const uint8_t* alphaBase;
+  while (uint32_t cp = bidi::next(s)) {
+    const gfont::Glyph* g = glyphFor(f, ex, cp, &alphaBase);
+    if (!g) continue;
+    if (g->w) blitGlyph(alphaBase, *g, (int)floorf(pen + 0.5f) + g->xoff, baseline + g->yoff, col, alpha);
+    pen += g->adv16 * (1.0f / 16.0f);
   }
+}
+
+void Canvas::textIn(const gfont::Font& f, const char* s, float x, float w, int baseline, const Color& c, float alpha) {
+  text(f, s, bidi::isRtl(s) ? x + w - textWidth(f, s) : x, baseline, c, alpha);
 }
 
 }  // namespace gfx

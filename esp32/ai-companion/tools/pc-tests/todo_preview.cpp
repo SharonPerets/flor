@@ -8,6 +8,8 @@
 #include "todo_screen.h"
 #include "todos.h"
 
+#include <Preferences.h>
+
 uint32_t fakeMillis = 0;
 SerialT Serial;
 
@@ -154,5 +156,52 @@ int main() {
   k.kb.symbols = true;
   k.kb.voice = todoscreen::VOICE_LISTENING;
   save("todo_keyboard_123.ppm", k);
+
+  // 4.6 lists (fixed 56-byte text) load into the new format
+  {
+    struct V1 { uint32_t id; int32_t due; uint32_t remindAt, alarmId, doneAt; uint8_t flags; char text[57]; };
+    uint8_t blob[8 + 2 * sizeof(V1)] = {};
+    const uint32_t magic = 0x31444F54, next = 9;
+    memcpy(blob, &magic, 4);
+    memcpy(blob + 4, &next, 4);
+    V1 a = {}, b = {};
+    a.id = 3; a.due = today; a.flags = 1; snprintf(a.text, sizeof a.text, "Old task one");
+    b.id = 7; b.due = todos::NO_DAY; snprintf(b.text, sizeof b.text, "Old task two");
+    memcpy(blob + 8, &a, sizeof a);
+    memcpy(blob + 8 + sizeof(V1), &b, sizeof b);
+    Preferences p;
+    p.begin("todo", false);
+    p.putBytes("list", blob, sizeof blob);
+    todos::begin();
+    assert(todos::openCount() == 2);
+    n = todos::collect(todos::TODAY, today, list, 64);
+    assert(n == 2 && !strcmp(list[0]->text, "Old task one") && list[0]->star());  // (no-day tasks show on Today too)
+    todos::begin();  // saved again in the new format
+    assert(todos::openCount() == 2);
+  }
+
+  // Hebrew tasks: kept as UTF-8, long ones cut at a whole letter, drawn right to left
+  remove("prefs.bin");
+  todos::begin();
+  add("\xD7\x9C\xD7\xA7\xD7\xA0\xD7\x95\xD7\xAA \xD7\x97\xD7\x9C\xD7\x91", today, false, false, 0);  // "לקנות חלב"
+  add("להתקשר לבנק על הכרטיס", today, false, true, 0);
+  add("לקבוע תור לרופא שיניים", today, false, false, noon + 5 * 3600);
+  add("Send the PR to Dana", today, false, false, 0);
+  add("להכין מצגת ל-Sprint review ב-10:30", today - 1, false, false, 0);
+  char longText[300] = "";
+  for (int i = 0; i < 12; ++i) strcat(longText, "משימה ");  // 72 letters, 132 bytes
+  add(longText, today + 1, false, false, 0);
+  n = todos::collect(todos::UPCOMING, today, list, 64);
+  assert(n == 1 && strlen(list[0]->text) <= (size_t)todos::TEXT_MAX && strlen(list[0]->text) % 2 == 0);
+  todos::saveNow();
+  todos::begin();
+  assert(todos::openCount() == 6);
+  n = todos::collect(todos::TODAY, today, list, 64);
+  assert(!strcmp(list[0]->text, "להתקשר לבנק על הכרטיס"));
+  todoscreen::View h;
+  todoscreen::fill(h, today, 0);
+  snprintf(h.toast, sizeof h.toast, "Done: %s", "לשלם חשבון חשמל");
+  h.toastUndo = true;
+  save("todo_hebrew.ppm", h);
   printf("to-do: ALL OK (pictures todo_*.ppm)\n");
 }
