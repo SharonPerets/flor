@@ -54,7 +54,6 @@ int main() {
   a.notices[1] = actioncenter::Notice{actioncenter::MISSED, "Missed: Call mom", "Reminder at 17:00, nobody tapped it", ""};
   a.notices[2] = actioncenter::Notice{actioncenter::CLAUDE, "Claude finished in flor", "While Gorgi was asleep, 21:40", ""};
   a.noticeCount = 3;
-  a.language = 1;
   save("l_action.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &a);
   static actioncenter::View e = a; e.noticeCount = 0;
   save("l_action_empty.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &e);

@@ -1,4 +1,4 @@
-"""A small Settings window: Ollama key, AI model, language, Gorgi's voices, Claude Code."""
+"""A small Settings window: Ollama key, AI model, Gorgi's voices, hearing (Groq/OpenAI key), Claude Code."""
 
 import asyncio
 import os
@@ -18,16 +18,13 @@ VOICES_HE = {
     "Hila - warm (female)": "he-IL-HilaNeural",
     "Avri - calm (male)": "he-IL-AvriNeural",
 }
-LANGUAGES = {"English": "en", "עברית (Hebrew)": "he"}
 HEARING = {
     "Groq - fast, free (needs a key)": "groq",
     "OpenAI - best Hebrew, paid (needs a key)": "openai",
-    "On this PC - slow without NVIDIA": "local",
 }
 HEARING_HINTS = {
     "groq": "Groq key: console.groq.com → API Keys (free account)",
     "openai": "OpenAI key: platform.openai.com → API keys (billing needed)",
-    "local": "No key needed. Downloads 1.6 GB the first time.",
 }
 SUGGESTED_MODELS = ["gpt-oss:20b", "gpt-oss:120b"]
 
@@ -78,22 +75,16 @@ def show_window(config, save_config, list_models, report_dir=None):
     ttk.Combobox(frame, textvariable=voice_var, values=list(VOICES), state="readonly", width=34).grid(
         row=6, column=0, sticky="we", pady=(2, 10))
 
-    # Language: what Gorgi hears and speaks (the switch in Gorgi's Action Center does the same)
-    ttk.Label(frame, text="Language").grid(row=10, column=0, sticky="w")
-    current_lang = next((k for k, v in LANGUAGES.items() if v == config.get("language")), "English")
-    lang_var = tk.StringVar(value=current_lang)
-    ttk.Combobox(frame, textvariable=lang_var, values=list(LANGUAGES), state="readonly", width=34).grid(
-        row=11, column=0, sticky="we", pady=(2, 10))
-
     ttk.Label(frame, text="Gorgi's Hebrew voice").grid(row=12, column=0, sticky="w")
     current_he = next((k for k, v in VOICES_HE.items() if v == config.get("voice_he")), list(VOICES_HE)[0])
     voice_he_var = tk.StringVar(value=current_he)
     ttk.Combobox(frame, textvariable=voice_he_var, values=list(VOICES_HE), state="readonly", width=34).grid(
         row=13, column=0, sticky="we", pady=(2, 10))
 
-    # Hebrew hearing: the big Hebrew model is slow on most PCs, so a cloud service can do it (needs a key)
-    ttk.Label(frame, text="Hebrew hearing").grid(row=14, column=0, sticky="w")
-    current_hearing = next((k for k, v in HEARING.items() if v == (config.get("hearing_he") or "groq")),
+    # Hearing in the cloud: fast, Hebrew and English (Gorgi answers in the language you speak). Without a key,
+    # Gorgi hears English only, on this PC.
+    ttk.Label(frame, text="Hearing (Hebrew + English)").grid(row=14, column=0, sticky="w")
+    current_hearing = next((k for k, v in HEARING.items() if v == (config.get("hearing") or "groq")),
                            list(HEARING)[0])
     hearing_var = tk.StringVar(value=current_hearing)
     hearing_box = ttk.Combobox(frame, textvariable=hearing_var, values=list(HEARING), state="readonly", width=34)
@@ -112,14 +103,8 @@ def show_window(config, save_config, list_models, report_dir=None):
             keys[shown[0]] = hearing_key_var.get().strip()
         name = HEARING[hearing_var.get()]
         shown[0] = name
-        if name in keys:
-            hearing_key.state(["!disabled"])
-            hearing_key_var.set(keys[name])
-            hearing_hint.set(HEARING_HINTS[name])
-        else:
-            hearing_key_var.set("")
-            hearing_key.state(["disabled"])
-            hearing_hint.set(HEARING_HINTS[name])
+        hearing_key_var.set(keys[name])
+        hearing_hint.set(HEARING_HINTS[name])
 
     hearing_box.bind("<<ComboboxSelected>>", hearing_changed)
     hearing_changed()
@@ -215,9 +200,8 @@ def show_window(config, save_config, list_models, report_dir=None):
         config["model"] = model_var.get().strip() or SUGGESTED_MODELS[0]
         config["voice"] = VOICES[voice_var.get()]
         config["voice_he"] = VOICES_HE[voice_he_var.get()]
-        config["language"] = LANGUAGES[lang_var.get()]
         hearing_changed()  # keeps the key typed for the service shown now
-        config["hearing_he"] = HEARING[hearing_var.get()]
+        config["hearing"] = HEARING[hearing_var.get()]
         config["groq_api_key"] = keys["groq"]
         config["openai_api_key"] = keys["openai"]
         save_config(config)

@@ -70,10 +70,9 @@ DEFAULT_CONFIG = {
     "model": "gpt-oss:20b",
     "voice": "en-US-AnaNeural",
     "whisper_model": "base.en",   # "small.en" understands better but is slower
-    "language": "en",             # "en" or "he": what Gorgi hears and speaks (Settings, or Gorgi's Action Center)
+    "language": "en",             # "en" or "he": the language you spoke last (Gorgi answers in it)
     "voice_he": "he-IL-HilaNeural",
-    "whisper_model_he": "ivrit-ai/whisper-large-v3-turbo-ct2",  # ivrit.ai's Hebrew Whisper, downloaded on first use
-    "hearing_he": "groq",         # Hebrew hearing: "groq" / "openai" (cloud, fast, need a key) or "local" (slow)
+    "hearing": "groq",            # cloud hearing, Hebrew + English: "groq" or "openai" (needs its key below)
     "groq_api_key": "",
     "openai_api_key": "",
 }
@@ -804,41 +803,15 @@ class Helper:
     # ------------------------------------------------------------ language
 
     async def set_language(self, code):
-        """Switches what Gorgi hears and speaks (from Gorgi's switch)."""
-        if code not in lang.LANGUAGES:
-            return
-        changed = code != lang.code()
-        if changed:
-            self.config["language"] = code
-            save_config(self.config)
-            log.info("language: %s", code)
-        await self.language_changed(say_it=changed)
+        """Gorgi's old EN/עב switch (firmware before 4.8.4): just use that language until you speak."""
+        if code in lang.LANGUAGES and code != lang.code():
+            lang.set_spoken(code)
 
-    async def language_changed(self, say_it=True):
-        """The language changed (here or in Settings): tell Gorgi, get the ears ready, say so."""
+    async def language_changed(self):
+        """You spoke the other language: remember it and tell Gorgi (its screen texts follow it)."""
+        save_config(self.config)
+        log.info("language: %s", lang.code())
         await self.send({"type": "language", "value": lang.code()})
-        if not say_it:
-            return
-        ears = self.ears.current() if self.ears else None
-        if lang.hebrew() and ears is not None and not ears.ready:
-            if not ears.loading:
-                threading.Thread(target=ears.load, daemon=True).start()
-            await self._tell("thinking", "רגע, אני לומדת עברית. בפעם הראשונה זה לוקח כמה דקות.")
-            for _ in range(1800):  # the download can take a while; say when it's done
-                await asyncio.sleep(1)
-                if ears.ready or (not ears.loading and ears.error) or lang.code() != "he":
-                    break
-            if lang.code() != "he":
-                return
-            if ears.ready:
-                await self._tell("excited", "סיימתי ללמוד עברית! אפשר לדבר איתי.")
-            else:
-                await self._tell("sad", "לא הצלחתי ללמוד עברית. תבדוק את החיבור לאינטרנט ונסה שוב.")
-            return
-        if lang.hebrew():
-            await self._tell("happy", "יאללה, מעכשיו מדברים עברית!")
-        else:
-            await self._tell("happy", "Okay, English it is!")
 
     async def _tell(self, mood, text):
         """Gorgi says something by itself: on its screen and out loud (unless busy talking or on a call)."""
@@ -1089,7 +1062,6 @@ def start_tray(helper, loop):
 _settings_process = None
 
 
-language_listeners = []  # called (from another thread) when Settings changed the language
 
 
 def show_settings(config):
@@ -1107,13 +1079,11 @@ def show_settings(config):
 
     def wait_and_reload(process):
         process.wait()
-        before = config.get("language")
+        spoken = config.get("language")  # follows your voice; the Settings window doesn't change it
         config.update(load_config())  # the brain and voice read this same dict
-        log.info("settings reloaded (model: %s, voice: %s, language: %s)", config.get("model"), config.get("voice"),
-                 config.get("language"))
-        if config.get("language") != before:
-            for listener in language_listeners:
-                listener()
+        config["language"] = spoken
+        log.info("settings reloaded (model: %s, voice: %s, hearing: %s, key %s)", config.get("model"),
+                 config.get("voice"), config.get("hearing"), "set" if config.get(f"{config.get('hearing')}_api_key") else "missing")
 
     threading.Thread(target=wait_and_reload, args=(_settings_process,), daemon=True).start()
 
@@ -1140,7 +1110,7 @@ def make_voice(config):
     try:
         from brain import Brain
         from conversation import Conversation
-        from voice import CloudTranscriber, Ears, Recorder, Speaker, Transcriber
+        from voice import CloudTranscriber, Ears, Recorder, Speaker, Transcriber, forget_hebrew_model
     except Exception as e:
         log.error("voice features unavailable: %s", e)
         return None, None
@@ -1149,9 +1119,8 @@ def make_voice(config):
 
     brain = Brain(config, Memory(data_dir() / "memory.json"))  # one brain, so Gorgi remembers between taps
     english = Transcriber(config.get("whisper_model") or "base.en", data_dir() / "models")
-    hebrew = Transcriber(config.get("whisper_model_he") or DEFAULT_CONFIG["whisper_model_he"], data_dir() / "models",
-                         language="he")
-    transcriber = Ears(english, hebrew, CloudTranscriber(config))  # the one for the language chosen now
+    transcriber = Ears(english, CloudTranscriber(config))  # the cloud (Hebrew + English) with a key, else English here
+    forget_hebrew_model(data_dir() / "models")  # 4.8-4.8.3 downloaded a 1.6 GB Hebrew model: not used any more
     # Download/load Whisper in the background so the first chat is quick
     threading.Thread(target=transcriber.load, daemon=True).start()
 
@@ -1289,23 +1258,19 @@ def self_test(out_path):
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
             raise RuntimeError("whisper did not understand the test sentence")
-        # Hebrew: Hila says a sentence, ivrit.ai's Whisper (downloaded like on a user's PC) listens; timed
+        # Hebrew: Hila says a sentence (the Hebrew voice works)
         he_speech = asyncio.run(Speaker("en-US-AnaNeural").synthesize("גורגי, תפעיל טיימר של עשר דקות לפסטה."))
         lines.append(f"hebrew voice: {len(he_speech)} samples")
         he16k = np.interp(np.arange(0, len(he_speech), 1.5), np.arange(len(he_speech)), he_speech).astype(np.float32)
-        th = Transcriber(DEFAULT_CONFIG["whisper_model_he"], Path(out_path).resolve().parent / "models", language="he")
-        started = time.monotonic()
-        th.load()
-        if th.error:
-            raise RuntimeError(f"hebrew whisper failed to load: {th.error}")
-        lines.append(f"hebrew whisper downloaded + loaded in {time.monotonic() - started:.0f} s")
-        for attempt in (1, 2):
-            started = time.monotonic()
-            heard_he = th.transcribe(he16k)
-            lines.append(f"hebrew heard ({attempt}): {heard_he!r} in {time.monotonic() - started:.1f} s "
-                         f"for {len(he16k) / 16000:.1f} s of speech ({os.cpu_count()} cores)")
-        if "טיימר" not in heard_he:
-            lines.append("WARNING: the Hebrew test sentence was not understood")
+        # Cloud hearing (Hebrew + English) with a fake key: Groq must answer "bad key"
+        from voice import CloudTranscriber, wav_bytes
+
+        lines.append(f"hebrew wav: {len(wav_bytes(he16k))} bytes")
+        try:
+            CloudTranscriber({"hearing": "groq", "groq_api_key": "selftest-fake-key"}).transcribe(he16k)
+            lines.append("hebrew cloud: unexpected success")
+        except Exception as e:
+            lines.append(f"hebrew cloud: groq reached, answered as expected ({str(e)[:60]})")
         # Talk to Ollama Cloud with a fake key: must come back as "key doesn't work"
         from brain import Brain, BrainError
 
@@ -1395,7 +1360,8 @@ def main():
     helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak,
                     todos=todos)
     helper.ears = getattr(voice_factory, "ears", None)
-    language_listeners.append(lambda: loop.call_soon_threadsafe(lambda: loop.create_task(helper.language_changed())))
+    # You spoke the other language (heard in a worker thread): tell Gorgi from the main loop
+    lang.on_change(lambda code: loop.call_soon_threadsafe(lambda: loop.create_task(helper.language_changed())))
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)

@@ -43,7 +43,7 @@ class Conversation:
             return None
         if self.transcriber.loading:
             return lang.t("Give me a minute, I'm still learning to hear. Try again soon!",
-                          "רגע, אני עוד לומדת לשמוע עברית. זה לוקח כמה דקות בפעם הראשונה, נסה שוב עוד מעט!")
+                          "רגע, אני עוד מתכוננת לשמוע. נסה שוב עוד רגע!")
         await asyncio.to_thread(self.transcriber.load)
         if not self.transcriber.ready:
             return lang.t("My ears aren't working. Please check the helper's log on your PC.",

@@ -51,8 +51,6 @@ jobs:
       - name: Self-test (voice -> Whisper round trip, imports)
         shell: pwsh
         run: |
-          # The packaged app downloads the Hebrew model itself (no console window, like on a user's PC)
-          Remove-Item -Recurse -Force models\ivrit-ai--whisper-large-v3-turbo-ct2 -ErrorAction SilentlyContinue
           $p = Start-Process -FilePath dist\GorgiHelper\GorgiHelper.exe -ArgumentList "--selftest","$PWD\selftest.txt" -PassThru
           $p | Wait-Process -Timeout 900 -ErrorAction SilentlyContinue
           if (-not $p.HasExited) { Write-Output "::error::self-test hung (15 min)"; $p | Stop-Process -Force }

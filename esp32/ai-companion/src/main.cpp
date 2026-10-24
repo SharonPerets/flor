@@ -1457,12 +1457,6 @@ void onOther(const char* type, JsonObjectConst msg) {
       ui::setSubtitle(String("Updating: ") + updateBusyText);
       moodHoldUntil = millis() + 60000;
     }
-  } else if (strcmp(type, "language") == 0) {  // {"type":"language","value":"he"|"en"}: what Gorgi speaks
-    const int lang = strcmp(msg["value"] | "en", "he") == 0 ? 1 : 0;
-    if (lang != acView.language) {
-      acView.language = lang;
-      acDirty = true;
-    }
   } else if (strcmp(type, "call") == 0) {
     callOn = msg["on"] | false;
     ui::setCallButton(callOn);
@@ -1560,11 +1554,6 @@ void onActionCenterRelease() {
       break;
     case actioncenter::Tap::Dismiss:
       removeNotice(t.index);
-      break;
-    case actioncenter::Tap::Language:  // the helper switches, then confirms with "language"
-      if (t.index == acView.language || !pclink::helperConnected()) return;
-      acView.language = t.index;
-      pclink::sendCommand("language", t.index);
       break;
     case actioncenter::Tap::None:
       return;

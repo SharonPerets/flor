@@ -1,8 +1,9 @@
-"""Which language Gorgi hears and speaks: English ("en") or Hebrew ("he").
+"""Which language Gorgi speaks now: English ("en") or Hebrew ("he").
 
-The choice lives in config.json ("language"), changed in Settings or with the
-switch in Gorgi's Action Center. Everything asks `lang.code()` when it needs it,
-so a change works at once. `lang.t("English", "עברית")` picks the right sentence.
+It follows you: whatever language you spoke last (the cloud hearing tells), Gorgi answers in it,
+and alerts and messages use it too until you speak the other one. Saved in config.json
+("language"). Everything asks `lang.code()` when it needs it. `lang.t("English", "עברית")`
+picks the right sentence.
 """
 
 import re
@@ -13,10 +14,29 @@ _config = {}
 HEBREW_RE = re.compile(r"[א-ת]")
 
 
+_listeners = []  # fn(code), called when the spoken language changes
+
+
 def bind(config):
     """Reads the choice from this settings dict from now on."""
     global _config
     _config = config
+
+
+def on_change(fn):
+    _listeners.append(fn)
+
+
+def set_spoken(code):
+    """You just spoke this language: Gorgi uses it from now on."""
+    if code not in LANGUAGES or code == _config.get("language", "en"):
+        return
+    _config["language"] = code
+    for fn in list(_listeners):
+        try:
+            fn(code)
+        except Exception:
+            pass
 
 
 def code():

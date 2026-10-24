@@ -272,8 +272,13 @@ Done and confirmed:
   `api.groq.com/openai/v1/audio/transcriptions` (`whisper-large-v3`, language he); OpenAI (`gpt-4o-mini-transcribe`) also
   supported. Config `hearing_he` groq|openai|local, `groq_api_key`, `openai_api_key` (Settings > Hebrew hearing). `Ears`
   uses the cloud when it has a key, falls back to the ivrit model on the PC if the request fails.
-  Next (user asked): **4.8.4 automatic language** - no EN/עב switch; detect the language of each sentence (Groq without
-  `language`, verbose_json returns it), answer in it, alerts in the last language used.
+- **4.8.4 - automatic language, no Hebrew model on the PC** (user: "don't want to choose", "don't want the local Hebrew
+  model at all"): with a cloud key ALL speech goes to Groq/OpenAI without a language; Hebrew letters in the text = Hebrew
+  (`voice.spoken_language`; Arabic/Cyrillic/CJK guess -> asked again with the last language). `Ears.transcribe` calls
+  `lang.set_spoken()` -> config "language" + `lang.on_change` -> helper `language_changed()` (saves, sends `language` to
+  Gorgi). Answers, voice and alerts follow the last language spoken. No key / cloud error -> English Whisper on the PC.
+  Removed: ivrit model + `_download`, `whisper_model_he`, Settings Language + "On this PC", the Action Center EN/עב pill
+  (firmware). `voice.forget_hebrew_model()` deletes `models/*ivrit-ai--*` at start. Config key `hearing` (was `hearing_he`).
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -287,7 +292,7 @@ Done and confirmed:
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
-- **4.8 - 4.8.3 (Hebrew hearing/speaking)** are on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
+- **4.8 - 4.8.4 (Hebrew hearing/speaking)** are on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
   confirmed, merge, then plan 4.9 (Hebrew keyboard). If Hebrew hearing is slow/wrong, ask for `gorgi-helper.log`
   ("transcribed in ..." lines) and `hebrew-test.txt`.
 

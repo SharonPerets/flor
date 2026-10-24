@@ -2,7 +2,7 @@
 
 - Recorder: listens to the PC microphone and stops when you stop talking.
 - Transcriber: turns speech into text with Whisper, on your PC (free, private).
-  Ears picks the English or the Hebrew one (ivrit.ai's Hebrew Whisper), see lang.py.
+  Ears: the cloud (Groq/OpenAI: Hebrew + English) or the English Whisper on this PC, see lang.py.
 - Speaker: says Gorgi's answers with a free Microsoft Edge voice and reports
   how loud each moment is, so Gorgi's mouth can follow the voice.
 """
@@ -104,8 +104,6 @@ def bundled_model_dir(model_name):
     return folder if (folder / "model.bin").exists() else None
 
 
-HEBREW_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"  # ivrit.ai's Hebrew Whisper (Apache 2.0), ~1.6 GB
-
 # What Whisper sometimes "hears" in silence
 NOT_SPEECH = {"", "you", "thank you", "thanks for watching", "bye",
               "תודה", "תודה רבה", "תודה שצפיתם", "תודה רבה שצפיתם", "תודה על הצפייה", "כתוביות", "שלום"}
@@ -138,9 +136,7 @@ class Transcriber:
             if bundled:
                 model = str(bundled)  # shipped with the app: no download needed
                 log.info("loading bundled Whisper model from %s", bundled)
-            elif "/" in self.model_name:  # a Hugging Face model (the Hebrew one)
-                model = self._download()
-            # All the PC's cores (the default is 4): the big Hebrew model is ~3x slower than the English one
+            # All the PC's cores (the default is 4)
             threads = min(os.cpu_count() or 4, 12)
             self._model = WhisperModel(model, device="cpu", compute_type="int8", cpu_threads=threads,
                                        download_root=str(self.models_dir))
@@ -150,40 +146,9 @@ class Transcriber:
             import traceback
 
             log.exception("could not load Whisper")
-            if "/" in self.model_name:  # check the downloaded files again next time
-                from pathlib import Path
-
-                marker = Path(self.models_dir) / self.model_name.replace("/", "--") / "download-complete.txt"
-                marker.unlink(missing_ok=True)
             self.error = f"{e!r}\n{traceback.format_exc()}"
         finally:
             self.loading = False
-
-    def _download(self):
-        """Downloads a Hugging Face model into a plain folder and returns it. Not the usual Hugging Face
-        cache: on Windows without symlink rights its links can't be opened ("Unable to open file
-        'model.bin'", 4.8 on the user's PC)."""
-        import shutil
-        from pathlib import Path
-
-        from faster_whisper.utils import download_model
-
-        folder = Path(self.models_dir) / self.model_name.replace("/", "--")
-        done = folder / "download-complete.txt"
-        if done.exists() and (folder / "model.bin").exists():
-            return str(folder)  # works without internet
-        log.info("downloading Whisper model %s (once, %s) into %s", self.model_name,
-                 "~1.6 GB" if self.language == "he" else "~150 MB", folder)
-        # faster-whisper's own download: only the 5 files it needs, and no progress bar (a progress bar
-        # with no console window hung 4.8.1 on the user's PC; the CI test has a console, so it passed)
-        download_model(self.model_name, output_dir=str(folder))
-        done.write_text(self.model_name, encoding="utf-8")
-        size = (folder / "model.bin").stat().st_size
-        log.info("Whisper model files ready: model.bin %.0f MB", size / 1e6)
-        old_cache = Path(self.models_dir) / ("models--" + self.model_name.replace("/", "--"))
-        if old_cache.exists():  # what 4.8 downloaded the other way: not needed, frees 1.6 GB
-            shutil.rmtree(old_cache, ignore_errors=True)
-        return str(folder)
 
     @property
     def ready(self):
@@ -205,12 +170,23 @@ class Transcriber:
         return text
 
 
-# Cloud hearing for Hebrew (the big Hebrew model is too slow on a PC without an NVIDIA card).
+def forget_hebrew_model(models_dir):
+    """Deletes the 1.6 GB Hebrew model that 4.8 - 4.8.3 downloaded (Hebrew is heard in the cloud now)."""
+    import shutil
+    from pathlib import Path
+
+    for folder in Path(models_dir).glob("*ivrit-ai--*"):
+        log.info("deleting the old Hebrew model %s", folder)
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+# Cloud hearing (Groq or OpenAI): fast, hears Hebrew and English and tells which one was spoken.
 # Both speak the same OpenAI-style API: POST audio, get text back.
 CLOUD_HEARING = {
     "groq": ("https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3"),
     "openai": ("https://api.openai.com/v1/audio/transcriptions", "gpt-4o-mini-transcribe"),
 }
+OTHER_SCRIPT_RE = re.compile(r"[\u0600-\u06ff\u0400-\u04ff\u3040-\u9fff]")  # Arabic, Cyrillic, ...
 
 
 def wav_bytes(audio):
@@ -228,19 +204,22 @@ def wav_bytes(audio):
     return out.getvalue()
 
 
-class CloudTranscriber:
-    """Hears through Groq or OpenAI (config "hearing_he": groq | openai | local, keys "groq_api_key" /
-    "openai_api_key"). Works like a Transcriber."""
+def spoken_language(text):
+    """"he" when the words have Hebrew letters, else "en"."""
+    return "he" if lang.has_hebrew(text) else "en"
 
-    def __init__(self, config, language="he"):
+
+class CloudTranscriber:
+    """Hears through Groq or OpenAI (config "hearing": groq | openai, keys "groq_api_key" / "openai_api_key").
+    No language is given, so it hears Hebrew or English, whichever was spoken."""
+
+    def __init__(self, config):
         self.config = config
-        self.language = language
         self.loading = False
         self.error = None
-        self.last_problem = None  # why the last request failed (for the log / a spoken hint)
 
     def service(self):
-        name = (self.config.get("hearing_he") or "local").lower()
+        name = (self.config.get("hearing") or "groq").lower()
         key = (self.config.get(f"{name}_api_key") or "").strip()
         return (name, key) if name in CLOUD_HEARING and key else (None, None)
 
@@ -251,45 +230,47 @@ class CloudTranscriber:
     def load(self):
         pass
 
-    def transcribe(self, audio, prompt=None):
-        """Slow-ish (a web request): run in a thread. Raises when the service fails."""
+    def _ask(self, audio, language=None):
         import httpx
 
         name, key = self.service()
         url, model = CLOUD_HEARING[name]
-        started = time.monotonic()
-        data = {"model": model, "language": self.language, "response_format": "json"}
-        if prompt:
-            data["prompt"] = prompt
+        data = {"model": model, "response_format": "json"}
+        if language:
+            data["language"] = language
         r = httpx.post(url, headers={"Authorization": f"Bearer {key}"}, data=data,
                        files={"file": ("speech.wav", wav_bytes(audio), "audio/wav")}, timeout=20)
         if r.status_code >= 400:
-            self.last_problem = f"{name} {r.status_code}: {r.text[:200]}"
-            raise RuntimeError(self.last_problem)
-        self.last_problem = None
-        text = (r.json().get("text") or "").strip()
-        log.info("%s heard %.1f s of speech in %.1f s", name, len(audio) / SAMPLE_RATE, time.monotonic() - started)
+            raise RuntimeError(f"{name} {r.status_code}: {r.text[:200]}")
+        return (r.json().get("text") or "").strip()
+
+    def transcribe(self, audio):
+        """A web request: run in a thread. Raises when the service fails."""
+        started = time.monotonic()
+        text = self._ask(audio)
+        if OTHER_SCRIPT_RE.search(text):  # it guessed another language (short or mumbled words): Hebrew or English only
+            text = self._ask(audio, lang.code())
+        log.info("%s heard %.1f s of speech in %.1f s", self.service()[0], len(audio) / SAMPLE_RATE,
+                 time.monotonic() - started)
         if text.lower().strip(" .!?,") in NOT_SPEECH:
             return ""
         return text
 
 
 class Ears:
-    """The English and the Hebrew hearing; works like a Transcriber for the language chosen now.
-    Hebrew goes to the cloud service chosen in Settings (fast), else the ivrit.ai model on this PC
-    (loads, and the first time downloads, only when needed). If the cloud fails, the PC model takes over."""
+    """Hearing: the cloud service from Settings when it has a key (Hebrew or English, detected each time),
+    else the English Whisper on this PC. After each sentence, the language spoken becomes Gorgi's language
+    (lang.set_spoken), so the answer, the voice and later alerts follow it."""
 
-    def __init__(self, english, hebrew, cloud=None):
+    def __init__(self, english, cloud=None):
         self.english = english
-        self.hebrew = hebrew
         self.cloud = cloud
+        self.cloud_failed = None  # why the cloud failed last time (None when it worked)
 
     def current(self):
-        if not lang.hebrew():
-            return self.english
         if self.cloud is not None and self.cloud.ready:
             return self.cloud
-        return self.hebrew
+        return self.english
 
     @property
     def ready(self):
@@ -304,17 +285,23 @@ class Ears:
         return self.current().error
 
     def load(self):
-        self.current().load()
+        self.english.load()  # the backup, ready for when there's no key or no internet
 
     def transcribe(self, audio):
         ears = self.current()
         if ears is self.cloud:
             try:
-                return ears.transcribe(audio)
+                text = ears.transcribe(audio)
+                self.cloud_failed = None
             except Exception as e:
-                log.warning("cloud hearing failed (%s), using the PC's Hebrew model", e)
-                return self.hebrew.transcribe(audio)
-        return ears.transcribe(audio)
+                log.warning("cloud hearing failed (%s), using the English Whisper on this PC", e)
+                self.cloud_failed = str(e)
+                text = self.english.transcribe(audio)
+        else:
+            text = ears.transcribe(audio)
+        if text:
+            lang.set_spoken(spoken_language(text))
+        return text
 
 
 class Speaker:

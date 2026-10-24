@@ -36,7 +36,6 @@ constexpr float CARD_Y = 124, CARD_H = 292;
 constexpr float N_X = PAD, N_W = 800 - 2 * PAD;  // notifications: the whole width
 constexpr float ROW_Y = CARD_Y + 58, ROW_H = 66, ROW_GAP = 10;
 constexpr float BACK_X = 24, BACK_Y = 6, BACK_W = 108, BACK_H = 34;
-constexpr float LANG_X = 612, LANG_Y = 424, LANG_W = 156, LANG_H = 40;  // English / Hebrew switch, bottom right
 
 void card(Canvas& c, float x, float y, float w, float h) {
   c.fillRRect(x, y, w, h, 24, CARD_EDGE);
@@ -222,18 +221,6 @@ void draw(Canvas& c, const View& v) {
     moonIcon(c, SLEEP_X + 34, SLEEP_Y + SLEEP_H / 2, MOON, CARD_EDGE);
     c.text(gfont::TITLE, "Sleep", SLEEP_X + 60, (int)(SLEEP_Y + 36), TEXT);
     noticesCard(c, v);
-    if (v.language >= 0) {  // which language Gorgi hears and speaks: two halves, the chosen one lit
-      c.fillRRect(LANG_X, LANG_Y, LANG_W, LANG_H, LANG_H / 2, CARD_EDGE);
-      const float half = LANG_W / 2;
-      const float sx = LANG_X + 3 + (v.language == 1 ? half : 0);
-      c.fillRRect(sx, LANG_Y + 3, half - 6, LANG_H - 6, (LANG_H - 6) / 2, ACCENT);
-      const char* names[2] = {"EN", "\xD7\xA2\xD7\x91"};  // "EN", Hebrew "Iv" (Ivrit)
-      for (int i = 0; i < 2; ++i) {
-        const float cx = LANG_X + half * i + half / 2;
-        c.text(gfont::TITLE, names[i], cx - Canvas::textWidth(gfont::TITLE, names[i]) / 2, (int)(LANG_Y + 28),
-               v.language == i ? DARK_TEXT : MUTED);
-      }
-    }
   }
   // footer: status, and the handle to push it back up
   c.text(gfont::SMALL, v.status, PAD, 452, FAINT);
@@ -252,8 +239,6 @@ TapResult tap(int x, int y, const View& v) {
     }
   }
   if (inside(x, y, SLEEP_X - 8, SLEEP_Y - 8, SLEEP_W + 16, SLEEP_H + 16)) return TapResult(Tap::Sleep);
-  if (v.language >= 0 && inside(x, y, LANG_X - 8, LANG_Y - 8, LANG_W + 16, LANG_H + 16))
-    return TapResult(Tap::Language, x >= LANG_X + LANG_W / 2 ? 1 : 0);
   if (inside(x, y, WX_X - 8, WX_Y - 8, WX_W + 12, WX_H + 16)) return TapResult(Tap::Weather);
   for (int i = 0; i < v.noticeCount && i < 3; ++i) {
     const Notice& n = v.notices[i];
