@@ -245,8 +245,7 @@ Done and confirmed:
   to-dos, reminders, notifications, Claude names); subtitles reveal from the right. `ui::cleanText` (was `toAscii`) keeps
   Hebrew, drops vowel marks/emoji. To-dos: TEXT_MAX 112 bytes, NVS "todo"/"list" now packed "TOD2" records (4.6 "TOD1" converted
   on start). Alarm labels (32 B) / reminder texts (64 B) keep UTF-8 (sizes unchanged). PC tests: `bidi_test`, `todo_hebrew.ppm`,
-  Time `hebrew.ppm`. Confirmed ("music ok": Hebrew song names show right).
-  Confirmed ("music ok"), merged (PR #9).
+  Time `hebrew.ppm`. Confirmed ("music ok": Hebrew song names show right), merged (PR #9).
 - **4.8 - Gorgi hears and speaks Hebrew**: `lang.py` (config "language" en|he, `lang.t(en, he)`, `has_hebrew`, `cut_bytes`).
   Switch: Action Center pill EN/עב (`Tap::Language` -> `cmd language` 0/1; helper answers `{"type":"language","value"}`,
   also sent on connect) and Settings (Language, Hebrew voice Hila/Avri, **Test Hebrew answers** = `model_test.py`: 8 Hebrew
