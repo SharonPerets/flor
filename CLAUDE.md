@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.3 released and confirmed by the user; merged to main)
+## Where things stand (4.3.4 released, waiting for the user to confirm; 4.3.3 confirmed and on main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -171,15 +171,18 @@ Done and confirmed:
     helper's `update_loop()` sees `update_flow` (or the old `pending_gorgi_update`) -> `continue_after_restart()`
     reopens the window -> `_update_gorgi_step()` (wait for Gorgi 60 s, send, then wait up to 180 s for `hello`
     with the new version) -> "All done" + Close. Failures -> "Try again". Tests: `test_updates.py`.
-- **Still open: plan % on the Claude screen** shows only tokens. `claude-usage.json` said: "no saved Claude sign-in
-  found (or it has expired)", plan "Max" -> `~/.claude/.credentials.json` exists but its token is expired (the desktop
-  app doesn't refresh that file). Proposed to the user (waiting for A/B):
-  - **A (recommended)**: read the Claude desktop app's own claude.ai login cookie (`sessionKey`, Electron cookie DB in
-    %APPDATA%\Claude, DPAPI-protected key in "Local State"; read-only; may be locked while the app runs) and call
-    `https://claude.ai/api/organizations` -> `/api/organizations/{uuid}/usage` (`five_hour`/`seven_day` `utilization`,
-    `resets_at`), like github.com/jimdawdy-hub/claude-usage-tracker does with browser cookies (curl_cffi Firefox TLS
-    impersonation for Cloudflare). Fallbacks: OAuth file if fresh, then token counting.
-  - B: the helper refreshes the expired OAuth token itself (risk: can sign Claude Code out).
+- **4.3.4 - plan % from the desktop app's sign-in** (NOT confirmed yet). Research report (deep research, 2026-10-24)
+  found: the desktop app's Code tab uses its own token and never refreshes `~/.claude/.credentials.json` (stale);
+  renewing a token ourselves (platform.claude.com/v1/oauth/token) rotates the refresh token and SIGNS CLAUDE CODE
+  OUT (CodexBar, Claude-Usage-Tracker shipped that bug) - never do it. `usage_fetch.py` now (like
+  CodeZeno/Claude-Code-Usage-Monitor): `%APPDATA%\Claude\config.json` (or Store: `%LOCALAPPDATA%\Packages\
+  Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\`) key `oauth:tokenCacheV2` (then `oauth:tokenCache`) = base64
+  "v10"+nonce12+ciphertext+tag16, AES-GCM key = `Local State` os_crypt.encrypted_key (base64, "DPAPI" prefix,
+  CryptUnprotectData). Decrypted JSON: "<install>:<user>:<base url>:<scopes>" -> {token, expiresAt ms}; pick a fresh
+  entry with `user:profile`. Then a fresh .credentials.json. No fresh token -> no request. Every 5 min, 429 ->
+  Retry-After (5 min..1 h), 401/403 -> 5 min. Utilization 0..1 or 0..100 both accepted.
+  **User doesn't want token counts at all** ("just the %, if we fail, drop it"): LogCounter / set_tokens removed;
+  Gorgi shows "Plan usage not available right now" when there's no %. If it fails, ask for `claude-usage.json`.
 - Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -187,7 +190,8 @@ Done and confirmed:
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
-- Waiting for the user's A/B choice for the plan % fix (see "Still open" above), then build it as 4.3.4.
+- **4.3.4 released** (plan % from the desktop app's sign-in), waiting for the user to test it. Update via the
+  tray "Update to 4.3.4..." window (Update all: helper, then Gorgi for the new "not available" text).
 - Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
