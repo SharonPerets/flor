@@ -115,7 +115,7 @@ Done and confirmed:
     alerts or pop-ups, red mute button next to the face -> `cmd teams_mute` -> Ctrl+Shift+M sent to the Teams
     window. Mute is a "try" (no mute state shown). Better later: Teams' third-party device API
     (ws://127.0.0.1:8124, needs enabling in Teams) gives real mute state and in-meeting status.
-- **4.2 - pull-down panel** (`panel.cpp`): swipe down from the top bar (drag > 50 px down from y < 44), close by
+- **4.2 - pull-down panel** (replaced by the Action Center in 4.3; `panel.cpp` now only draws the top handle): swipe down from the top bar (drag > 50 px down from y < 44), close by
   pushing up or tapping outside; drawn over the page (page drawing paused, page marked dirty on close).
   - **Sleep**: backlight off, phase Asleep; any touch wakes (consumed). Timer/reminder/Claude alerts turn the screen
     on and it goes back to sleep after the alert is dismissed (`sleepAfterAlert`).
@@ -148,13 +148,25 @@ Done and confirmed:
   - Time screen redraws only the changed part (rings / buttons / list): a full redraw flickered (start/stop focus).
 - Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
 
+## Handover for the next session (2026-10-24)
+
+- Branch `claude/esp32-touch-screen-software-emaips` = 4.3.1 (released). **Not merged to main yet**: main has 4.2
+  (PR SharonPerets/flor#3). Merge 4.2.1-4.3.1 once the user confirms 4.3.1 works (the user asks "merge to main").
+- Waiting for the user to report on 4.3.1:
+  1. The helper self-update (tray stuck on "Downloading..." was the 4.1-4.3 quit bug). Steps given: end GorgiHelper
+     in Task Manager, start it, Check for updates -> helper 4.3.1, then Gorgi from the Action Center.
+  2. Claude usage shows "Usage - Max" with percentages (4.2.1, desktop app); else ask for `claude-usage.json`.
+  3. 4.3: Action Center look, weather chip -> forecast -> Back, slim music line, focus start/stop without flicker,
+     the music tab icon staying, an untapped alert turning into a notification after 10 min.
+- After that: the next feature from "Next steps" / the ideas list (plan first, then build).
+
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
 - Test pure-C++ drawing and logic on the PC first (`tools/pc-tests`), then let GitHub compile.
 
 ## Next steps (chosen by the user, in this order; plan each one with the user before coding)
 
-Planned screen order when all exist: **Music ← Face → Weather → Time → Sketch** (dots in the top bar).
+Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs; weather lives in the Action Center).
 
 1. ~~**Time screen**~~ - done in 3.9 (see above).
 2. ~~**Sketch pad**~~ - done in 4.0 (the AI-guess bonus was declined).
