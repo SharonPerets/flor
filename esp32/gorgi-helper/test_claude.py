@@ -127,9 +127,11 @@ asyncio.run(server_test())
 
 assert call_watch.in_call(["MSTeams_8wekyb3d8bbwe"]) and call_watch.in_call(["C:#Users#a#AppData#Local#Microsoft#Teams#current#Teams.exe"])
 assert not call_watch.in_call(["Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe", "C:#Program Files#GorgiHelper#GorgiHelper.exe"])
-# ---- usage: sign-in, tokens from logs, Anthropic's answer
+# ---- usage: sign-ins (desktop app, Claude Code file), Anthropic's answer, no token counting
+import base64 as _b64
 import time as _t
 import usage_fetch as uf
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 cred = d / ".credentials.json"
 cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": int((_t.time() + 3600) * 1000),
                                               "subscriptionType": "max"}}))
@@ -137,38 +139,84 @@ assert uf.read_sign_in(cred) == ("tok", "Max")
 cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": int((_t.time() - 10) * 1000),
                                               "subscriptionType": "pro"}}))
 assert uf.read_sign_in(cred) == (None, "Pro")
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "", "expiresAt": 0, "subscriptionType": "max"}}))
+assert uf.read_sign_in(cred) == (None, "Max")  # blanked by a failed renewal
 assert uf.read_sign_in(d / "missing.json") == (None, None)
 
-proj = d / "projects" / "C--code-flor"
-proj.mkdir(parents=True)
-now = _t.time()
-iso = lambda t: _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime(t))
-rows = [{"type": "assistant", "timestamp": iso(now - 600), "message": {"id": "m1", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 10, "cache_read_input_tokens": 9999}}},
-        {"type": "assistant", "timestamp": iso(now - 600), "message": {"id": "m1", "usage": {"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 10}}},
-        {"type": "assistant", "timestamp": iso(now - 3 * 86400), "message": {"id": "m2", "usage": {"input_tokens": 1000, "output_tokens": 0}}},
-        {"type": "user", "timestamp": iso(now), "message": {"content": "hi"}}]
-(proj / "s.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n")
-assert uf.LogCounter().count([d / "projects"], now) == (160, 1160)
+# the desktop app's token cache, locked like the app does it (a fake Windows lock: none)
+app = d / "Claude"
+app.mkdir()
+key = AESGCM.generate_key(bit_length=256)
+(app / "Local State").write_text(json.dumps({"os_crypt": {"encrypted_key": _b64.b64encode(b"DPAPI" + key).decode()}}))
+def lock(obj):
+    nonce = b"0123456789ab"
+    return _b64.b64encode(b"v10" + nonce + AESGCM(key).encrypt(nonce, json.dumps(obj).encode(), None)).decode()
+soon, later = int((_t.time() + 3600) * 1000), int((_t.time() + 7200) * 1000)
+base = "inst:user:https://api.anthropic.com:"
+cache = {base + "user:inference": {"token": "infer-only", "expiresAt": later},
+         base + "user:inference user:profile user:sessions:claude_code": {"token": "good", "expiresAt": soon},
+         base + "user:profile user:inference": {"token": "old", "expiresAt": int((_t.time() - 50) * 1000)},
+         base + "user:profile": {"token": "  ", "expiresAt": later}}
+(app / "config.json").write_text(json.dumps({"locale": "en", "oauth:tokenCacheV2": lock(cache)}))
+same = lambda b: b
+assert uf.read_desktop_sign_in([app / "config.json"], same) == ("good", "desktop app (oauth:tokenCacheV2)")
+(app / "config.json").write_text(json.dumps({"oauth:tokenCacheV2": "djEwYnJva2Vu", "oauth:tokenCache": lock(cache)}))
+assert uf.read_desktop_sign_in([app / "config.json"], same) == ("good", "desktop app (oauth:tokenCache)")
+(app / "config.json").write_text(json.dumps({"oauth:tokenCacheV2": lock({base + "user:inference": {"token": "x"}})}))
+token, why = uf.read_desktop_sign_in([app / "config.json"], same)
+assert token is None and "no fresh sign-in" in why, why
+assert uf.read_desktop_sign_in([d / "nope" / "config.json"], same) == (None, "Claude desktop app not found")
+def broken_lock(_b):
+    raise OSError("Windows couldn't unlock the key")
+(app / "config.json").write_text(json.dumps({"oauth:tokenCacheV2": lock(cache)}))
+assert "can't unlock" in uf.read_desktop_sign_in([app / "config.json"], broken_lock)[1]
+assert uf._percents({"five_hour": {"utilization": 0.41}, "seven_day": {"utilization": 0.125}})[0] == 41.0
+assert uf._percents({"five_hour": {"utilization": 41}, "seven_day": {"utilization": 0}})[0] == 41
+assert uf._retry_after("0") == 300 and uf._retry_after("99999") == 3600 and uf._retry_after(None) == 300
 
 class FakeWatch(ClaudeWatch):
     pass
+uf.claude_dir = lambda: d
+real_desktop = uf.read_desktop_sign_in
+uf.read_desktop_sign_in = lambda: real_desktop([app / "config.json"], same)
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "file-tok", "expiresAt": soon, "subscriptionType": "max"}}))
+asked = []
+async def ok(client, token):
+    asked.append(token)
+    return 200, {"five_hour": {"utilization": 41.0, "resets_at": "2026-10-24T03:00:00+00:00"},
+                 "seven_day": {"utilization": 12.5, "resets_at": "2026-10-29T09:00:00+00:00"}}, None
 fw = FakeWatch()
 f = uf.UsageFetcher(fw, d / "usage-debug.json")
-uf.claude_dir = lambda: d
-cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "tok", "expiresAt": int((_t.time() + 3600) * 1000), "subscriptionType": "max"}}))
-async def ok(client, token):
-    return 200, {"five_hour": {"utilization": 41.0, "resets_at": "2026-10-24T03:00:00+00:00"},
-                 "seven_day": {"utilization": 12.5, "resets_at": "2026-10-29T09:00:00+00:00"}}
 f.ask_anthropic = ok
 asyncio.run(f.check_once(None))
 u = fw.message()["usage"]
+assert asked == ["good"]  # the desktop app's sign-in comes first
 assert u["mode"] == "percent" and u["five"] == 41.0 and u["plan"] == "Max" and u["week_reset"] > 0, u
-assert "tok" not in (d / "usage-debug.json").read_text()
+debug = (d / "usage-debug.json").read_text()
+assert "good" not in debug and "file-tok" not in debug and "desktop app" in debug
+# no desktop app: the fresh file sign-in is used
+uf.read_desktop_sign_in = lambda: (None, "Claude desktop app not found")
+f2 = uf.UsageFetcher(FakeWatch()); f2.ask_anthropic = ok
+asyncio.run(f2.check_once(None)); assert asked[-1] == "file-tok"
+# nothing fresh: Anthropic isn't asked at all, and there's no usage (no token counting any more)
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "file-tok", "expiresAt": 1, "subscriptionType": "max"}}))
+fw3 = FakeWatch(); f3 = uf.UsageFetcher(fw3, d / "usage-debug.json"); f3.ask_anthropic = ok
+n = len(asked); asyncio.run(f3.check_once(None))
+assert len(asked) == n and "usage" not in fw3.message() and "no fresh sign-in" in (d / "usage-debug.json").read_text()
+# refused / too many requests: waits before asking again, keeps the last numbers
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "file-tok", "expiresAt": soon, "subscriptionType": "max"}}))
+async def busy(client, token):
+    asked.append(token)
+    return 429, {"error": {"type": "rate_limit_error"}}, "0"
+f.ask_anthropic = busy
+f.wait_until = 0
+asyncio.run(f.check_once(None)); n = len(asked)
+assert f.wait_until > _t.time() + 290 and fw.message()["usage"]["five"] == 41.0
+asyncio.run(f.check_once(None)); assert len(asked) == n  # still waiting
 async def refused(client, token):
-    return 401, {"error": {"type": "authentication_error"}}
-fw2 = FakeWatch(); f2 = uf.UsageFetcher(fw2); f2.ask_anthropic = refused
-asyncio.run(f2.check_once(None))
-u = fw2.message()["usage"]
-assert u["mode"] == "tokens" and u["five_tokens"] == 160 and u["week_tokens"] == 1160 and u["plan"] == "Max", u
-print(fw2.summary())
+    return 401, {"error": {"type": "authentication_error"}}, None
+f.ask_anthropic = refused; f.wait_until = 0
+asyncio.run(f.check_once(None)); assert f.wait_until > _t.time() + 290
+uf.read_desktop_sign_in = real_desktop
+print(fw.summary())
 print("ALL OK")

@@ -1092,6 +1092,25 @@ def self_test(out_path):
 
         token, plan = usage_fetch.read_sign_in()
         lines.append(f"claude sign-in found: {bool(token)}, plan: {plan}")
+        lines.append(f"claude desktop sign-in: {usage_fetch.read_desktop_sign_in()[1]}")
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        assert AESGCM(b"k" * 32).decrypt(b"n" * 12, AESGCM(b"k" * 32).encrypt(b"n" * 12, b"hi", None), None) == b"hi"
+        if IS_WINDOWS:  # Windows' per-user lock, both ways (the desktop app's key is locked like this)
+            import ctypes
+            from ctypes import wintypes
+
+            class Blob(ctypes.Structure):
+                _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+            buf = ctypes.create_string_buffer(b"gorgi", 5)
+            out = Blob()
+            assert ctypes.windll.crypt32.CryptProtectData(
+                ctypes.byref(Blob(5, ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))), None, None, None, None, 0,
+                ctypes.byref(out))
+            locked = ctypes.string_at(out.pbData, out.cbData)
+            assert usage_fetch._dpapi_unprotect(locked) == b"gorgi"
+        lines.append("usage decryption: ok")
         import settings_window  # noqa: F401
 
         import updater as upd

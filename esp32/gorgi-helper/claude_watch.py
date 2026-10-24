@@ -113,7 +113,6 @@ class ClaudeWatch:
         self.usage = None    # {"five", "five_reset", "week", "week_reset", "at"}
         self.model = ""
         self.hooked = False  # we've heard from Claude Code
-        self.log_dirs = set()  # folders with Claude Code's session logs
 
     # ------------------------------------------------------------ events
 
@@ -170,8 +169,6 @@ class ClaudeWatch:
         if not isinstance(data, dict):
             return
         self.hooked = True
-        if data.get("transcript_path"):  # where this Claude keeps its logs (for counting tokens)
-            self.log_dirs.add(str(PurePath(str(data["transcript_path"])).parent.parent))
         event = data.get("hook_event_name") or ""
         changed = False
         if event == "SessionEnd":
@@ -234,7 +231,7 @@ class ClaudeWatch:
                 self.set_percent(p5, (five or {}).get("resets_at"), p7, (week or {}).get("resets_at"), "status line")
         return self.status_line()
 
-    # ------------------------------------------------------------ usage (from the status line, Anthropic, or logs)
+    # ------------------------------------------------------------ usage (from the status line or Anthropic)
 
     def set_percent(self, p5, reset5, p7, reset7, source, plan=None):
         """Plan usage in percent (the best kind)."""
@@ -252,17 +249,6 @@ class ClaudeWatch:
         if (old.get("mode") != "percent" or round(old.get("five", -1)) != round(self.usage["five"])
                 or round(old.get("week", -1)) != round(self.usage["week"]) or self.clock() - old.get("at", 0) > 300
                 or old.get("plan") != self.usage["plan"]):
-            self.on_change()
-
-    def set_tokens(self, five_tokens, week_tokens, plan=None):
-        """Only token amounts from the logs (used when percentages can't be had)."""
-        old = self.usage or {}
-        if old.get("mode") == "percent" and self.clock() - old.get("at", 0) < 15 * 60:
-            return  # recent percentages are better
-        self.usage = {"mode": "tokens", "five_tokens": int(five_tokens), "week_tokens": int(week_tokens),
-                      "at": int(self.clock()), "plan": plan or old.get("plan", ""), "source": "logs"}
-        if (old.get("mode") != "tokens" or old.get("five_tokens") != self.usage["five_tokens"]
-                or old.get("week_tokens") != self.usage["week_tokens"]):
             self.on_change()
 
     def status_line(self):
@@ -307,9 +293,6 @@ class ClaudeWatch:
         if u and u.get("mode") == "percent":
             lines.append(f"Claude plan usage: {u['five']:.0f}% of the 5-hour limit, {u['week']:.0f}% of the weekly "
                          "limit.")
-        elif u:
-            lines.append(f"Claude Code used about {u['five_tokens']:,} tokens in the last 5 hours and "
-                         f"{u['week_tokens']:,} in the last 7 days (plan percentages aren't available).")
         return "\n".join(lines)
 
     # ------------------------------------------------------------ the little web server

@@ -153,7 +153,7 @@ void draw(Canvas& c, const View& v) {
     c.text(gfont::SMALL, plan, R_X + 26 + Canvas::textWidth(gfont::TITLE, "Usage"), (int)P_Y + 35, MUTED);
   }
   if (!v.usage.known) {
-    const char* lines[] = {"Shows up after", "Claude Code answers", "once."};
+    const char* lines[] = {"Plan usage", "not available", "right now."};
     for (int i = 0; i < 3; ++i) c.text(gfont::SMALL, lines[i], R_X + 18, (int)ROW_Y + 26 + i * 24, MUTED);
     return;
   }
