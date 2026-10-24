@@ -11,6 +11,7 @@ import asyncio
 import logging
 import re
 import os
+import threading
 import time
 
 import numpy as np
@@ -118,9 +119,14 @@ class Transcriber:
         self._model = None
         self.loading = False
         self.error = None
+        self._lock = threading.Lock()  # one load at a time (two downloads of the same files clash)
 
     def load(self):
         """Loads (and the first time downloads) the Whisper model. Slow: run in a thread."""
+        with self._lock:
+            self._load()
+
+    def _load(self):
         if self._model is not None:
             return
         self.loading = True
