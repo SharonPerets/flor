@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.6.2 subtitle-with-voice released, waiting for the user; 4.6.1 confirmed and merged)
+## Where things stand (4.6.2 confirmed and merged; everything on main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -229,7 +229,7 @@ Done and confirmed:
   right before playback (`voice.word_timings`, guesses from word lengths without boundaries). Firmware:
   `ui::setSubtitleReveal(n)` draws only the first n words of the (fully wrapped) subtitle, two lines at a time, turning
   to the next two lines for long replies (no more "..." cut); main `updateSayWords` each frame. Rejected option C
-  (hide "You: ..." / "Thinking...") for now.
+  (hide "You: ..." / "Thinking...") for now. Confirmed ("looks great!").
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -240,9 +240,8 @@ Done and confirmed:
 - **4.3.4 is confirmed** (plan % works) and merged to main.
 - **4.6 + 4.6.1 (To-do screen, face follows the conversation) are confirmed** ("ok good") and merged to main
   (with 4.4/4.5).
-- **4.6.2** (reply text appears word by word with the voice) is released from `claude/project-thread-fs7qq5`
-  (restarted from main), waiting for the user's test. When confirmed: mark it here, merge to main. When confirmed: mark it here, merge the branch to main. If voice tasks
-  come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
+- **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
+  If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
 Lessons from 3.9 (keep for future screens):
