@@ -257,6 +257,10 @@ Done and confirmed:
   alerts (`hebrew_alert`); the device's alert screens stay English. Self-test: Hila says a Hebrew timer request, the ivrit
   model transcribes it word for word, but in ~12 s for 4 s of speech on the 4-core CI PC (all cores used now); ask the user
   how long Hebrew answers take. Released as gorgi-v4.8.
+- **4.8.1 - Hebrew download fix**: on the user's PC the ivrit model downloaded (~35 s) but faster-whisper said "Unable to
+  open file 'model.bin'" in the Hugging Face cache (`models--ivrit-ai--.../snapshots/...`; likely Windows symlinks).
+  Now `Transcriber._download()` uses `snapshot_download(local_dir=models/ivrit-ai--whisper-large-v3-turbo-ct2)` (plain
+  files), writes `download-complete.txt` (no internet needed later), deletes the old cache folder, logs model.bin size.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)

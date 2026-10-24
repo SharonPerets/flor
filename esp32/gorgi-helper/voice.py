@@ -138,9 +138,8 @@ class Transcriber:
             if bundled:
                 model = str(bundled)  # shipped with the app: no download needed
                 log.info("loading bundled Whisper model from %s", bundled)
-            else:
-                log.info("loading Whisper model %s (downloads once, %s)...", self.model_name,
-                         "~1.6 GB" if self.language == "he" else "~150 MB")
+            elif "/" in self.model_name:  # a Hugging Face model (the Hebrew one)
+                model = self._download()
             # All the PC's cores (the default is 4): the big Hebrew model is ~3x slower than the English one
             threads = min(os.cpu_count() or 4, 12)
             self._model = WhisperModel(model, device="cpu", compute_type="int8", cpu_threads=threads,
@@ -151,9 +150,38 @@ class Transcriber:
             import traceback
 
             log.exception("could not load Whisper")
+            if "/" in self.model_name:  # check the downloaded files again next time
+                from pathlib import Path
+
+                marker = Path(self.models_dir) / self.model_name.replace("/", "--") / "download-complete.txt"
+                marker.unlink(missing_ok=True)
             self.error = f"{e!r}\n{traceback.format_exc()}"
         finally:
             self.loading = False
+
+    def _download(self):
+        """Downloads a Hugging Face model into a plain folder and returns it. Not the usual Hugging Face
+        cache: on Windows without symlink rights its links can't be opened ("Unable to open file
+        'model.bin'", 4.8 on the user's PC)."""
+        import shutil
+        from pathlib import Path
+
+        from huggingface_hub import snapshot_download
+
+        folder = Path(self.models_dir) / self.model_name.replace("/", "--")
+        done = folder / "download-complete.txt"
+        if done.exists() and (folder / "model.bin").exists():
+            return str(folder)  # works without internet
+        log.info("downloading Whisper model %s (once, %s) into %s", self.model_name,
+                 "~1.6 GB" if self.language == "he" else "~150 MB", folder)
+        snapshot_download(self.model_name, local_dir=str(folder))  # carries on from a broken download
+        done.write_text(self.model_name, encoding="utf-8")
+        size = (folder / "model.bin").stat().st_size
+        log.info("Whisper model files ready: model.bin %.0f MB", size / 1e6)
+        old_cache = Path(self.models_dir) / ("models--" + self.model_name.replace("/", "--"))
+        if old_cache.exists():  # what 4.8 downloaded the other way: not needed, frees 1.6 GB
+            shutil.rmtree(old_cache, ignore_errors=True)
+        return str(folder)
 
     @property
     def ready(self):
