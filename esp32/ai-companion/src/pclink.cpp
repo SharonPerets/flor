@@ -290,6 +290,11 @@ void send(JsonDocument& doc) {
   sendJson(helperClient, doc);
 }
 
+void sendText(const String& json) {
+  if (helperClient < 0) return;
+  server.sendTXT((uint8_t)helperClient, json.c_str(), json.length());
+}
+
 void forgetWifi() {
   Serial.println("pclink: forgetting Wi-Fi and the paired helper, restarting");
   prefs.remove("helperKey");

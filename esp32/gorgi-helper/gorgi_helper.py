@@ -597,14 +597,16 @@ class Helper:
         if self.conversation_task and not self.conversation_task.done():
             self.conversation_task.cancel()
 
-    def start_conversation(self):
+    def start_conversation(self, dictate=False):
         if self.conversation_task and not self.conversation_task.done():
             return
         if self.make_conversation is None:
-            asyncio.get_running_loop().create_task(
-                self.send({"type": "say", "mood": "sad", "text": "My voice parts aren't installed on the PC."}))
+            msg = ({"type": "dictate_state", "state": "idle", "problem": "Voice isn't installed on the PC"} if dictate
+                   else {"type": "say", "mood": "sad", "text": "My voice parts aren't installed on the PC."})
+            asyncio.get_running_loop().create_task(self.send(msg))
             return
         conversation = self.make_conversation(self.send)
+        conversation.dictate = dictate
         self.conversation_task = asyncio.get_running_loop().create_task(self._run_conversation(conversation))
 
     async def _run_conversation(self, conversation):
@@ -614,7 +616,8 @@ class Helper:
             log.info("conversation cancelled")
         except Exception:
             log.exception("conversation failed")
-            await self.send({"type": "voice", "state": "idle"})
+            if not conversation.dictate:  # (voice typing already said it's done)
+                await self.send({"type": "voice", "state": "idle"})
 
     async def _session(self, ws):
         self.ws = ws
@@ -671,6 +674,13 @@ class Helper:
                 log.info("Gorgi was tapped: starting a conversation")
                 self.start_conversation()
                 continue
+            if msg.get("type") == "dictate":
+                log.info("voice typing on the Sketch screen")
+                self.start_conversation(dictate=True)
+                continue
+            if msg.get("type") == "ink":
+                asyncio.get_running_loop().create_task(self.read_ink(msg))
+                continue
             if msg.get("type") == "cancel":
                 log.info("Gorgi was tapped again: stopping the conversation")
                 self.stop_conversation()
@@ -695,6 +705,19 @@ class Helper:
                 self.ignore_volume_until = time.monotonic() + 0.5
             # Report the new state soon, once the media app has reacted
             asyncio.get_running_loop().call_later(0.4, self.refresh_event.set)
+
+    async def read_ink(self, msg):
+        """A handwritten word from the Sketch screen: send back what it says."""
+        import ink_reader
+
+        started = time.monotonic()
+        try:
+            guesses = await ink_reader.read(msg.get("strokes") or [])
+        except Exception as e:
+            log.warning("handwriting: %r", e)
+            guesses = []
+        log.info("handwriting read as %s (%.0f ms)", guesses, (time.monotonic() - started) * 1000)
+        await self.send({"type": "ink_text", "id": msg.get("id", 0), "guesses": guesses})
 
     # ------------------------------------------------------------ Claude Code and calls
 

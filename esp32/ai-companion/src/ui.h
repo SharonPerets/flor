@@ -39,6 +39,8 @@ void setStatus(const String& text, const gfx::Color& color, bool pulse);
 // A real "Talk" button in the top right (screens without a face to tap). It shows
 // while the status is empty; Listening / Thinking / On a call show instead.
 void setTalkButton(bool on);
+// No music bar or slim line at the bottom (the Sketch screen uses all of it)
+void setBottomHidden(bool hidden);
 void setSubtitle(const String& text);
 void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);

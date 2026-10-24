@@ -94,6 +94,8 @@ void sendSimple(const char* type);
 
 // Send any message (it must have a "type"). Does nothing if the helper isn't connected.
 void send(JsonDocument& doc);
+// The same with a message already written as JSON text (for big ones, like handwriting)
+void sendText(const String& json);
 
 // Firmware updates: the helper sends the new firmware with
 //   POST http://gorgi.local:8080/update?key=<pairing secret>&size=<bytes>&md5=<hex>

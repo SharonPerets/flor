@@ -36,10 +36,10 @@ const Color GUIDE = gfx::rgb(0x2F5F5C);
 
 // Toolbar: Write and Draw on top, then two columns of round buttons, then Clear and New page
 constexpr float COL_X[2] = {30, 78};
-constexpr float ROW_Y[4] = {146, 190, 234, 278};
-constexpr float CELL_R = 19;  // highlight behind a button
-constexpr float PILL_X = 6, PILL_W = 96, PILL_H = 30;
-constexpr float WRITE_Y = 54, DRAW_Y = 89, CLEAR_Y = 304, NEW_Y = 339;
+constexpr float ROW_Y[4] = {170, 222, 274, 326};
+constexpr float CELL_R = 21;  // highlight behind a button
+constexpr float PILL_X = 6, PILL_W = 96, PILL_H = 36;
+constexpr float WRITE_Y = 56, DRAW_Y = 100, CLEAR_Y = 372, NEW_Y = 418;
 
 // Write mode box buttons (x on screen, y from the top of the box)
 constexpr float BTN_X = 700, BTN_W = 80, BTN_H = 36, SPACE_Y = 28, NEWLINE_Y = 78;
@@ -110,11 +110,11 @@ bool inside(int x, int y, float bx, float by, float bw, float bh) {
 
 static void pill(Canvas& c, float y, const char* label, bool on, const Color& onColor = ACCENT) {
   c.fillRRect(PILL_X, y, PILL_W, PILL_H, PILL_H / 2, on ? onColor : BORDER);
-  centered(c, gfont::SMALL, label, PILL_X + PILL_W / 2, (int)y + 21, on ? DARK_TEXT : TEXT);
+  centered(c, gfont::SMALL, label, PILL_X + PILL_W / 2, (int)y + 24, on ? DARK_TEXT : TEXT);
 }
 
 void drawToolbar(Canvas& c, const Tools& t) {
-  c.fillRect(TOOLBAR_RIGHT - 1, 50, 1, 320, BORDER);
+  c.fillRect(TOOLBAR_RIGHT - 1, PAPER_Y, 1, PAPER_H, BORDER);
   pill(c, WRITE_Y, "Write", t.write);
   pill(c, DRAW_Y, "Draw", !t.write);
   for (int i = 0; i < COLOR_COUNT; ++i) {
@@ -143,14 +143,14 @@ void drawToolbar(Canvas& c, const Tools& t) {
 ToolTap toolbarTap(int x, int y) {
   if (x >= TOOLBAR_RIGHT || y < 48) return ToolTap();
   const int col = x < 54 ? 0 : 1;
-  if (y < 87) return ToolTap(Tool::Write);
-  if (y < 123) return ToolTap(Tool::Draw);
-  if (y < 168) return ToolTap(Tool::Color, col);
-  if (y < 212) return ToolTap(Tool::Color, 2 + col);
-  if (y < 256) return ToolTap(col ? Tool::Size : Tool::Eraser);
-  if (y < 300) return ToolTap(col ? Tool::Gallery : Tool::Undo);
-  if (y < 337) return ToolTap(Tool::Clear);
-  if (y < 376) return ToolTap(Tool::NewPage);
+  if (y < 96) return ToolTap(Tool::Write);
+  if (y < 142) return ToolTap(Tool::Draw);
+  if (y < 196) return ToolTap(Tool::Color, col);
+  if (y < 248) return ToolTap(Tool::Color, 2 + col);
+  if (y < 300) return ToolTap(col ? Tool::Size : Tool::Eraser);
+  if (y < 362) return ToolTap(col ? Tool::Gallery : Tool::Undo);
+  if (y < 412) return ToolTap(Tool::Clear);
+  if (y < 480) return ToolTap(Tool::NewPage);
   return ToolTap();
 }
 
@@ -281,26 +281,51 @@ void Writer::ink(const Pt* pts, int n) {
   for (int i = 0; i < n; ++i) {
     const Pt& p = pts[i];
     bc.fillCapsule(last_.x, last_.y, p.x, p.y, rb, col_);
-    const Pt a = toPage(last_), b = toPage(p);
-    pc.fillCapsule(a.x, a.y, b.x, b.y, rPage_, col_);
     const int m = (int)rb + 2;
     mark(gfx::intersect(boxRect(), Rect{(int)fminf(last_.x, p.x) - m, (int)fminf(last_.y, p.y) - m,
                                          (int)fabsf(p.x - last_.x) + 2 * m + 1, (int)fabsf(p.y - last_.y) + 2 * m + 1}));
-    mark(Rect{(int)fminf(a.x, b.x) - 3, (int)fminf(a.y, b.y) - 3, (int)fabsf(b.x - a.x) + 7, (int)fabsf(b.y - a.y) + 7});
+    if (!typed_) {  // no PC: the handwriting goes straight onto the page
+      const Pt a = toPage(last_), b = toPage(p);
+      pc.fillCapsule(a.x, a.y, b.x, b.y, rPage_, col_);
+      mark(Rect{(int)fminf(a.x, b.x) - 3, (int)fminf(a.y, b.y) - 3, (int)fabsf(b.x - a.x) + 7, (int)fabsf(b.y - a.y) + 7});
+    }
     if (p.x + rb > inkRight_) inkRight_ = p.x + rb;
     last_ = p;
   }
 }
 
+void Writer::record(float x, float y, bool newStroke) {
+  Word& w = word_;
+  const int16_t px = (int16_t)lroundf(x - BOX_INK_X), py = (int16_t)lroundf(y - (boxY() + BOX_BASE));
+  if (newStroke) {
+    if (w.strokes >= WORD_STROKES || w.points >= WORD_POINTS) return;
+    w.start[w.strokes++] = (uint16_t)w.points;
+  } else {
+    if (w.strokes == 0 || w.points >= WORD_POINTS) return;
+    const int l = w.points - 1;
+    if (l >= w.start[w.strokes - 1] && abs(w.x[l] - px) + abs(w.y[l] - py) < 2) return;  // hardly moved
+  }
+  w.x[w.points] = px;
+  w.y[w.points] = py;
+  ++w.points;
+}
+
 void Writer::begin(float x, float y, const Color& col, int size) {
   drawing_ = false;
-  if (!hasInk() && cur_.x > PAPER_W - 100) {  // no room left on this line
-    newLine();
-    if (full_) return;
+  if (!hasInk()) {
+    if (cur_.x > PAPER_W - 100) {  // no room left on this line
+      newLine();
+      if (full_) return;
+    }
+    typed_ = typedNext_;
+    word_.points = word_.strokes = 0;
+    word_.right = -1;
+    clearChips();
   }
   col_ = col;
   rPage_ = WRITE_SIZES[size < 0 ? 0 : (size >= SIZE_COUNT ? SIZE_COUNT - 1 : size)];
   drawing_ = true;
+  record(x, y, true);
   Pt pts[Smoother::MAX_OUT];
   sm_.start(x, y, pts);
   last_ = pts[0];
@@ -309,6 +334,7 @@ void Writer::begin(float x, float y, const Color& col, int size) {
 
 void Writer::move(float x, float y) {
   if (!drawing_) return;
+  record(x, y, false);
   Pt pts[Smoother::MAX_OUT];
   ink(pts, sm_.add(x, y, pts));
 }
@@ -330,12 +356,115 @@ bool Writer::tick(uint32_t now) {
 
 bool Writer::commit() {
   if (!hasInk()) return false;
+  if (typed_) {  // the word goes to the PC; typeWord / placeHandwriting puts it on the page
+    word_.right = inkRight_ - BOX_INK_X;
+    word_.color = col_;
+    word_.radius = rPage_;
+    wordReady_ = true;
+    clearBox();
+    return true;
+  }
   markCursor();
   cur_.x += (inkRight_ - BOX_INK_X) / SCALE + 2;
   clearBox();
   if (cur_.x > PAPER_W - 40) newLine();
   markCursor();
   return true;
+}
+
+bool Writer::takeWord(Word& out) {
+  if (!wordReady_) return false;
+  wordReady_ = false;
+  out = word_;
+  return true;
+}
+
+// Moves to the next line when a piece w pixels wide doesn't fit any more. false = the page is full.
+bool Writer::roomFor(float w) {
+  if (cur_.x + w <= PAPER_W - MARGIN || cur_.x <= MARGIN + 1) return true;
+  newLine();
+  return !full_;
+}
+
+bool Writer::typeWord(const char* text, const Color& col) {
+  if (!text || !*text) return true;
+  const float w = Canvas::textWidth(gfont::NOTE, text);
+  if (!roomFor(w)) return false;
+  markCursor();
+  if (page_) {
+    Canvas pc;
+    pc.begin(page_, PAPER_W, PAPER_H, PAPER_X, PAPER_Y);
+    pc.text(gfont::NOTE, text, PAPER_X + cur_.x, PAPER_Y + baseline(cur_.line), col);
+  }
+  mark(Rect{(int)(PAPER_X + cur_.x) - 2, PAPER_Y + baseline(cur_.line) - 26, (int)w + 6, 36});
+  cur_.x += w + Canvas::textWidth(gfont::NOTE, " ");
+  markCursor();
+  return true;
+}
+
+bool Writer::placeHandwriting(const Word& w) {
+  if (w.points == 0) return true;
+  const float width = w.right / SCALE + 2;
+  if (!roomFor(width)) return false;
+  markCursor();
+  if (page_) {
+    Canvas pc;
+    pc.begin(page_, PAPER_W, PAPER_H, PAPER_X, PAPER_Y);
+    const float ox = PAPER_X + cur_.x, oy = (float)(PAPER_Y + baseline(cur_.line));
+    for (int s = 0; s < w.strokes; ++s) {
+      const int a = w.start[s], b = s + 1 < w.strokes ? w.start[s + 1] : w.points;
+      Smoother sm;
+      Pt pts[Smoother::MAX_OUT];
+      Pt last = {ox + w.x[a] / SCALE, oy + w.y[a] / SCALE};
+      sm.start(last.x, last.y, pts);
+      pc.fillCircle(last.x, last.y, w.radius, w.color);
+      for (int i = a + 1; i <= b; ++i) {
+        const int n = i < b ? sm.add(ox + w.x[i] / SCALE, oy + w.y[i] / SCALE, pts) : sm.finish(pts);
+        for (int k = 0; k < n; ++k) {
+          pc.fillCapsule(last.x, last.y, pts[k].x, pts[k].y, w.radius, w.color);
+          last = pts[k];
+        }
+      }
+    }
+  }
+  mark(Rect{(int)(PAPER_X + cur_.x) - 4, PAPER_Y + baseline(cur_.line) - 44, (int)width + 8, 64});
+  cur_.x += width;
+  markCursor();
+  return true;
+}
+
+void Writer::setChips(const char* const* texts, int n) {
+  chipCount_ = 0;
+  for (int i = 0; i < n && chipCount_ < CHIPS; ++i) {
+    if (!texts[i] || !*texts[i]) continue;
+    snprintf(chips_[chipCount_], sizeof chips_[0], "%s", texts[i]);
+    ++chipCount_;
+  }
+  mark(boxRect());
+}
+
+void Writer::clearChips() {
+  if (!chipCount_) return;
+  chipCount_ = 0;
+  mark(boxRect());
+}
+
+constexpr float CHIP_Y = 8, CHIP_H = 32, CHIP_GAP = 10, CHIP_PAD = 16;
+
+float Writer::chipX(int i) const {
+  float x = BOX_INK_X + Canvas::textWidth(gfont::SMALL, "Or:") + 12;
+  for (int k = 0; k < i; ++k) x += Canvas::textWidth(gfont::NOTE, chips_[k]) + 2 * CHIP_PAD + CHIP_GAP;
+  return x;
+}
+
+int Writer::chipAt(int x, int y) const {
+  const float by = (float)boxY();
+  if (y < by + CHIP_Y - 6 || y >= by + CHIP_Y + CHIP_H + 8) return -1;
+  for (int i = 0; i < chipCount_; ++i) {
+    const float cx = chipX(i), w = Canvas::textWidth(gfont::NOTE, chips_[i]) + 2 * CHIP_PAD;
+    if (x >= cx - 4 && x < cx + w + 4) return i;
+  }
+  return -1;
 }
 
 void Writer::clearBox() {
@@ -348,6 +477,7 @@ void Writer::clearBox() {
 
 void Writer::space() {
   commit();
+  clearChips();
   markCursor();
   cur_.x += SPACE;
   if (cur_.x > PAPER_W - 40) newLine();
@@ -356,6 +486,7 @@ void Writer::space() {
 
 void Writer::newLine() {
   commit();
+  clearChips();
   if (cur_.line + 1 >= LINES) {
     full_ = true;
     return;
@@ -403,6 +534,7 @@ void Writer::findCursor() {
     }
   }
   inkRight_ = -1;
+  chipCount_ = 0;
   cur_ = c;
   flip_ = true;
 }
@@ -419,7 +551,16 @@ void Writer::draw(Canvas& c) const {
   if (gfx::intersect(c.area(), r).empty()) return;
   c.fillRect(r.x, r.y, r.w, r.h, BOX_BG);
   c.fillRect(r.x, boxOnTop() ? r.bottom() - 2 : r.y, r.w, 2, ACCENT);
-  c.text(gfont::SMALL, "Write here, big. It shrinks onto the page.", BOX_INK_X, r.y + 26, MUTED);
+  if (chipCount_) {  // other guesses for the last word: tap one to swap it in
+    c.text(gfont::SMALL, "Or:", BOX_INK_X, (int)(r.y + CHIP_Y + 22), MUTED);
+    for (int i = 0; i < chipCount_; ++i) {
+      const float x = chipX(i), w = Canvas::textWidth(gfont::NOTE, chips_[i]) + 2 * CHIP_PAD;
+      c.fillRRect(x, r.y + CHIP_Y, w, CHIP_H, CHIP_H / 2, BORDER);
+      c.text(gfont::NOTE, chips_[i], x + CHIP_PAD, (int)(r.y + CHIP_Y + 23), TEXT);
+    }
+  } else {
+    c.text(gfont::SMALL, "Write here, big.", BOX_INK_X, r.y + 26, MUTED);
+  }
   const float gy = (float)(r.y + BOX_BASE);
   for (float x = BOX_INK_X; x < BOX_INK_RIGHT; x += 14) c.fillRect(x, gy, 7, 2, GUIDE);
   for (float y = r.y + 36; y < r.bottom() - 8; y += 12) c.fillRect(BOX_SLIDE_X, y, 2, 6, GUIDE);
@@ -518,8 +659,8 @@ size_t packRows(const uint16_t* picture, int y0, int y1, uint8_t* out) {
   return o;
 }
 
-Unpacker Unpacker::forThumb(uint16_t* thumb) {
-  Unpacker u(thumb);
+Unpacker Unpacker::forThumb(uint16_t* thumb, int rows) {
+  Unpacker u(thumb, rows);
   u.thumb_ = true;
   return u;
 }
@@ -543,7 +684,7 @@ void Unpacker::feed(const uint8_t* data, size_t len) {
 }
 
 void Unpacker::put(uint16_t count, uint16_t color) {
-  const uint32_t total = (uint32_t)PAPER_W * PAPER_H;
+  const uint32_t total = (uint32_t)PAPER_W * rows_;
   uint32_t end = pos_ + count;
   if (end > total) end = total;
   if (!thumb_) {

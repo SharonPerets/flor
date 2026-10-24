@@ -9,7 +9,7 @@
 using namespace sketch;
 using gfx::Rect;
 static void save(const char* name, void (*fn)(gfx::Canvas&, void*), void* ctx) {
-  const int W = 800, H = 332;
+  const int W = 800, H = 436;
   std::vector<uint16_t> buf(W * H);
   gfx::Canvas c; c.begin(buf.data(), W, H, 0, 44);
   c.clear(gfx::rgb(0x05070A));
@@ -49,14 +49,14 @@ static void writeTest() {
   fakeWord(w, 4, BOX_INK_X + 10, now); w.commit();
   w.placeAt(PAPER_X + 300, PAPER_Y + FIRST_LINE + 2 * LINE_H - 5); assert(w.cursor().line == 2 && w.cursor().x == 300);
   // the lines fill up; reaching the lower half moves the box to the top
-  w.setCursor(Cursor(3, MARGIN)); w.takeLayoutChange();
+  w.setCursor(Cursor(5, MARGIN)); w.takeLayoutChange();
   fakeWord(w, 2, BOX_INK_X + 10, now); w.commit();
   assert(!w.boxOnTop());
   w.newLine(); w.newLine(); assert(w.boxOnTop() && w.takeLayoutChange());
   fakeWord(w, 5, BOX_INK_X + 10, now); w.commit();
   // finding where to carry on after loading the page
   Writer w2; w2.attach(page.data(), box.data()); w2.findCursor();
-  assert(w2.cursor().line == 5 && w2.cursor().x > MARGIN);
+  assert(w2.cursor().line == 7 && w2.cursor().x > MARGIN);
   for (int i = 0; i < LINES; ++i) w2.newLine();
   assert(w2.takePageFull() && w2.cursor().line == LINES - 1);
   // smoother: a straight line stays straight, and the last point is reached
@@ -64,6 +64,23 @@ static void writeTest() {
   gfx::Pt last = {0, 0};
   for (int i = 1; i <= 20; ++i) { int n = sm.add(i * 5.0f, 0, out); for (int k = 0; k < n; ++k) { assert(fabsf(out[k].y) < 0.01f && out[k].x >= last.x - 0.01f); last = out[k]; } }
   int n = sm.finish(out); assert(n > 0 && out[n - 1].x == 100.0f);
+  // typed mode: the word goes to the PC, nothing on the page until it's typed
+  {
+    std::vector<uint16_t> pg(PAPER_W * PAPER_H, PAPER_COLOR.c);
+    Writer t; t.attach(pg.data(), box.data()); t.setTyped(true);
+    fakeWord(t, 3, BOX_INK_X + 10, now);
+    for (uint16_t p : pg) assert(p == PAPER_COLOR.c);
+    assert(t.commit() && !t.hasInk());
+    static Word wd; assert(t.takeWord(wd) && wd.points > 10 && wd.strokes == 1 && !t.takeWord(wd));
+    assert(t.cursor().x == MARGIN);
+    assert(t.typeWord("hello", COLORS[0]) && t.cursor().x > MARGIN + 40);
+    const float x1 = t.cursor().x;
+    assert(t.placeHandwriting(wd) && t.cursor().x > x1 + 20);
+    for (int i = 0; i < 40; ++i) t.typeWord("wrap", COLORS[0]);
+    assert(t.cursor().line >= 1);
+    const char* alts[] = {"hallo", "hella"}; t.setChips(alts, 2);
+    assert(t.chipAt((int)BOX_INK_X + 60, t.boxRect().y + 20) == 0);
+  }
   printf("write mode OK\n");
   // pictures: writing near the top (box at the bottom) and lower down (box on top)
   struct C2 { Writer* w; Tools t; } ctx{&w, Tools()};

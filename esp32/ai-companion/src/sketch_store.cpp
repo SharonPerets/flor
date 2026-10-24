@@ -14,16 +14,23 @@ bool mounted = false;
 
 String pathOf(uint32_t id) { return String(DIR) + "/" + id + ".gsk"; }
 
-bool readFile(uint32_t id, sketch::Unpacker& u) {
+// Reads a sketch into `out` (the full picture, or a thumbnail). Sketches from
+// before 4.5 are shorter: they fill the top part, the rest stays empty paper.
+bool readFile(uint32_t id, uint16_t* out, bool thumb) {
   if (!mounted) return false;
   File f = LittleFS.open(pathOf(id), "r");
   if (!f) return false;
-  uint8_t head[8];
-  if (f.read(head, 8) != 8 || memcmp(head, "GSK1", 4) != 0 || (head[4] | head[5] << 8) != sketch::PAPER_W ||
-      (head[6] | head[7] << 8) != sketch::PAPER_H) {
+  uint8_t head[8] = {0};
+  const int rows = f.read(head, 8) == 8 ? (head[6] | head[7] << 8) : 0;
+  if (memcmp(head, "GSK1", 4) != 0 || (head[4] | head[5] << 8) != sketch::PAPER_W ||
+      (rows != sketch::PAPER_H && rows != sketch::OLD_PAPER_H)) {
     f.close();
     return false;
   }
+  const size_t pixels = thumb ? (size_t)sketch::THUMB_W * sketch::THUMB_H : (size_t)sketch::PAPER_W * sketch::PAPER_H;
+  if (thumb || rows < sketch::PAPER_H)
+    for (size_t i = thumb ? 0 : (size_t)sketch::PAPER_W * rows; i < pixels; ++i) out[i] = sketch::PAPER_COLOR.c;
+  sketch::Unpacker u = thumb ? sketch::Unpacker::forThumb(out, rows) : sketch::Unpacker(out, rows);
   uint8_t buf[2048];
   int n;
   while ((n = f.read(buf, sizeof buf)) > 0) u.feed(buf, n);
@@ -71,15 +78,9 @@ int list(uint32_t* ids, int max) {
   return n;
 }
 
-bool load(uint32_t id, uint16_t* picture) {
-  sketch::Unpacker u(picture);
-  return readFile(id, u);
-}
+bool load(uint32_t id, uint16_t* picture) { return readFile(id, picture, false); }
 
-bool loadThumb(uint32_t id, uint16_t* thumb) {
-  sketch::Unpacker u = sketch::Unpacker::forThumb(thumb);
-  return readFile(id, u);
-}
+bool loadThumb(uint32_t id, uint16_t* thumb) { return readFile(id, thumb, true); }
 
 bool save(uint32_t id, const uint16_t* picture) {
   if (!mounted) return false;

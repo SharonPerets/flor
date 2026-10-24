@@ -54,6 +54,7 @@ String statusText = "";
 Color statusColor = COLOR_TEXT_DIM;
 bool statusPulse = false;
 bool talkButton = false;
+bool bottomHidden = false;
 constexpr float TALK_W = 104;  // the Talk button, right-aligned at x 780
 String subtitle = "";
 int progress = -1;  // progress bar under the subtitle, -1 = none
@@ -361,6 +362,12 @@ void setStatus(const String& text, const Color& color, bool pulse) {
   dirtyStatus = true;
 }
 
+void setBottomHidden(bool hidden) {
+  if (hidden == bottomHidden) return;
+  bottomHidden = hidden;
+  if (!hidden) dirtyBar = true;
+}
+
 void setTalkButton(bool on) {
   if (on == talkButton) return;
   talkButton = on;
@@ -434,6 +441,10 @@ void update(uint32_t now) {
   }
   if (subtitleVisible) dirtyCall = false;
   if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
+  if (bottomHidden) {  // the screen draws down there itself
+    dirtyText = dirtyButtons = dirtyVolume = false;
+    return;
+  }
   if (barOpen && (int32_t)(now - barOpenUntil) >= 0) {  // fold the bar away again
     barOpen = false;
     dirtyBar = true;
@@ -452,6 +463,12 @@ void update(uint32_t now) {
 }
 
 Target hitTest(int x, int y) {
+  if (bottomHidden) {
+    if (y < TOP_H && x < 240) return Target::Clock;
+    if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
+    if (y < TOP_H && talkButton && x >= 780 - TALK_W - 8) return Target::Talk;
+    return y >= TOP_H ? Target::Face : Target::None;
+  }
   if (!barOpen && y >= tabs::MINI.y - 10) {
     const Rect& m = tabs::MINI;
     return x >= m.x - 10 && x < m.right() + 10 ? Target::Mini : Target::None;

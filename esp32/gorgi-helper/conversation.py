@@ -25,8 +25,61 @@ class Conversation:
         self.transcriber = transcriber
         self.speaker = speaker
         self.followup_seconds = followup_seconds
+        self.dictate = False  # True: just type what's said on the Sketch screen (no AI, no voice)
 
     async def run(self):
+        if self.dictate:
+            await self.run_dictation()
+            return
+        await self.run_chat()
+
+    async def _ears_problem(self):
+        """None when Whisper is ready (loads it if needed), else what to tell the user."""
+        if self.transcriber.ready:
+            return None
+        if self.transcriber.loading:
+            return "Give me a minute, I'm still learning to hear. Try again soon!"
+        await asyncio.to_thread(self.transcriber.load)
+        if not self.transcriber.ready:
+            return "My ears aren't working. Please check the helper's log on your PC."
+        return None
+
+    async def run_dictation(self):
+        """Voice typing for the Sketch screen: listen once, send the words back to be typed."""
+        paused_music = False
+        problem = None
+        try:
+            info = await self.media.get_info()
+            if info["playing"]:
+                await self.media.set_playing(False)
+                paused_music = True
+            problem = await self._ears_problem()
+            if problem:
+                return
+            await self.send({"type": "dictate_state", "state": "listening"})
+            audio = await self.recorder.record(wait_for_speech=FIRST_WAIT_SECONDS, max_seconds=30.0, end_silence=1.5)
+            if audio is None:
+                problem = "I didn't hear anything"
+                return
+            await self.send({"type": "dictate_state", "state": "thinking"})
+            text = await asyncio.to_thread(self.transcriber.transcribe, audio)
+            log.info("dictation: %r", text)
+            if text:
+                await self.send({"type": "dictation", "text": text})
+            else:
+                problem = "Sorry, I didn't catch that"
+        finally:
+            try:
+                msg = {"type": "dictate_state", "state": "idle"}
+                if problem:
+                    msg["problem"] = problem
+                await self.send(msg)
+            except Exception:
+                pass
+            if paused_music:
+                await self.media.set_playing(True)
+
+    async def run_chat(self):
         """Runs until the chat ends. Cancel the task to stop it early."""
         paused_music = False
         resume_music = True
@@ -37,14 +90,10 @@ class Conversation:
                 await self.media.set_playing(False)
                 paused_music = True
 
-            if not self.transcriber.ready:
-                if self.transcriber.loading:
-                    await self._say("thinking", "Give me a minute, I'm still learning to hear. Try again soon!")
-                    return
-                await asyncio.to_thread(self.transcriber.load)
-                if not self.transcriber.ready:
-                    await self._say("sad", "My ears aren't working. Please check the helper's log on your PC.")
-                    return
+            problem = await self._ears_problem()
+            if problem:
+                await self._say("thinking" if self.transcriber.loading else "sad", problem)
+                return
 
             followup = False
             while True:

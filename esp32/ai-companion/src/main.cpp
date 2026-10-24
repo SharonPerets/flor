@@ -26,6 +26,8 @@
 #include "music_screen.h"
 #include "action_center.h"
 #include "pclink.h"
+#include <new>
+
 #include "sketch.h"
 #include "sketch_store.h"
 #include "tabs.h"
@@ -90,6 +92,7 @@ String timeNote;             // short message at the top of the Time screen
 uint32_t timeNoteUntil = 0;
 
 bool sketchFull = true;  // the sketch screen needs drawing in full
+bool skDictating = false;  // voice typing on the Sketch screen is listening / writing
 
 // Claude Code on the PC (sessions and usage, sent by the helper)
 claudescreen::View claudeView;
@@ -278,6 +281,7 @@ void showPage(Page p) {
   ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
   ui::setTalkButton(p == Page::Sketch);
+  ui::setBottomHidden(p == Page::Sketch);  // the Sketch screen uses the whole height
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
     display::render(gfx::Rect{0, ui::TOP_H, 800, ui::FACE_Y - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
@@ -459,6 +463,10 @@ void onVoice(const char* type, JsonObjectConst msg) {
 
 void onHelper(bool connected, const String& name) {
   gotMediaSinceConnect = false;
+  if (skDictating) {
+    skDictating = false;
+    showIdleStatus();
+  }
   if (inConversation) endConversation();
   if (connected) {
     pcName = name;
@@ -790,6 +798,7 @@ uint16_t* skBox = nullptr;  // the big writing in the Write box (PSRAM)
 // Undo: the last few states of the picture, newest = what's on the paper now. A copy is
 // made when a stroke (Draw) or a word (Write) is finished, never while the finger draws.
 constexpr int UNDO_STEPS = 6;
+constexpr uint32_t KEEP_PSRAM = 1500 * 1024;  // undo copies stop before PSRAM gets this low
 uint16_t* skUndo[UNDO_STEPS] = {};
 sketch::Cursor skUndoCursor[UNDO_STEPS];
 int skUndoSlots = 0;          // how many undo pictures could be made
@@ -814,12 +823,43 @@ constexpr uint32_t SKETCH_SAVE_AFTER_MS = 20 * 1000;  // save after a pause in d
 constexpr uint32_t SKETCH_CLEAR_ASK_MS = 3000;
 constexpr size_t SKETCH_PIXELS = (size_t)sketch::PAPER_W * sketch::PAPER_H;
 
+// Typed notes: each handwritten word goes to the PC, which answers with the text.
+// What happens on the page waits in a queue, in order (a word, a space, a new line...),
+// so a slow answer never mixes things up. No answer in INK_WAIT_MS: the handwriting stays.
+constexpr int WORD_SLOTS = 3;
+constexpr uint32_t INK_WAIT_MS = 2500;
+sketch::Word* skWords = nullptr;  // WORD_SLOTS words (PSRAM)
+bool skWordUsed[WORD_SLOTS] = {};
+enum class SkOpKind : uint8_t { Word, Text, Space, NewLine, Place };
+struct SkOp {
+  SkOpKind kind;
+  uint16_t id;     // Word: matches the PC's answer
+  int8_t slot;     // Word: which of skWords
+  bool ready;      // Word: the answer came
+  uint32_t sentAt;
+  int x, y;        // Place
+  String text;     // Text: the words; Word: the best guess
+  String alts[sketch::CHIPS];
+  int altCount;
+  SkOp() : kind(SkOpKind::Space), id(0), slot(-1), ready(false), sentAt(0), x(0), y(0), altCount(0) {}
+};
+constexpr int MAX_OPS = 8;
+SkOp skOps[MAX_OPS];
+int skOpCount = 0;
+uint16_t skInkId = 0;
+int skChipsHist = -1;  // the undo step that the guess chips belong to
+uint32_t skStatusUntil = 0;  // a short note in the status pill (e.g. "PC not connected")
+
 void sketchSetup() {
   skPic = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
   skBox = (uint16_t*)heap_caps_malloc((size_t)sketch::PAPER_W * sketch::BOX_H * 2, MALLOC_CAP_SPIRAM);
   skThumbs = (uint16_t*)heap_caps_malloc((size_t)sketch::MAX_SKETCHES * sketch::THUMB_W * sketch::THUMB_H * 2,
                                          MALLOC_CAP_SPIRAM);
+  skWords = (sketch::Word*)heap_caps_malloc(sizeof(sketch::Word) * WORD_SLOTS, MALLOC_CAP_SPIRAM);
+  if (skWords)
+    for (int i = 0; i < WORD_SLOTS; ++i) new (&skWords[i]) sketch::Word();
   for (int i = 0; i < UNDO_STEPS; ++i) {
+    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < SKETCH_PIXELS * 2 + KEEP_PSRAM) break;
     skUndo[i] = (uint16_t*)heap_caps_malloc(SKETCH_PIXELS * 2, MALLOC_CAP_SPIRAM);
     if (!skUndo[i]) break;
     skUndoSlots = i + 1;
@@ -864,11 +904,212 @@ void sketchForgetUndo() {
   sketchCheckpoint();
 }
 
+void sketchRunOps();
+void sketchStartNew();
+void sketchFlushWriter();
+
+int sketchFreeWordSlot() {
+  for (int i = 0; i < WORD_SLOTS; ++i)
+    if (!skWordUsed[i]) return i;
+  return -1;
+}
+
+void sketchPushOp(const SkOp& op) {
+  if (skOpCount >= MAX_OPS) {  // (hardly possible) make room: the oldest goes on the page as it is
+    skOps[0].ready = true;
+    skOps[0].sentAt = millis() - INK_WAIT_MS;
+    sketchRunOps();
+  }
+  if (skOpCount < MAX_OPS) skOps[skOpCount++] = op;
+}
+
+// Sends a handwritten word to the PC: {"type":"ink","id":7,"strokes":[[x,y,x,y...],...]}
+void sketchSendInk(uint16_t id, const sketch::Word& w) {
+  String j;
+  j.reserve(64 + w.points * 9);
+  j = "{\"type\":\"ink\",\"id\":";
+  j += id;
+  j += ",\"strokes\":[";
+  for (int s = 0; s < w.strokes; ++s) {
+    const int a = w.start[s], b = s + 1 < w.strokes ? w.start[s + 1] : w.points;
+    j += s ? ",[" : "[";
+    for (int i = a; i < b; ++i) {
+      if (i > a) j += ',';
+      j += w.x[i];
+      j += ',';
+      j += w.y[i];
+    }
+    j += ']';
+  }
+  j += "]}";
+  pclink::sendText(j);
+}
+
 // Write mode: finishes the word in the box (the box moves on)
 void sketchCommitWord() {
-  if (skWriter.commit()) {
+  if (!skWriter.commit()) return;
+  skChanged = true;
+  int slot = sketchFreeWordSlot();
+  if (slot < 0 && skWords) {  // all waiting: the oldest goes on the page as it is
+    skOps[0].sentAt = millis() - INK_WAIT_MS;
+    sketchRunOps();
+    slot = sketchFreeWordSlot();
+  }
+  if (slot >= 0 && skWords && skWriter.takeWord(skWords[slot])) {  // typed: ask the PC what it says
+    skWordUsed[slot] = true;
+    SkOp op;
+    op.kind = SkOpKind::Word;
+    op.id = ++skInkId;
+    op.slot = slot;
+    op.sentAt = millis();
+    sketchPushOp(op);
+    sketchSendInk(op.id, skWords[slot]);
+    return;
+  }
+  sketch::Word lost;  // (no room to keep it: shouldn't happen)
+  if (skWriter.takeWord(lost)) skWriter.placeHandwriting(lost);
+  sketchCheckpoint();  // the handwriting is on the page already
+}
+
+// Puts text on the page word by word (a full page carries on on a new one)
+void sketchType(const String& text, const gfx::Color& col) {
+  const String t = ui::toAscii(text);
+  int i = 0;
+  while (i < (int)t.length()) {
+    while (i < (int)t.length() && t[i] == ' ') ++i;
+    int j = i;
+    while (j < (int)t.length() && t[j] != ' ') ++j;
+    if (j > i) {
+      const String w = t.substring(i, j);
+      if (!skWriter.typeWord(w.c_str(), col) && skWriter.takePageFull()) {
+        sketchStartNew();
+        skWriter.typeWord(w.c_str(), col);
+      }
+    }
+    i = j;
+  }
+}
+
+// Does what's waiting in the queue, in order, as far as it can (a word waits for the PC's answer)
+void sketchRunOps() {
+  const uint32_t now = millis();
+  bool changed = false;
+  while (skOpCount > 0) {
+    SkOp& op = skOps[0];
+    if (op.kind == SkOpKind::Word && !op.ready && msSince(now, op.sentAt) < INK_WAIT_MS) break;
+    switch (op.kind) {
+      case SkOpKind::Word: {
+        sketch::Word& w = skWords[op.slot];
+        if (op.ready && op.text.length()) {
+          sketchType(op.text, w.color);
+          const char* alts[sketch::CHIPS];
+          for (int k = 0; k < op.altCount; ++k) alts[k] = op.alts[k].c_str();
+          sketchCheckpoint();
+          skWriter.setChips(alts, op.altCount);
+          skChipsHist = skHistCount;
+        } else {  // no answer (or unreadable): the handwriting stays, small
+          if (!skWriter.placeHandwriting(w) && skWriter.takePageFull()) {
+            sketchStartNew();
+            skWriter.placeHandwriting(w);
+          }
+          sketchCheckpoint();
+        }
+        skWordUsed[op.slot] = false;
+        break;
+      }
+      case SkOpKind::Text:
+        sketchType(op.text, sketch::COLORS[skTools.color]);
+        sketchCheckpoint();
+        break;
+      case SkOpKind::Space:
+        skWriter.space();
+        break;
+      case SkOpKind::NewLine:
+        skWriter.newLine();
+        if (skWriter.takePageFull()) sketchStartNew();
+        break;
+      case SkOpKind::Place:
+        skWriter.placeAt(op.x, op.y);
+        break;
+    }
+    for (int k = 1; k < skOpCount; ++k) skOps[k - 1] = skOps[k];
+    --skOpCount;
+    changed = true;
+  }
+  if (changed) {
     skChanged = true;
-    sketchCheckpoint();
+    skLastStroke = now;
+    sketchFlushWriter();
+  }
+}
+
+// Space / new line / a tap on the page: right away, or after the words still waiting
+void sketchCursorOp(SkOpKind kind, int x = 0, int y = 0) {
+  sketchCommitWord();
+  SkOp op;
+  op.kind = kind;
+  op.x = x;
+  op.y = y;
+  sketchPushOp(op);
+  sketchRunOps();
+}
+
+// The PC's answer for a handwritten word: {"type":"ink_text","id":7,"guesses":["milk","mild"]}
+void onInkText(JsonObjectConst msg) {
+  const uint16_t id = msg["id"] | 0;
+  for (int i = 0; i < skOpCount; ++i) {
+    SkOp& op = skOps[i];
+    if (op.kind != SkOpKind::Word || op.id != id) continue;
+    op.ready = true;
+    op.altCount = 0;
+    int n = 0;
+    for (JsonVariantConst g : msg["guesses"].as<JsonArrayConst>()) {
+      const String t = ui::toAscii(String((const char*)(g | "")));
+      if (!t.length()) continue;
+      if (n++ == 0) op.text = t;
+      else if (op.altCount < sketch::CHIPS) op.alts[op.altCount++] = t;
+    }
+    break;
+  }
+  sketchRunOps();
+}
+
+void sketchStatusNote(const char* text) {
+  ui::setStatus(text, ui::COLOR_TEXT_DIM, false);
+  skStatusUntil = millis() + 3500;
+}
+
+// Voice typing (the Talk button on the Sketch screen)
+void onDictation(const char* type, JsonObjectConst msg) {
+  lastActivity = millis();
+  if (strcmp(type, "dictation") == 0) {
+    SkOp op;
+    op.kind = SkOpKind::Text;
+    op.text = String((const char*)(msg["text"] | ""));
+    sketchCommitWord();
+    sketchPushOp(op);
+    sketchRunOps();
+    return;
+  }
+  const char* state = msg["state"] | "idle";  // dictate_state
+  skDictating = strcmp(state, "idle") != 0;
+  if (strcmp(state, "listening") == 0) ui::setStatus("Listening...", ui::COLOR_LISTEN, true);
+  else if (strcmp(state, "thinking") == 0) ui::setStatus("Writing...", ui::COLOR_THINK, false);
+  else if (msg["problem"].is<const char*>()) sketchStatusNote(msg["problem"]);
+  else showIdleStatus();
+}
+
+void sketchTalk() {
+  if (skDictating) {
+    pclink::sendSimple("cancel");
+    skDictating = false;
+    showIdleStatus();
+  } else if (!pclink::helperConnected()) {
+    sketchStatusNote("PC not connected");
+  } else {
+    pclink::sendSimple("dictate");
+    skDictating = true;
+    ui::setStatus("Listening...", ui::COLOR_LISTEN, true);
   }
 }
 
@@ -933,7 +1174,7 @@ void sketchDrawSheet(gfx::Canvas& c) {
 }
 
 void sketchRenderRect(const gfx::Rect& r) {
-  if (r.empty() || skTools.gallery) return;
+  if (r.empty() || skTools.gallery || page != Page::Sketch || acOpen) return;
   display::render(r, sketch::PAPER_COLOR, [](gfx::Canvas& c) { sketchDrawSheet(c); });
 }
 
@@ -980,6 +1221,7 @@ void sketchBegin(int x, int y) {
   if (skTools.write) {
     if (skWriter.inBox(x, y)) {
       const gfx::Color& col = sketch::COLORS[skTools.color];
+      skWriter.setTyped(pclink::helperConnected() && skWords != nullptr);
       skWriter.begin(x, y, col, skTools.size);
       if (skWriter.takePageFull()) {  // no lines left: carry on on a new page
         sketchStartNew();
@@ -1029,6 +1271,12 @@ void sketchEnd(uint32_t now) {
 }
 
 void sketchUndo() {
+  if (skOpCount > 0 && !(skTools.write && skWriter.hasInk())) {  // not on the page yet: just forget it
+    SkOp& op = skOps[--skOpCount];
+    if (op.kind == SkOpKind::Word) skWordUsed[op.slot] = false;
+    return;
+  }
+  skWriter.clearChips();
   if (skTools.write && skWriter.hasInk()) {
     skWriter.clearBox();  // the word being written goes; the page goes back to before it
   } else {
@@ -1128,20 +1376,28 @@ void onSketchTap(int x, int y) {
       skToolbarDirty = true;
     }
     if (!skTools.write || !sketchOnPaper(x, y)) return;
+    const int chip = skWriter.chipAt(x, y);
+    if (chip >= 0) {  // another guess for the last word: swap it in
+      if (skChipsHist == skHistCount && skOpCount == 0 && skHistCount >= 2) {
+        const String pick = skWriter.chip(chip);
+        sketchUndo();  // back to before the word (it also hides the chips)
+        sketchType(pick, sketch::COLORS[skTools.color]);
+        sketchCheckpoint();
+      }
+      skWriter.clearChips();
+      sketchFlushWriter();
+      return;
+    }
     switch (skWriter.buttonAt(x, y)) {
       case sketch::BoxButton::Space:
-        sketchCommitWord();
-        skWriter.space();
+        sketchCursorOp(SkOpKind::Space);
         break;
       case sketch::BoxButton::NewLine:
-        sketchCommitWord();
-        skWriter.newLine();
-        if (skWriter.takePageFull()) sketchStartNew();
+        sketchCursorOp(SkOpKind::NewLine);
         break;
       case sketch::BoxButton::None:
         if (skWriter.inBox(x, y)) return;
-        sketchCommitWord();
-        skWriter.placeAt(x, y);  // the writing spot goes where you tapped
+        sketchCursorOp(SkOpKind::Place, x, y);  // the writing spot goes where you tapped
         break;
     }
     sketchFlushWriter();
@@ -1208,6 +1464,11 @@ void updateSketch(uint32_t now) {
     skChanged = true;
     sketchCheckpoint();
     sketchFlushWriter();
+  }
+  if (skOpCount > 0) sketchRunOps();  // words whose answer is late go on the page as handwriting
+  if (skStatusUntil && msSince(now, skStatusUntil) > 0) {
+    skStatusUntil = 0;
+    if (!skDictating) showIdleStatus();
   }
   if (skTools.confirmClear && msSince(now, skClearAsked) > SKETCH_CLEAR_ASK_MS) {
     skTools.confirmClear = false;
@@ -1308,6 +1569,14 @@ void showClaudeAlert(const String& name, bool waiting, const String& text) {
 }
 
 void onOther(const char* type, JsonObjectConst msg) {
+  if (strcmp(type, "ink_text") == 0) {
+    onInkText(msg);
+    return;
+  }
+  if (strcmp(type, "dictation") == 0 || strcmp(type, "dictate_state") == 0) {
+    onDictation(type, msg);
+    return;
+  }
   if (strcmp(type, "claude") == 0) {
     claudeView.hooked = msg["hooked"] | false;
     claudeView.count = 0;
@@ -1697,9 +1966,13 @@ void handleTouch(uint32_t now) {
       ui::openMusicBar();
       return;
     }
-    if (released == ui::Target::Talk) {  // the Talk button: to the face, listening
-      showPage(Page::Face);
-      if (!inConversation) onTap(ui::Target::Face);
+    if (released == ui::Target::Talk) {  // the Talk button (Sketch screen): voice typing
+      if (page == Page::Sketch) {
+        sketchTalk();
+      } else {
+        showPage(Page::Face);
+        if (!inConversation) onTap(ui::Target::Face);
+      }
       return;
     }
     if (released == ui::Target::CallMute) {

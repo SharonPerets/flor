@@ -15,10 +15,12 @@ namespace sketch {
 
 // The paper, in screen coordinates. The drawing is a PAPER_W x PAPER_H
 // RGB565 picture, row after row.
-constexpr int PAPER_X = 112, PAPER_Y = 50, PAPER_W = 680, PAPER_H = 320;
+// Since 4.5 the screen has no music bar, so the paper reaches almost to the bottom.
+constexpr int PAPER_X = 112, PAPER_Y = 50, PAPER_W = 680, PAPER_H = 424;
+constexpr int OLD_PAPER_H = 320;  // sketches saved before 4.5 (loaded into the top part)
 constexpr gfx::Rect PAPER{PAPER_X, PAPER_Y, PAPER_W, PAPER_H};
-constexpr gfx::Rect TOOLBAR{0, 44, 108, 332};
-constexpr gfx::Rect AREA{0, 44, 800, 332};  // the whole screen part
+constexpr gfx::Rect TOOLBAR{0, 44, 108, 436};
+constexpr gfx::Rect AREA{0, 44, 800, 436};  // the whole screen part (no music bar here)
 constexpr int TOOLBAR_RIGHT = 108;          // swipes starting left of this change screens
 
 constexpr gfx::Color PAPER_COLOR = gfx::rgb(0x141B24);
@@ -79,13 +81,13 @@ class Smoother {
 // there lands on the page at a third of the size, at the writing spot, which
 // then moves along like typing. The page has LINES lines.
 
-constexpr int LINES = 10;
+constexpr int LINES = 13;
 constexpr int LINE_H = 30;      // between lines, page pixels
-constexpr int FIRST_LINE = 28;  // the first line, from the top of the paper
+constexpr int FIRST_LINE = 30;  // the first line, from the top of the paper
 constexpr int MARGIN = 10;      // left edge of the writing, page pixels
 constexpr float SCALE = 3.0f;   // the box is 3x bigger than the page
-constexpr int BOX_H = 148;
-constexpr int BOX_BASE = 108;   // the guide line, from the top of the box
+constexpr int BOX_H = 170;
+constexpr int BOX_BASE = 124;   // the guide line, from the top of the box
 constexpr int BOX_INK_X = PAPER_X + 14;  // box writing starts here on screen
 constexpr int BOX_INK_RIGHT = PAPER_X + 580;  // ...and ends here (the buttons are to the right)
 constexpr int BOX_SLIDE_X = PAPER_X + 400;    // writing past this: the box moves on as soon as the finger lifts
@@ -100,12 +102,33 @@ struct Cursor {
 
 enum class BoxButton { None, Space, NewLine };
 
+// One handwritten word as the finger wrote it, in box pixels: x from the start
+// of the writing area, y from the guide line (negative = above it).
+constexpr int WORD_POINTS = 1000, WORD_STROKES = 64;
+struct Word {
+  int16_t x[WORD_POINTS], y[WORD_POINTS];
+  uint16_t start[WORD_STROKES];  // where each stroke begins in x / y
+  int points, strokes;
+  float right;  // right edge of the writing (box pixels)
+  gfx::Color color;
+  float radius;  // pen radius on the page
+  Word() : points(0), strokes(0), right(-1), color(gfx::rgb(0xFFFFFF)), radius(1.3f) {}
+};
+
+constexpr int CHIPS = 3;  // other guesses for the last typed word
+
 class Writer {
  public:
   // page: the PAPER_W x PAPER_H picture. box: a PAPER_W x BOX_H picture for the big writing.
   void attach(uint16_t* page, uint16_t* box);
 
-  bool boxOnTop() const { return cur_.line >= LINES / 2; }
+  // Typed mode: the PC turns each word into text. The page shows nothing while the
+  // word is written; commit() hands the word over (takeWord), and typeWord() or
+  // placeHandwriting() puts it on the page. Otherwise the handwriting goes straight
+  // onto the page while you write (no PC).
+  void setTyped(bool on) { typedNext_ = on; }
+
+  bool boxOnTop() const { return baseline(cur_.line) + 16 > PAPER_H - BOX_H; }
   gfx::Rect boxRect() const;
   bool inBox(int x, int y) const;
   BoxButton buttonAt(int x, int y) const;
@@ -118,7 +141,7 @@ class Writer {
     return r;
   }
 
-  // Writing in the box. The changed parts of the screen are collected (see dirty()).
+  // Writing in the box. The changed parts of the screen are collected (see takeDirty()).
   void begin(float x, float y, const gfx::Color& col, int size);
   void move(float x, float y);
   // The finger lifted. Returns true if the box moved on (a word is done).
@@ -126,8 +149,19 @@ class Writer {
   // Call often: moves on after a pause. Returns true when it did.
   bool tick(uint32_t now);
   // Finishes the word in the box (if any). Returns true when there was one.
+  // In typed mode, take the word right after (takeWord).
   bool commit();
+  bool takeWord(Word& out);
   void clearBox();  // forgets the box without touching the page (undo does that)
+
+  // Putting a finished word on the page (typed mode). false = no room left on the page.
+  bool typeWord(const char* text, const gfx::Color& col);
+  bool placeHandwriting(const Word& w);
+  // Other guesses for the last typed word, shown as chips in the box
+  void setChips(const char* const* texts, int n);
+  void clearChips();
+  int chipAt(int x, int y) const;  // -1 = none
+  const char* chip(int i) const { return chips_[i]; }
 
   void space();
   void newLine();
@@ -153,9 +187,12 @@ class Writer {
   void mark(const gfx::Rect& r);
   void markCursor();
   void ink(const gfx::Pt* pts, int n);
+  void record(float x, float y, bool newStroke);
+  bool roomFor(float w);
   gfx::Pt toPage(const gfx::Pt& p) const;
   int boxY() const { return boxOnTop() ? PAPER_Y : PAPER_Y + PAPER_H - BOX_H; }
   int baseline(int line) const { return FIRST_LINE + line * LINE_H; }
+  float chipX(int i) const;
 
   uint16_t* page_ = nullptr;
   uint16_t* box_ = nullptr;
@@ -166,6 +203,11 @@ class Writer {
   float rPage_ = 1.3f;
   float inkRight_ = -1;  // right edge of the writing in the box (screen x), -1 = empty
   bool drawing_ = false;
+  bool typedNext_ = false, typed_ = false;  // typed_: the word in the box
+  Word word_;
+  bool wordReady_ = false;
+  char chips_[CHIPS][24];
+  int chipCount_ = 0;
   uint32_t liftedAt_ = 0;
   bool flip_ = false, full_ = false;
   gfx::Rect dirty_[6];
@@ -175,7 +217,7 @@ class Writer {
 // ---------------------------------------------------------------- gallery
 
 constexpr int MAX_SKETCHES = 10;
-constexpr int THUMB_W = 160, THUMB_H = 75;  // small pictures in the gallery
+constexpr int THUMB_W = 160, THUMB_H = 100;  // small pictures in the gallery
 
 struct GalleryItem {
   uint32_t id;
@@ -211,15 +253,17 @@ size_t packRows(const uint16_t* picture, int y0, int y1, uint8_t* out);
 // Unpacks a file piece by piece. Feed it all the bytes after the 8-byte header.
 class Unpacker {
  public:
-  explicit Unpacker(uint16_t* picture) : pic_(picture) {}
+  // rows: how many rows the file has (PAPER_H, or OLD_PAPER_H for sketches from before 4.5)
+  explicit Unpacker(uint16_t* picture, int rows = PAPER_H) : pic_(picture), rows_(rows) {}
   // A thumbnail instead of the full picture: only every few pixels are kept
-  static Unpacker forThumb(uint16_t* thumb);
+  static Unpacker forThumb(uint16_t* thumb, int rows = PAPER_H);
   void feed(const uint8_t* data, size_t len);
-  bool complete() const { return pos_ >= (uint32_t)PAPER_W * PAPER_H; }
+  bool complete() const { return pos_ >= (uint32_t)PAPER_W * rows_; }
 
  private:
   void put(uint16_t count, uint16_t color);
   uint16_t* pic_;
+  int rows_;
   bool thumb_ = false;
   uint32_t pos_ = 0;
   uint8_t carry_[4];
