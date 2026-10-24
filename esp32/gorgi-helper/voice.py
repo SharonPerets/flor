@@ -166,7 +166,7 @@ class Transcriber:
         import shutil
         from pathlib import Path
 
-        from huggingface_hub import snapshot_download
+        from faster_whisper.utils import download_model
 
         folder = Path(self.models_dir) / self.model_name.replace("/", "--")
         done = folder / "download-complete.txt"
@@ -174,7 +174,9 @@ class Transcriber:
             return str(folder)  # works without internet
         log.info("downloading Whisper model %s (once, %s) into %s", self.model_name,
                  "~1.6 GB" if self.language == "he" else "~150 MB", folder)
-        snapshot_download(self.model_name, local_dir=str(folder))  # carries on from a broken download
+        # faster-whisper's own download: only the 5 files it needs, and no progress bar (a progress bar
+        # with no console window hung 4.8.1 on the user's PC; the CI test has a console, so it passed)
+        download_model(self.model_name, output_dir=str(folder))
         done.write_text(self.model_name, encoding="utf-8")
         size = (folder / "model.bin").stat().st_size
         log.info("Whisper model files ready: model.bin %.0f MB", size / 1e6)
