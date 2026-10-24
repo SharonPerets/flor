@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bidi.h"
 #include "gfont.h"
 
 namespace actioncenter {
@@ -44,10 +45,11 @@ void card(Canvas& c, float x, float y, float w, float h) {
 void fit(const gfont::Font& f, const char* s, float maxW, char* out, int size) {
   snprintf(out, size, "%s", s);
   if (Canvas::textWidth(f, out) <= maxW) return;
-  int n = (int)strlen(out);
+  size_t n = strlen(out);
   while (n > 0) {
-    out[--n] = 0;
-    char tmp[96];
+    n = bidi::dropLast(out, n);  // a whole letter at a time (Hebrew letters are 2 bytes)
+    out[n] = 0;
+    char tmp[160];
     snprintf(tmp, sizeof tmp, "%s...", out);
     if (Canvas::textWidth(f, tmp) <= maxW) {
       snprintf(out, size, "%s", tmp);
@@ -179,9 +181,9 @@ void noticesCard(Canvas& c, const View& v) {
     const float textW = rw - 72 - (hasAction ? aw + 12 : 40);
     char buf[72];
     fit(gfont::TITLE, n.title, textW, buf, sizeof buf);
-    c.text(gfont::TITLE, buf, rx + 64, (int)y + 30, TEXT);
+    c.textIn(gfont::TITLE, buf, rx + 64, textW, (int)y + 30, TEXT);
     fit(gfont::SMALL, n.text, textW, buf, sizeof buf);
-    c.text(gfont::SMALL, buf, rx + 64, (int)y + 52, MUTED);
+    c.textIn(gfont::SMALL, buf, rx + 64, textW, (int)y + 52, MUTED);
     if (hasAction) {
       const float bx = rx + rw - 14 - aw;
       const bool busy = v.busy && n.kind == UPDATE;

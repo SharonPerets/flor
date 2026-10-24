@@ -28,4 +28,9 @@ int main() {
   save("three.ppm", v);
   v.rings[3] = R(4, TIMER, "5 min timer", 59, 300, false); v.ringCount = 4; v.timersFull = true; v.confirmRow = -1; v.note = "I can only run 3 timers at once";
   save("four.ppm", v);
+  View h; h.clockKnown = true;
+  h.rings[0] = R(1, TIMER, "פסטה", 581, 600, false); h.ringCount = 1;
+  h.rows[0] = W("In 20 min", "להוציא את הכביסה"); h.rows[1] = W("Today 17:00", "להתקשר לאמא על התוכניות לסופש");
+  h.rows[2] = W("Every day 08:00", "Take vitamins"); h.rows[3] = W("Sun-Thu 07:30", "חדר כושר עם Dana ב-7:30"); h.rowCount = 4;
+  save("hebrew.ppm", h);
 }

@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "bidi.h"
 #include "display.h"
 #include "gfont.h"
 #include "panel.h"
@@ -135,7 +136,7 @@ void iconNote(Canvas& c, float cx, float cy, const Color& col) {
 String fit(const gfont::Font& f, const String& s, float maxW) {
   if (Canvas::textWidth(f, s.c_str()) <= maxW) return s;
   String t = s;
-  while (t.length() > 0 && Canvas::textWidth(f, (t + "...").c_str()) > maxW) t.remove(t.length() - 1);
+  while (t.length() > 0 && Canvas::textWidth(f, (t + "...").c_str()) > maxW) t.remove(bidi::dropLast(t.c_str(), t.length()));
   return t + "...";
 }
 
@@ -269,7 +270,10 @@ void drawSubtitle(Canvas& c) {
     const float w = Canvas::textWidth(gfont::SUBTITLE, s.c_str());
     if (chars == 0) return;
     const String part = chars < 0 ? s : s.substring(0, chars);
-    c.text(gfont::SUBTITLE, part.c_str(), SUB_X + (SUB_W - w) * 0.5f, baseline, TEXT);
+    float x = SUB_X + (SUB_W - w) * 0.5f;
+    // Hebrew reads from the right: the words said so far sit at the line's right end
+    if (chars >= 0 && bidi::isRtl(s.c_str())) x += w - Canvas::textWidth(gfont::SUBTITLE, part.c_str());
+    c.text(gfont::SUBTITLE, part.c_str(), x, baseline, TEXT);
   };
   if (show[1].length() == 0) {
     centered(show[0], SUB_Y + 38, visible[0]);
@@ -288,8 +292,8 @@ void drawBar(Canvas& c) {
   iconNote(c, 60, BAR_CY, ACCENT);
 
   // song
-  c.text(gfont::TITLE, fit(gfont::TITLE, media.title, TEXT_W - 4).c_str(), TEXT_X, BAR_CY - 3, TEXT_TITLE);
-  c.text(gfont::SMALL, fit(gfont::SMALL, media.artist, TEXT_W - 4).c_str(), TEXT_X, BAR_CY + 21, TEXT_MUTED);
+  c.textIn(gfont::TITLE, fit(gfont::TITLE, media.title, TEXT_W - 4).c_str(), TEXT_X, TEXT_W - 4, BAR_CY - 3, TEXT_TITLE);
+  c.textIn(gfont::SMALL, fit(gfont::SMALL, media.artist, TEXT_W - 4).c_str(), TEXT_X, TEXT_W - 4, BAR_CY + 21, TEXT_MUTED);
 
   // buttons
   c.fillCircle(PREV_X, BAR_CY, 26, pressed == Target::Prev ? BTN_PRESSED : BTN);
@@ -421,7 +425,7 @@ void setTalkButton(bool on) {
 }
 
 void setSubtitle(const String& text) {
-  String t = toAscii(text);
+  String t = cleanText(text);
   if (t == subtitle && progress < 0 && subtitleReveal < 0) return;
   subtitle = t;
   progress = -1;
@@ -436,14 +440,14 @@ void setSubtitleReveal(int words) {
 }
 
 void showProgress(const String& text, int percent) {
-  subtitle = toAscii(text);
+  subtitle = cleanText(text);
   progress = percent < 0 ? 0 : percent;
   redraw(SUB_AREA, BG, drawSubtitle);
   dirtySub = false;
 }
 
 void setMedia(const MediaInfo& info) {
-  String title = toAscii(info.title), artist = toAscii(info.artist);
+  String title = cleanText(info.title), artist = cleanText(info.artist);
   if (title != media.title || artist != media.artist) dirtyText = true;
   if (info.playing != media.playing) dirtyButtons = true;
   if (info.volume != media.volume) dirtyVolume = true;
@@ -546,7 +550,7 @@ int volumeFromX(int x) {
   return constrain((x - VOL_X0) * 100 / (VOL_X1 - VOL_X0), 0, 100);
 }
 
-String toAscii(const String& in) {
+String cleanText(const String& in) {
   String out;
   out.reserve(in.length());
   const uint8_t* s = (const uint8_t*)in.c_str();
@@ -571,7 +575,14 @@ String toAscii(const String& in) {
     else if (cp == 0x2013 || cp == 0x2014) out += '-';
     else if (cp == 0x2026) out += "...";
     else if (cp == 0xA0) out += ' ';
-    // anything else (emoji, accents) is dropped
+    else if (cp == 0x05BE) out += '-';                  // Hebrew hyphen (maqaf)
+    else if (cp == 0x05F3) out += '\'';                 // geresh
+    else if (cp == 0x05F4) out += '"';                  // gershayim
+    else if (cp >= 0x05D0 && cp <= 0x05EA) {            // Hebrew letters, kept as UTF-8
+      out += (char)(0xC0 | (cp >> 6));
+      out += (char)(0x80 | (cp & 0x3F));
+    }
+    // anything else (emoji, accents, Hebrew vowel marks) is dropped
   }
   return out;
 }

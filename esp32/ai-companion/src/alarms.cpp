@@ -4,6 +4,7 @@
 
 #include <vector>
 
+#include "bidi.h"
 #include "wallclock.h"
 
 namespace alarms {
@@ -56,12 +57,14 @@ int today() {
 int focusToday() { return focusDay && focusDay == today() ? focusCount : 0; }
 
 void copyText(char* out, size_t size, const char* in) {
-  // keep plain text only (the screen font has no emoji or accents)
+  // text without control characters (UTF-8 letters such as Hebrew are kept), never cut mid-letter
   size_t n = 0;
   for (const char* p = in; *p && n + 1 < size; ++p) {
     const unsigned char ch = (unsigned char)*p;
-    if (ch >= 32 && ch < 127) out[n++] = (char)ch;
+    if (ch >= 32 && ch != 127) out[n++] = (char)ch;
   }
+  out[n] = 0;
+  n = bidi::trimPartial(out, n);  // a letter cut off by the end of the buffer goes
   while (n && out[n - 1] == ' ') --n;
   out[n] = 0;
 }

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bidi.h"
 #include "gfont.h"
 
 namespace timescreen {
@@ -67,10 +68,11 @@ void centered(Canvas& c, const gfont::Font& f, const char* s, float cx, int base
 void fit(const gfont::Font& f, const char* s, float maxW, char* out, int size) {
   snprintf(out, size, "%s", s);
   if (textW(f, out) <= maxW) return;
-  int n = (int)strlen(out);
+  size_t n = strlen(out);
   while (n > 0) {
-    out[--n] = 0;
-    char tmp[96];
+    n = bidi::dropLast(out, n);  // a whole letter at a time (Hebrew letters are 2 bytes)
+    out[n] = 0;
+    char tmp[160];
     snprintf(tmp, sizeof tmp, "%s...", out);
     if (textW(f, tmp) <= maxW) {
       snprintf(out, size, "%s", tmp);
@@ -261,7 +263,7 @@ void reminders(Canvas& c, const View& v) {
     }
     c.text(gfont::SMALL, r.when, x, (int)y + 20, ACCENT);
     fit(gfont::TITLE, r.text, w, buf, sizeof buf);
-    c.text(gfont::TITLE, buf, x, (int)y + 46, TEXT);
+    c.textIn(gfont::TITLE, buf, x, w, (int)y + 46, TEXT);
   }
 
   // footer

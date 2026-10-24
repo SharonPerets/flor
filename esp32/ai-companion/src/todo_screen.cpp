@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bidi.h"
 #include "gfont.h"
 
 namespace todoscreen {
@@ -51,10 +52,11 @@ bool inside(const Rect& r, int x, int y) { return x >= r.x && y >= r.y && x < r.
 void fit(const gfont::Font& f, const char* s, float maxW, char* out, int size) {
   snprintf(out, size, "%s", s);
   if (textW(f, out) <= maxW) return;
-  int n = (int)strlen(out);
+  size_t n = strlen(out);
   while (n > 0) {
-    out[--n] = 0;
-    char tmp[96];
+    n = bidi::dropLast(out, n);  // a whole letter at a time (Hebrew letters are 2 bytes)
+    out[n] = 0;
+    char tmp[160];
     snprintf(tmp, sizeof tmp, "%s...", out);
     if (textW(f, tmp) <= maxW) {
       snprintf(out, size, "%s", tmp);
@@ -208,8 +210,11 @@ void drawRow(Canvas& c, const View& v, int i) {
   }
   char text[todos::TEXT_MAX + 8];
   fit(gfont::NOTE, r.text, right - 78, text, sizeof text);
-  c.text(gfont::NOTE, text, 78, (int)cy + 7, r.done ? MUTED : TEXT);
-  if (r.done) c.fillRect(78, cy, textW(gfont::NOTE, text), 1.5f, MUTED);
+  // Hebrew tasks sit at the right end of their space
+  const float tw = textW(gfont::NOTE, text);
+  const float tx = bidi::isRtl(text) ? right - tw : 78;
+  c.text(gfont::NOTE, text, tx, (int)cy + 7, r.done ? MUTED : TEXT);
+  if (r.done) c.fillRect(tx, cy, tw, 1.5f, MUTED);
 }
 
 void drawEmpty(Canvas& c, const View& v) {
@@ -257,7 +262,7 @@ void drawList(Canvas& c, const View& v) {
     char text[72];
     fit(gfont::SMALL, v.toast, u.w - (v.toastUndo ? 110 : 44), text, sizeof text);
     if (v.toastUndo) {
-      c.text(gfont::SMALL, text, u.x + 22, u.y + 28, TEXT);
+      c.textIn(gfont::SMALL, text, u.x + 22, u.w - 110, u.y + 28, TEXT);
       c.text(gfont::SMALL, "Undo", u.right() - 70, u.y + 28, ACCENT);
     } else {
       centered(c, gfont::SMALL, text, u.x + u.w / 2.0f, u.y + 28, TEXT);
@@ -345,7 +350,7 @@ void drawKeyboard(Canvas& c, const View& v) {
   c.fillRRect(f.x, f.y, f.w, f.h, 14, ROW_BG);
   c.fillRRect(f.x, f.bottom() - 2, f.w, 2, 1, ACCENT);
   const char* shown = kb.text;
-  while (*shown && textW(gfont::NOTE, shown) > f.w - 44) ++shown;
+  while (*shown && textW(gfont::NOTE, shown) > f.w - 44) bidi::next(shown);
   if (kb.text[0]) {
     c.text(gfont::NOTE, shown, f.x + 18, f.y + 36, TEXT);
   } else {
@@ -419,7 +424,7 @@ Press press(Keyboard& kb, int key) {
   const bool wasShift = kb.shift;
   if (key == KEY_DELETE) {
     if (!len) return Press::None;
-    kb.text[len - 1] = 0;
+    kb.text[bidi::dropLast(kb.text, len)] = 0;  // a whole letter
     kb.shift = len == 1;  // empty again: a capital first
     return kb.shift != wasShift ? Press::Keys : Press::Text;
   }

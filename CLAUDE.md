@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.6.2 confirmed and merged; everything on main)
+## Where things stand (4.7 Hebrew on the screen confirmed and merged; everything on main; next 4.8 Hebrew hearing/speaking)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -230,6 +230,22 @@ Done and confirmed:
   `ui::setSubtitleReveal(n)` draws only the first n words of the (fully wrapped) subtitle, two lines at a time, turning
   to the next two lines for long replies (no more "..." cut); main `updateSayWords` each frame. Rejected option C
   (hide "You: ..." / "Thinking...") for now. Confirmed ("looks great!").
+- **Hebrew plan** (user, 2026-10-24: "Hebrew across the board"; plan doc https://claude.ai/artifact/252ezF3tuXChEh2ictoAsT,
+  user picked all recommendations): a Hebrew / English **switch** (Settings + Action Center), English buttons with Hebrew
+  content (no mirrored screens), Edge voice **he-IL-HilaNeural**, Hebrew keyboard later. Steps: 4.7 screen shows Hebrew,
+  4.8 hears/speaks Hebrew (ivrit.ai `whisper-large-v3-turbo-ct2` via faster-whisper, language "he", ~1.6 GB download on
+  first Hebrew use; Hebrew rule in the personality, tags stay English with Hebrew content; to-do find must handle Hebrew
+  words + prefixes ה ו ב ל מ ש; Hebrew day words in `parse_spoken`; Hebrew alerts; a "Hebrew model test" in Settings to
+  pick the Ollama model - gpt-oss:20b is weak in Hebrew, candidates gpt-oss:120b, gemma4, deepseek-v4.1-flash), 4.9 Hebrew keyboard.
+- **4.7 - Hebrew on the screen**: Hebrew letters (alef..tav) from **Fredoka** (OFL, `tools/Fredoka-OFL.txt`) in SUBTITLE,
+  TITLE, SMALL, HEADLINE, NOTE (`src/gfont_hebrew.cpp` from `tools/make_fonts.py --hebrew Fredoka.ttf`, weight = Nunito's - 200;
+  `gfont::extraFor(font)`). `bidi.cpp` (pure C++): UTF-8 `next`, `dropLast` / `safeCut` / `trimPartial` (never half a letter),
+  `isRtl` (first letter Hebrew), `visual()` = a small Unicode bidi for one line (numbers like 17:00 kept, brackets mirrored).
+  `Canvas::text` reorders Hebrew lines itself; `Canvas::textIn(x, w)` puts RTL lines at the right edge (music screen + bar,
+  to-dos, reminders, notifications, Claude names); subtitles reveal from the right. `ui::cleanText` (was `toAscii`) keeps
+  Hebrew, drops vowel marks/emoji. To-dos: TEXT_MAX 112 bytes, NVS "todo"/"list" now packed "TOD2" records (4.6 "TOD1" converted
+  on start). Alarm labels (32 B) / reminder texts (64 B) keep UTF-8 (sizes unchanged). PC tests: `bidi_test`, `todo_hebrew.ppm`,
+  Time `hebrew.ppm`. Confirmed ("music ok": Hebrew song names show right).
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -242,7 +258,8 @@ Done and confirmed:
   (with 4.4/4.5).
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
-- Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
+- **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
+- Next: build **4.8** (Hebrew hearing/speaking, see the Hebrew plan above; already approved by the user).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
