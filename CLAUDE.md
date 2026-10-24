@@ -267,6 +267,13 @@ Done and confirmed:
   `faster_whisper.utils.download_model(name, output_dir=...)` (no progress bar, only the 5 needed files). CI deletes the
   Hebrew folder before the packaged self-test, so the exe downloads it itself (14 s; heard in ~5.3 s for 4 s of speech on
   4 cores). Lesson: test downloads in the packaged, console-less app.
+- **4.8.3 - Hebrew hearing in the cloud**: 4.8.2 worked on the user's laptop but took 20.6 s for 2.4 s of speech (no NVIDIA;
+  AI 1.3 s, voice 1.6 s). User OK'd **Groq** (free key, console.groq.com): `voice.CloudTranscriber` posts a WAV to
+  `api.groq.com/openai/v1/audio/transcriptions` (`whisper-large-v3`, language he); OpenAI (`gpt-4o-mini-transcribe`) also
+  supported. Config `hearing_he` groq|openai|local, `groq_api_key`, `openai_api_key` (Settings > Hebrew hearing). `Ears`
+  uses the cloud when it has a key, falls back to the ivrit model on the PC if the request fails.
+  Next (user asked): **4.8.4 automatic language** - no EN/עב switch; detect the language of each sentence (Groq without
+  `language`, verbose_json returns it), answer in it, alerts in the last language used.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -280,7 +287,7 @@ Done and confirmed:
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
-- **4.8 - 4.8.2 (Hebrew hearing/speaking)** are on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
+- **4.8 - 4.8.3 (Hebrew hearing/speaking)** are on branch `claude/project-thread-vbs4n9`, waiting for the user's test. On "works": mark
   confirmed, merge, then plan 4.9 (Hebrew keyboard). If Hebrew hearing is slow/wrong, ask for `gorgi-helper.log`
   ("transcribed in ..." lines) and `hebrew-test.txt`.
 
