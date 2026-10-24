@@ -53,6 +53,9 @@ const Color FOCUS_C = gfx::rgb(0xB69CFF);
 String statusText = "";
 Color statusColor = COLOR_TEXT_DIM;
 bool statusPulse = false;
+bool talkButton = false;
+bool bottomHidden = false;
+constexpr float TALK_W = 104;  // the Talk button, right-aligned at x 780
 String subtitle = "";
 int progress = -1;  // progress bar under the subtitle, -1 = none
 MediaInfo media;
@@ -154,7 +157,14 @@ void drawClock(Canvas& c) {
 
 void drawStatus(Canvas& c) {
   c.fillRect(0, tabs::LINE_Y, 800, 1, LINE);
-  if (statusText.length() == 0) return;
+  if (statusText.length() == 0) {
+    if (!talkButton) return;
+    const float x = 780 - TALK_W;
+    c.fillRRect(x, 6, TALK_W, 34, 17, ACCENT);
+    iconMic(c, x + 24, 24, PLAY_ICON);
+    c.text(gfont::SMALL, "Talk", x + 42, 29, PLAY_ICON);
+    return;
+  }
   const String text = fit(gfont::SMALL, statusText, 190);
   const float tw = Canvas::textWidth(gfont::SMALL, text.c_str());
   const float w = tw + 52, x = 780 - w;
@@ -352,6 +362,18 @@ void setStatus(const String& text, const Color& color, bool pulse) {
   dirtyStatus = true;
 }
 
+void setBottomHidden(bool hidden) {
+  if (hidden == bottomHidden) return;
+  bottomHidden = hidden;
+  if (!hidden) dirtyBar = true;
+}
+
+void setTalkButton(bool on) {
+  if (on == talkButton) return;
+  talkButton = on;
+  dirtyStatus = true;
+}
+
 void setSubtitle(const String& text) {
   String t = toAscii(text);
   if (t == subtitle && progress < 0) return;
@@ -419,6 +441,10 @@ void update(uint32_t now) {
   }
   if (subtitleVisible) dirtyCall = false;
   if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
+  if (bottomHidden) {  // the screen draws down there itself
+    dirtyText = dirtyButtons = dirtyVolume = false;
+    return;
+  }
   if (barOpen && (int32_t)(now - barOpenUntil) >= 0) {  // fold the bar away again
     barOpen = false;
     dirtyBar = true;
@@ -437,6 +463,12 @@ void update(uint32_t now) {
 }
 
 Target hitTest(int x, int y) {
+  if (bottomHidden) {
+    if (y < TOP_H && x < 240) return Target::Clock;
+    if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
+    if (y < TOP_H && talkButton && x >= 780 - TALK_W - 8) return Target::Talk;
+    return y >= TOP_H ? Target::Face : Target::None;
+  }
   if (!barOpen && y >= tabs::MINI.y - 10) {
     const Rect& m = tabs::MINI;
     return x >= m.x - 10 && x < m.right() + 10 ? Target::Mini : Target::None;
@@ -451,6 +483,7 @@ Target hitTest(int x, int y) {
   }
   if (y < TOP_H && x < 240) return Target::Clock;
   if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
+  if (y < TOP_H && talkButton && statusText.length() == 0 && x >= 780 - TALK_W - 8) return Target::Talk;
   if (callVisible && subtitleVisible && tabs::onCallButton(x, y)) return Target::CallMute;
   if (y >= TOP_H && y < SUB_Y + SUB_H) return Target::Face;
   return Target::None;

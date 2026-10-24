@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.3.4 released and confirmed by the user; merged to main)
+## Where things stand (4.6.1 To-do screen confirmed and merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -183,15 +183,57 @@ Done and confirmed:
   Retry-After (5 min..1 h), 401/403 -> 5 min. Utilization 0..1 or 0..100 both accepted.
   **User doesn't want token counts at all** ("just the %, if we fail, drop it"): LogCounter / set_tokens removed;
   Gorgi shows "Plan usage not available right now" when there's no %. If it fails, ask for `claude-usage.json`.
-- Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs at the top).
+- **4.4 - notes on the Sketch screen** (user: finger notes came out huge; plan doc
+  https://claude.ai/artifact/PSdMeAMBBejgJGZKjvRspS, mock-up approved). `sketch::Writer` (sketch.cpp): **Write** mode =
+  big writing box (148 px, at the bottom; moves to the top for lines 5-9), ink lands at 1/3 size on a lined page
+  (10 lines, 30 px) at a writing spot that moves on after a 0.9 s pause or at once past the dashed slide line;
+  space / new line buttons; tap the page = move the spot; eraser rubs the page directly; full page -> new page;
+  after loading, `findCursor()` continues after the last writing. Box ink lives in a separate PSRAM picture
+  (`skBox`). **Draw** mode = the old free drawing. Both use `sketch::Smoother` (calmed points + curves).
+  Undo: a ring of 6 copies taken when a stroke / word ENDS (not at finger down); Write undo = last word.
+  Toolbar: Write / Draw, 4 colours, eraser, size, undo, gallery, Clear (twice: "Sure?"), New page. Mode in NVS
+  "sketch"/"mode". The idle "Tap me to talk" pill is gone everywhere (user: it looked like a button but wasn't);
+  the Sketch screen has a real teal **Talk** button (`ui::setTalkButton`, Target::Talk -> face + listen).
+  Status pill still shows Listening / Thinking / On a call.
+- **4.5 - typed notes** (user tried 4.4 with a photo; asked for no music bar, a bigger page, handwriting -> real text,
+  voice typing). `ui::setBottomHidden` on Sketch: paper 680x424 (13 lines, box 170 px, flips to the top from line 7);
+  old 320-row files still load (`OLD_PAPER_H`), thumbs 160x100. Typed mode (helper connected): the Writer records the
+  word's points (`sketch::Word`, box px, y from the guide line), main sends `{"type":"ink","id","strokes":[[x,y..]]}`
+  (`pclink::sendText`), helper `ink_reader.py` = Windows `InkRecognizerContainer` (pywinrt
+  `winrt-Windows.UI.Input.Inking`; the CI self-test reads a sample "hello" -> ['hello','hallo',...]) -> `ink_text`
+  {id, guesses}. Main keeps an op queue (Word / Text / Space / NewLine / Place) so order holds; no answer in 2.5 s
+  -> handwriting placed small. Text in the new `gfont::NOTE` (Nunito 21 px, 600). Other guesses = chips in the box
+  (tap = undo + type it). Talk on Sketch = `dictate` -> helper `Conversation.dictate` (Whisper only) ->
+  `dictate_state` (listening / thinking / idle + problem) and `dictation` {text}. English only (fonts are ASCII).
+  The user tried 4.5: "the writing does not work at all, voice talk works great" -> **Sketch was dropped** (4.6).
+- **4.6 - To-do screen** (replaces Sketch; plan doc https://claude.ai/artifact/XSw28AN7VC7sDiAYGkqLdL, user picked
+  option B, mock-ups in /mnt/project-files/todo/). `todos.cpp` keeps up to 40 open + 20 done tasks in NVS ("todo"/"list",
+  one blob; day numbers = days since 1970 local; flags star/done/someday; remindAt + alarmId = a normal Time-screen
+  reminder via `alarms::remindAt` + new `alarms::lastAddedId()`). `todo_screen.cpp`: Today / Upcoming / Done tabs,
+  5 rows of 58 px (drag to scroll), circle = done (Undo toast 5 s), star, tap text = row buttons (Star / Today /
+  Tomorrow / Delete; Done tab: Not done / Delete), "Add by voice" + "Type" (QWERTY keyboard, 123 layer, When chips
+  Today / Tomorrow / Next week (coming Sunday) / Someday, star, "Say it instead"). No music bar (`setBottomHidden`).
+  Messages: Gorgi -> `todo_list` (on change/connect), `dictate` {mode todo|text}; helper -> `dictation`
+  {text, due "YYYY-MM-DD", someday, star, at, mode}, `todo_add` / `todo_done` {id, done} / `todo_remove` {id}.
+  Helper `todolist.py`: `[todo: add x | tomorrow 17:00]`, `[todo: done x]`, `[todo: undone x]`, `[todo: remove x]`,
+  fuzzy find by words (asks "Which one?" when unclear), `parse_spoken` ("buy milk tomorrow at 5" -> Buy milk, 17:00),
+  list in the AI context. Old sketches (LittleFS /sketch, NVS "sketch") are deleted on first start (user OK'd).
+  `ink_reader.py` and the Inking package removed. Tests: `tools/pc-tests` (todo_preview), `test_todolist.py`.
+- **4.6.1 - face fix**: user: "Works good" (4.6), but after adding from the face it stayed on "I'm listening...".
+  Cause (since 4.1!): `pclink.cpp` sent "voice"/"heard"/"say"/"level" to `onOther` (checked first), so the face
+  never got the conversation and waited for the 60 s safety timeout. Now the voice branch comes before onOther.
+  Confirmed ("ok good").
+- Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
   ever comes too often again, ask for `gorgi-helper.log` (lines "claude hook: ..." show the order of events).
-- **4.3.4 is confirmed** (plan % works) and merged to main. Nothing is waiting.
-- Branch `claude/esp32-touch-screen-software-emaips`: after a merged PR, restart it from main for new work.
+- **4.3.4 is confirmed** (plan % works) and merged to main.
+- **4.6 + 4.6.1 (To-do screen, face follows the conversation) are confirmed** ("ok good") and merged to main
+  (with 4.4/4.5). When confirmed: mark it here, merge the branch to main. If voice tasks
+  come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - Next: ask what to build next; offer "Next steps" / the ideas list (plan first, then build).
 
 Lessons from 3.9 (keep for future screens):
@@ -200,10 +242,10 @@ Lessons from 3.9 (keep for future screens):
 
 ## Next steps (chosen by the user, in this order; plan each one with the user before coding)
 
-Screens now: **Music ← Face → Time → Sketch → Claude** (icon tabs; weather lives in the Action Center).
+Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs; weather lives in the Action Center).
 
 1. ~~**Time screen**~~ - done in 3.9 (see above).
-2. ~~**Sketch pad**~~ - done in 4.0 (the AI-guess bonus was declined).
+2. ~~**Sketch pad**~~ - done in 4.0, replaced by the **To-do screen** in 4.6 (finger writing didn't work out).
 3. **Night clock**: at night Gorgi shows a big dim clock instead of just sleeping.
 4. **"Hey Gorgi" wake word**: talk without tapping. Local on the PC (voice detection + Whisper checking
    for the name and sound-alikes), with an on/off setting.

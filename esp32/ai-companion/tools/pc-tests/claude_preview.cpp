@@ -29,7 +29,7 @@ int main() {
   View e; e.pc = true; e.hooked = false;
   save("claude_empty.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &e);
   save("tabs.ppm", 0, 300, [](gfx::Canvas& c, void*) {
-    const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
+    const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::TODO, tabs::CLAUDE};
     tabs::draw(c, icons, 6, 1, 1u << 5);
     tabs::drawCallButton(c, false);
   }, nullptr);
@@ -38,7 +38,7 @@ int main() {
   snprintf(pp.pv.status, 96, "Gorgi 4.1  -  Wi-Fi good  -  PC: MY-PC connected");
   save("panel.ppm", 0, 376, [](gfx::Canvas& c, void* p) {
     P* x = (P*)p;
-    const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::SKETCH, tabs::CLAUDE};
+    const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::WEATHER, tabs::TIME, tabs::TODO, tabs::CLAUDE};
     tabs::draw(c, icons, 6, 5, 0);
     panel::drawHandle(c, true);
     draw(c, x->v);

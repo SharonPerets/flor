@@ -76,6 +76,18 @@ Ask Gorgi, for example:
 
 They're kept on Gorgi itself, so they go off even when the PC is off. When one is due, Gorgi shows it,
 and if the helper is running, a pop-up appears and Gorgi's voice says it on the PC (music pauses for a moment).
+
+## To-do list
+
+The list lives on Gorgi's To-do screen. On that screen, **Add by voice** writes down what you say as a task
+("buy milk tomorrow" -> "Buy milk", due tomorrow; "at 5" adds a reminder). From the face you can ask Gorgi:
+
+- "Add call the bank to my list", "put renew the passport on my list for Friday, it's important"
+- "I finished the bank thing", "mark buy milk as done", "remove buy milk"
+- "What's on my list today?"
+
+(`todolist.py` turns the AI's `[todo: add ... | day]`, `[todo: done ...]`, `[todo: remove ...]` tags into messages
+for Gorgi and finds tasks by their words. Test: `python test_todolist.py`.)
 You can see, pause and delete them on Gorgi's **Time** screen too.
 
 ## Claude Code

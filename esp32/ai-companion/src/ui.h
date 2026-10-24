@@ -13,7 +13,7 @@ constexpr int TOP_H = 44;   // the top bar
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 56;  // a little lower since 4.3: the music bar folds away
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk };
 
 struct MediaInfo {
   String title;
@@ -36,6 +36,11 @@ void setClock(const String& text);
 // timer or focus session runs. Empty text hides it.
 void setTimerChip(const String& text, bool focus);
 void setStatus(const String& text, const gfx::Color& color, bool pulse);
+// A real "Talk" button in the top right (screens without a face to tap). It shows
+// while the status is empty; Listening / Thinking / On a call show instead.
+void setTalkButton(bool on);
+// No music bar or slim line at the bottom (the Sketch screen uses all of it)
+void setBottomHidden(bool hidden);
 void setSubtitle(const String& text);
 void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);

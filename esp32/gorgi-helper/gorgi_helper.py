@@ -37,11 +37,12 @@ import claude_setup  # noqa: E402
 from claude_watch import ClaudeWatch  # noqa: E402
 from usage_fetch import UsageFetcher  # noqa: E402
 from timekeeper import TimeKeeper  # noqa: E402
+from todolist import TodoKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.3.4"  # must match esp32/VERSION
+VERSION = "4.6.1"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -201,10 +202,12 @@ def make_update_window(on_word):
 
 
 class Helper:
-    def __init__(self, media, config, on_status=None, make_conversation=None, timekeeper=None, speak=None):
+    def __init__(self, media, config, on_status=None, make_conversation=None, timekeeper=None, speak=None,
+                 todos=None):
         self.media = media
         self.config = config
         self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
+        self.todos = todos or TodoKeeper()  # Gorgi's to-do list, for the AI
         self.speak = speak  # async fn(text): says something on the PC speakers (None = no voice)
         self._announcing = asyncio.Lock()
         # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
@@ -597,14 +600,17 @@ class Helper:
         if self.conversation_task and not self.conversation_task.done():
             self.conversation_task.cancel()
 
-    def start_conversation(self):
+    def start_conversation(self, dictate=False, mode="todo"):
         if self.conversation_task and not self.conversation_task.done():
             return
         if self.make_conversation is None:
-            asyncio.get_running_loop().create_task(
-                self.send({"type": "say", "mood": "sad", "text": "My voice parts aren't installed on the PC."}))
+            msg = ({"type": "dictate_state", "state": "idle", "problem": "Voice isn't installed on the PC"} if dictate
+                   else {"type": "say", "mood": "sad", "text": "My voice parts aren't installed on the PC."})
+            asyncio.get_running_loop().create_task(self.send(msg))
             return
         conversation = self.make_conversation(self.send)
+        conversation.dictate = dictate
+        conversation.dictate_mode = mode
         self.conversation_task = asyncio.get_running_loop().create_task(self._run_conversation(conversation))
 
     async def _run_conversation(self, conversation):
@@ -614,7 +620,8 @@ class Helper:
             log.info("conversation cancelled")
         except Exception:
             log.exception("conversation failed")
-            await self.send({"type": "voice", "state": "idle"})
+            if not conversation.dictate:  # (voice typing already said it's done)
+                await self.send({"type": "voice", "state": "idle"})
 
     async def _session(self, ws):
         self.ws = ws
@@ -635,6 +642,7 @@ class Helper:
             self.ws = None
             self.gorgi_version = None
             self.timekeeper.forget()
+            self.todos.forget()
             self.on_changed()
             self._push()
             self.stop_conversation()
@@ -663,6 +671,9 @@ class Helper:
             if msg.get("type") == "time_list":
                 self.timekeeper.update(msg)
                 continue
+            if msg.get("type") == "todo_list":
+                self.todos.update(msg)
+                continue
             if msg.get("type") == "due":
                 log.info("due on Gorgi (%s): %s", msg.get("kind"), msg.get("text"))
                 asyncio.get_running_loop().create_task(self.announce(str(msg.get("text") or "")))
@@ -670,6 +681,11 @@ class Helper:
             if msg.get("type") == "talk":
                 log.info("Gorgi was tapped: starting a conversation")
                 self.start_conversation()
+                continue
+            if msg.get("type") == "dictate":
+                mode = "text" if msg.get("mode") == "text" else "todo"
+                log.info("voice typing on the To-do screen (%s)", mode)
+                self.start_conversation(dictate=True, mode=mode)
                 continue
             if msg.get("type") == "cancel":
                 log.info("Gorgi was tapped again: stopping the conversation")
@@ -1030,9 +1046,9 @@ def make_voice(config):
         voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
         return Speaker(voice, pitch="+5Hz")
 
-    def factory(send, media, timekeeper, extra_context=None):
+    def factory(send, media, timekeeper, extra_context=None, todos=None):
         return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper,
-                            extra_context=extra_context)
+                            extra_context=extra_context, todos=todos)
 
     async def speak(text):
         await speaker().say(text)
@@ -1082,6 +1098,7 @@ def self_test(out_path):
         import update_window  # noqa: F401
         import conversation  # noqa: F401
         import timekeeper  # noqa: F401
+        import todolist  # noqa: F401
         import claude_watch  # noqa: F401
         import claude_setup as cs
         import call_watch as cw
@@ -1117,6 +1134,9 @@ def self_test(out_path):
 
         assert upd.is_newer("3.10", "3.9") and not upd.is_newer("3.4", "3.4")
         lines.append("imports: ok")
+        task = todolist.parse_spoken("buy milk tomorrow")
+        assert task["text"] == "Buy milk" and task["due"], task
+        lines.append(f"to-do from speech: {task}")
         if IS_WINDOWS:  # the updates window starts and can talk back (its buttons use that)
             import queue as _queue
 
@@ -1225,6 +1245,7 @@ def main():
     media = make_media()
     voice_factory, speak = make_voice(config)
     timekeeper = TimeKeeper()
+    todos = TodoKeeper()
     helper = None
 
     def extra_context():
@@ -1233,9 +1254,10 @@ def main():
             lines.append("Your friend is on a Teams call right now.")
         return "\n".join(x for x in lines if x)
 
-    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context))
+    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context, todos))
                          if voice_factory else None)
-    helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak)
+    helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak,
+                    todos=todos)
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)

@@ -391,6 +391,8 @@ bool takeDue(Due& out) {
   return true;
 }
 
+uint32_t lastAddedId() { return nextId - 1; }
+
 Result addTimer(uint32_t seconds, const char* label) { return startTimer(timescreen::TIMER, seconds, label); }
 
 Result startFocus(uint32_t seconds) { return startTimer(timescreen::FOCUS, seconds, "Focus"); }

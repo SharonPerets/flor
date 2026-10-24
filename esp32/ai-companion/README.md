@@ -58,8 +58,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 - **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
-- **Change screens**: tap an icon in the top bar (music, face, time, sketch, Claude), or swipe sideways in the
-  middle of the screen. Order: **Music ← Face → Time → Sketch → Claude**. Gorgi stays on the screen you leave it on
+- **Change screens**: tap an icon in the top bar (music, face, time, to-do, Claude), or swipe sideways in the
+  middle of the screen. Order: **Music ← Face → Time → To-do → Claude**. Gorgi stays on the screen you leave it on
   (it switches to its face when you talk to it or when a timer or reminder goes off).
 - **Music line**: the music bar is folded into a slim "♪ Song - Artist ⏯" line at the bottom. Tap it to open the
   full bar (buttons and volume) for 10 seconds.
@@ -80,13 +80,18 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
     The PC says it out loud if Gorgi Helper is running.
   - Everything is saved on Gorgi (up to 20 reminders), so it survives restarts and works without the PC.
     Anything that went off while Gorgi was off is shown once when it starts again.
-- **Sketch screen** (swipe left from the time screen): draw with your finger.
-  - Left toolbar: 8 colours, eraser, brush size (tap to cycle 3 sizes), undo (last 5 strokes), gallery.
-  - On the sketch screen, **swipe on the toolbar** to change screens (on the paper, a swipe draws).
-  - Drawings save by themselves (after a 20-second pause, or when you leave). The **gallery** shows the
-    last 10: tap one to open it, **New page** for a fresh one, the small **x** to delete one. When there
-    are more than 10, the oldest is removed.
-  - The first start after installing 4.0 takes a few seconds longer: Gorgi prepares its storage once.
+- **To-do screen** (swipe left from the time screen, 4.6): **Today / Upcoming / Done** tabs at the top.
+  - **Add by voice**: tap it and say the task, like "buy milk tomorrow" or "call mom on Friday at 5". The PC
+    writes it down and works out the day (and a reminder time if you say one). **Type** opens a big keyboard
+    with day choices (Today / Tomorrow / Next week / Someday), a star, and "Say it instead".
+  - Tap the circle to finish a task (Undo shows for 5 seconds). Tap the star to mark it important. Tap the
+    task's text for its buttons: Star, Today, Tomorrow, Delete (Done tab: Not done, Delete).
+  - Today = tasks without a day, due today, or late (red "Late"). Upcoming = later days and Someday. Done =
+    the last 7 days. Drag the list up / down when it's long. A time chip (like 17:00) = a reminder that
+    rings like the Time screen's reminders.
+  - Talk to Gorgi: "add call the bank to my list", "I finished the bank thing", "remove buy milk", "what's on
+    my list today?".
+  - Saved on Gorgi (up to 40 open tasks), so it works without the PC. No music bar on this screen.
 - **Claude screen** (the spark icon): your Claude Code sessions on the PC (working, waiting for you,
   done) and your plan usage (5-hour and weekly, with reset times). Needs Gorgi Helper with
   **Settings → Connect Claude Code**. When a session needs you, or finishes after working a while,
@@ -113,8 +118,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/time_screen.cpp` | The Time screen: countdown rings, buttons, the reminder list |
 | `src/alarms.cpp` | Keeps timers, focus sessions and reminders (saved in flash) and says when one is due |
 | `src/wallclock.cpp` | The time of day from the internet (Israel time zone) |
-| `src/sketch.cpp` | The Sketch screen: toolbar, paper, gallery, packing drawings small |
-| `src/sketch_store.cpp` | Saves and loads sketches in flash (LittleFS) |
+| `src/todo_screen.cpp` | The To-do screen: lists, row buttons, the keyboard |
+| `src/todos.cpp` | The to-do list: keeping, sorting into Today / Upcoming / Done, saving |
 | `src/tabs.cpp` | The screen icons in the top bar, the slim music line, the Teams mute button |
 | `src/action_center.cpp` | The Action Center: notifications, weather, Sleep |
 | `src/claude_screen.cpp` | The Claude screen: sessions and usage |

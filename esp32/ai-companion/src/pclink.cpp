@@ -99,11 +99,12 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
     if (handlers.onClock) handlers.onClock(String((const char*)(doc["text"] | "")), doc["epoch"] | 0u);
   } else if (strcmp(type, "time_add") == 0 || strcmp(type, "time_cancel") == 0) {
     if (handlers.onTime) handlers.onTime(type, doc.as<JsonObjectConst>());
-  } else if (handlers.onOther) {  // "claude", "claude_alert", "call"...
-    handlers.onOther(type, doc.as<JsonObjectConst>());
   } else if (strcmp(type, "voice") == 0 || strcmp(type, "heard") == 0 || strcmp(type, "say") == 0 ||
              strcmp(type, "level") == 0) {
+    // (before onOther: since 4.1 these went to onOther by mistake, and the face stayed on "I'm listening...")
     if (handlers.onVoice) handlers.onVoice(type, doc.as<JsonObjectConst>());
+  } else if (handlers.onOther) {  // "claude", "claude_alert", "call", "todo_..."...
+    handlers.onOther(type, doc.as<JsonObjectConst>());
   }
 }
 
@@ -288,6 +289,11 @@ void sendSimple(const char* type) {
 void send(JsonDocument& doc) {
   if (helperClient < 0) return;
   sendJson(helperClient, doc);
+}
+
+void sendText(const String& json) {
+  if (helperClient < 0) return;
+  server.sendTXT((uint8_t)helperClient, json.c_str(), json.length());
 }
 
 void forgetWifi() {

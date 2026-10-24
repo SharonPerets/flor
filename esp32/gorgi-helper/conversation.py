@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 
+import todolist
 import weather
 from brain import BrainError
 
@@ -15,18 +16,79 @@ FIRST_WAIT_SECONDS = 7.0  # how long to wait for you to start talking after a ta
 
 class Conversation:
     def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0, timekeeper=None,
-                 extra_context=None):
+                 extra_context=None, todos=None):
         self.send = send  # async fn(dict): message to Gorgi
         self.media = media
         self.timekeeper = timekeeper  # timers and reminders (see timekeeper.py)
+        self.todos = todos  # the to-do list (see todolist.py)
         self.extra_context = extra_context  # fn() -> more lines for the AI (Claude Code, calls)
         self.brain = brain
         self.recorder = recorder
         self.transcriber = transcriber
         self.speaker = speaker
         self.followup_seconds = followup_seconds
+        self.dictate = False  # True: just write down what's said (To-do screen; no AI, no voice)
+        self.dictate_mode = "todo"  # "todo": a new task (with its day); "text": words for the keyboard's text box
 
     async def run(self):
+        if self.dictate:
+            await self.run_dictation()
+            return
+        await self.run_chat()
+
+    async def _ears_problem(self):
+        """None when Whisper is ready (loads it if needed), else what to tell the user."""
+        if self.transcriber.ready:
+            return None
+        if self.transcriber.loading:
+            return "Give me a minute, I'm still learning to hear. Try again soon!"
+        await asyncio.to_thread(self.transcriber.load)
+        if not self.transcriber.ready:
+            return "My ears aren't working. Please check the helper's log on your PC."
+        return None
+
+    async def run_dictation(self):
+        """Voice typing for the To-do screen: listen once, send the words back (as a task with its day)."""
+        paused_music = False
+        problem = None
+        try:
+            info = await self.media.get_info()
+            if info["playing"]:
+                await self.media.set_playing(False)
+                paused_music = True
+            problem = await self._ears_problem()
+            if problem:
+                return
+            await self.send({"type": "dictate_state", "state": "listening"})
+            audio = await self.recorder.record(wait_for_speech=FIRST_WAIT_SECONDS, max_seconds=30.0, end_silence=1.5)
+            if audio is None:
+                problem = "I didn't hear anything"
+                return
+            await self.send({"type": "dictate_state", "state": "thinking"})
+            text = await asyncio.to_thread(self.transcriber.transcribe, audio)
+            log.info("dictation: %r", text)
+            if text and self.dictate_mode == "todo":
+                task = todolist.parse_spoken(text)
+                log.info("new task: %s", task)
+                msg = todolist.to_message(task, "dictation")
+                msg["mode"] = "todo"
+                await self.send(msg)
+            elif text:
+                await self.send({"type": "dictation", "text": text, "mode": "text"})
+            else:
+                problem = "Sorry, I didn't catch that"
+        finally:
+            try:
+                msg = {"type": "dictate_state", "state": "idle"}
+                if problem:
+                    msg["problem"] = problem
+                await self.send(msg)
+            except Exception:
+                pass
+            if paused_music:
+                await self.media.set_playing(True)
+
+    async def run_chat(self):
         """Runs until the chat ends. Cancel the task to stop it early."""
         paused_music = False
         resume_music = True
@@ -37,14 +99,10 @@ class Conversation:
                 await self.media.set_playing(False)
                 paused_music = True
 
-            if not self.transcriber.ready:
-                if self.transcriber.loading:
-                    await self._say("thinking", "Give me a minute, I'm still learning to hear. Try again soon!")
-                    return
-                await asyncio.to_thread(self.transcriber.load)
-                if not self.transcriber.ready:
-                    await self._say("sad", "My ears aren't working. Please check the helper's log on your PC.")
-                    return
+            problem = await self._ears_problem()
+            if problem:
+                await self._say("thinking" if self.transcriber.loading else "sad", problem)
+                return
 
             followup = False
             while True:
@@ -120,7 +178,14 @@ class Conversation:
         problem = None
         for action, value in actions:
             log.info("action: %s %s", action, value if value is not None else "")
-            if action in ("timer", "focus", "remind", "reminder", "cancel"):
+            if action == "todo":
+                if self.todos is None:
+                    continue
+                messages, trouble = self.todos.handle(value)
+                for message in messages:
+                    await self.send(message)
+                problem = problem or trouble
+            elif action in ("timer", "focus", "remind", "reminder", "cancel"):
                 if self.timekeeper is None:
                     continue
                 messages, trouble = self.timekeeper.handle(action, value)
@@ -158,6 +223,8 @@ class Conversation:
             lines.append(forecast)
         if self.timekeeper is not None:
             lines.append(self.timekeeper.prompt_block())
+        if self.todos is not None:
+            lines.append(self.todos.prompt_block())
         if self.extra_context is not None:
             try:
                 extra = self.extra_context()
