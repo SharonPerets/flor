@@ -156,20 +156,29 @@ class Conversation:
                 await self.media.set_playing(True)
 
     async def _say(self, mood, text):
-        await self.send({"type": "say", "text": text, "mood": mood})
+        """Speaks. The text goes to Gorgi when the sound starts, with the time of each word,
+        so the subtitle appears word by word with the voice."""
         loop = asyncio.get_running_loop()
+        sent = False
+
+        async def on_start(timings):
+            nonlocal sent
+            sent = True
+            await self.send({"type": "say", "text": text, "mood": mood, "words": timings})
 
         def on_level(level):
             loop.create_task(self.send({"type": "level", "value": round(level, 2)}))
 
         log.info("speaking (%s): %s", mood, text)
         try:
-            await self.speaker.say(text, on_level=on_level)
+            await self.speaker.say(text, on_level=on_level, on_start=on_start)
             log.info("done speaking")
         except asyncio.CancelledError:
             raise
         except Exception as e:  # no internet for the voice: still show the text for a while
             log.warning("speaking failed: %s", e)
+            if not sent:
+                await self.send({"type": "say", "text": text, "mood": mood})
             await asyncio.sleep(min(8.0, 1.0 + len(text) * 0.06))
 
     async def _do_actions(self, actions, resume_music):

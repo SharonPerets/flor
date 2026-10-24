@@ -416,6 +416,30 @@ void onUpdate(int percent, const String& message) {
 
 // ---------- conversation messages from the helper ----------
 
+// Gorgi's reply appears word by word, in time with the voice on the PC
+constexpr int MAX_SAY_WORDS = 96;
+uint32_t sayAtMs[MAX_SAY_WORDS];
+int sayWords[MAX_SAY_WORDS];
+int sayWordCount = 0;  // 0 = show it all at once
+uint32_t sayStart = 0;
+int sayShown = -2;
+
+void updateSayWords(uint32_t now) {
+  if (!sayWordCount) return;
+  if (phase != Phase::Talking || !inConversation) {  // done talking (or something else took over): all of it
+    sayWordCount = 0;
+    ui::setSubtitleReveal(-1);
+    return;
+  }
+  const uint32_t t = now - sayStart;
+  int shown = 0;
+  for (int i = 0; i < sayWordCount && sayAtMs[i] <= t; ++i) shown = sayWords[i];
+  if (shown != sayShown) {
+    sayShown = shown;
+    ui::setSubtitleReveal(shown);
+  }
+}
+
 void onVoice(const char* type, JsonObjectConst msg) {
   uint32_t now = millis();
   lastVoiceMsg = now;
@@ -454,8 +478,19 @@ void onVoice(const char* type, JsonObjectConst msg) {
     face.setMood(mood);
     face.setTalking(true);
     ui::setSubtitle(String((const char*)(msg["text"] | "")));
+    // the words appear as they are spoken: [[ms, words shown], ...] from the start of the voice
+    sayWordCount = 0;
+    for (JsonArrayConst w : msg["words"].as<JsonArrayConst>()) {
+      if (sayWordCount >= MAX_SAY_WORDS) break;
+      sayAtMs[sayWordCount] = w[0] | 0u;
+      sayWords[sayWordCount] = w[1] | 0;
+      ++sayWordCount;
+    }
+    sayStart = now;
+    sayShown = -2;
     showIdleStatus();
     setPhase(Phase::Talking);  // lasts until the helper says listening/idle
+    updateSayWords(now);
   }
 }
 
@@ -1775,6 +1810,7 @@ uint32_t msSince(uint32_t now, uint32_t since) { return (int32_t)(now - since) >
 
 void updatePhase(uint32_t now) {
   bool timeUp = phaseUntil && now >= phaseUntil;
+  updateSayWords(now);
 
   // Safety net: if the helper goes quiet in the middle of a conversation
   if (inConversation && msSince(now, lastVoiceMsg) > CONVERSATION_TIMEOUT_MS) {

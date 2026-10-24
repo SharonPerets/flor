@@ -42,7 +42,7 @@ import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.6.1"  # must match esp32/VERSION
+VERSION = "4.6.2"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -1137,6 +1137,9 @@ def self_test(out_path):
         task = todolist.parse_spoken("buy milk tomorrow")
         assert task["text"] == "Buy milk" and task["due"], task
         lines.append(f"to-do from speech: {task}")
+        from voice import word_timings
+
+        assert word_timings("Hi there", [(0.1, "Hi"), (0.4, "there")], 1.0) == [[100, 1], [400, 2]]
         if IS_WINDOWS:  # the updates window starts and can talk back (its buttons use that)
             import queue as _queue
 
