@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.6.2 confirmed and merged; 4.7 Hebrew on the screen released on branch claude/project-thread-vbs4n9, waiting for the user's test)
+## Where things stand (4.7 Hebrew on the screen confirmed and merged; everything on main; next 4.8 Hebrew hearing/speaking)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -245,7 +245,7 @@ Done and confirmed:
   to-dos, reminders, notifications, Claude names); subtitles reveal from the right. `ui::cleanText` (was `toAscii`) keeps
   Hebrew, drops vowel marks/emoji. To-dos: TEXT_MAX 112 bytes, NVS "todo"/"list" now packed "TOD2" records (4.6 "TOD1" converted
   on start). Alarm labels (32 B) / reminder texts (64 B) keep UTF-8 (sizes unchanged). PC tests: `bidi_test`, `todo_hebrew.ppm`,
-  Time `hebrew.ppm`.
+  Time `hebrew.ppm`. Confirmed ("music ok": Hebrew song names show right).
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
 ## Handover for the next session (2026-10-24)
@@ -258,8 +258,8 @@ Done and confirmed:
   (with 4.4/4.5).
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
-- **4.7 (Hebrew on the screen) released** from branch `claude/project-thread-vbs4n9`, not merged: waiting for the user's test
-  (a Hebrew song on the music screen). On "works": mark confirmed, merge, then build 4.8 (Hebrew hearing/speaking, see plan above).
+- **4.7 is confirmed** ("music ok", Hebrew song names show right) and merged to main.
+- Next: build **4.8** (Hebrew hearing/speaking, see the Hebrew plan above; already approved by the user).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
