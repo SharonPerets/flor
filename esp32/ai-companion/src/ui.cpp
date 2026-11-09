@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "bidi.h"
 #include "display.h"
 #include "gfont.h"
 #include "panel.h"
@@ -135,7 +136,7 @@ void iconNote(Canvas& c, float cx, float cy, const Color& col) {
 String fit(const gfont::Font& f, const String& s, float maxW) {
   if (Canvas::textWidth(f, s.c_str()) <= maxW) return s;
   String t = s;
-  while (t.length() > 0 && Canvas::textWidth(f, (t + "...").c_str()) > maxW) t.remove(t.length() - 1);
+  while (t.length() > 0 && Canvas::textWidth(f, (t + "...").c_str()) > maxW) t.remove(bidi::dropLast(t.c_str(), t.length()));
   return t + "...";
 }
 
@@ -288,8 +289,8 @@ void drawBar(Canvas& c) {
   iconNote(c, 60, BAR_CY, ACCENT);
 
   // song
-  c.text(gfont::TITLE, fit(gfont::TITLE, media.title, TEXT_W - 4).c_str(), TEXT_X, BAR_CY - 3, TEXT_TITLE);
-  c.text(gfont::SMALL, fit(gfont::SMALL, media.artist, TEXT_W - 4).c_str(), TEXT_X, BAR_CY + 21, TEXT_MUTED);
+  c.textIn(gfont::TITLE, fit(gfont::TITLE, media.title, TEXT_W - 4).c_str(), TEXT_X, TEXT_W - 4, BAR_CY - 3, TEXT_TITLE);
+  c.textIn(gfont::SMALL, fit(gfont::SMALL, media.artist, TEXT_W - 4).c_str(), TEXT_X, TEXT_W - 4, BAR_CY + 21, TEXT_MUTED);
 
   // buttons
   c.fillCircle(PREV_X, BAR_CY, 26, pressed == Target::Prev ? BTN_PRESSED : BTN);
@@ -443,7 +444,7 @@ void showProgress(const String& text, int percent) {
 }
 
 void setMedia(const MediaInfo& info) {
-  String title = toAscii(info.title), artist = toAscii(info.artist);
+  String title = toAscii(info.title, true), artist = toAscii(info.artist, true);  // song names may be Hebrew
   if (title != media.title || artist != media.artist) dirtyText = true;
   if (info.playing != media.playing) dirtyButtons = true;
   if (info.volume != media.volume) dirtyVolume = true;
@@ -546,7 +547,7 @@ int volumeFromX(int x) {
   return constrain((x - VOL_X0) * 100 / (VOL_X1 - VOL_X0), 0, 100);
 }
 
-String toAscii(const String& in) {
+String toAscii(const String& in, bool keepHebrew) {
   String out;
   out.reserve(in.length());
   const uint8_t* s = (const uint8_t*)in.c_str();
@@ -571,7 +572,14 @@ String toAscii(const String& in) {
     else if (cp == 0x2013 || cp == 0x2014) out += '-';
     else if (cp == 0x2026) out += "...";
     else if (cp == 0xA0) out += ' ';
-    // anything else (emoji, accents) is dropped
+    else if (keepHebrew && cp == 0x05BE) out += '-';   // Hebrew hyphen (maqaf)
+    else if (keepHebrew && cp == 0x05F3) out += '\'';  // geresh
+    else if (keepHebrew && cp == 0x05F4) out += '"';   // gershayim
+    else if (keepHebrew && cp >= 0x05D0 && cp <= 0x05EA) {  // Hebrew letters, kept as UTF-8
+      out += (char)(0xC0 | (cp >> 6));
+      out += (char)(0x80 | (cp & 0x3F));
+    }
+    // anything else (emoji, accents, Hebrew vowel marks) is dropped
   }
   return out;
 }
