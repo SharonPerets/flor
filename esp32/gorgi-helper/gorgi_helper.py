@@ -1100,6 +1100,10 @@ def self_test(out_path):
         info = asyncio.run(media.get_info())
         lines.append(f"media info: {info}")
         lines.append(f"volume: {media.get_volume()}")
+        if sys.platform == "win32":
+            import youtube_music
+
+            lines.append(f"youtube music: window {youtube_music.find_window()}, app {youtube_music.find_shortcut()}")
         from icon import make_image
 
         make_image(64)

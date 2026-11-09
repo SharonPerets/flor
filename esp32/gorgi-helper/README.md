@@ -4,6 +4,7 @@ A small app that connects your PC to Gorgi over Wi-Fi:
 
 - Gorgi's **play/pause, next, previous** buttons control whatever is playing (Spotify, YouTube in a browser, ...)
 - Gorgi's **volume slider** controls the PC volume, and follows it when you change it on the PC
+  (always the speakers Windows uses right now; if the driver ignores it, the volume keys are pressed instead)
 - Gorgi shows the **song title and artist** and the PC's **time**
 - **Talk to Gorgi**: tap its face, speak into the PC microphone, and Gorgi answers out loud
 - **Timers and reminders** by voice, and Gorgi's voice says them out loud when they're due

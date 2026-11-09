@@ -154,6 +154,9 @@ class Conversation:
                 pass
             if paused_music and resume_music:
                 await self.media.set_playing(True)
+            elif getattr(self, "_start_music", False) and hasattr(self.media, "start_music"):
+                await self.media.start_music()
+            self._start_music = False
 
     async def _say(self, mood, text):
         """Speaks. The text goes to Gorgi when the sound starts, with the time of each word,
@@ -205,6 +208,7 @@ class Conversation:
                 resume_music = False  # you want quiet: don't restart it afterwards
             elif action == "play":
                 resume_music = True
+                self._start_music = True  # nothing was playing: start it after Gorgi speaks
                 keep_talking = False  # music on: stop listening so the mic doesn't hear it
             elif action in ("next", "prev"):
                 await self.media.command(action)
