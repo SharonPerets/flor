@@ -238,6 +238,12 @@ Done and confirmed:
   (`HEBREW_LEFTOVERS`) and any `models/*ivrit-ai--*` folder. Don't offer Hebrew again unless the user asks.
   4.8.5 confirmed ("Works") and merged to main.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
+- **4.8.6 - laptop volume + Play** (helper only; NOT confirmed yet): user: volume did nothing on the laptop, Play did
+  nothing with YouTube Music closed. `media_windows.py` now looks up the current default speakers (every 5 s; one
+  kept volume object per device id) instead of the first speakers forever, reads the volume back and falls back to the
+  volume keys (2% a press). `youtube_music.py`: Play with no media session -> use a "YouTube Music" window, else the
+  Start menu shortcut "YouTube Music*.lnk", else music.youtube.com; then session play or Space in its window. Voice
+  "play" also starts music when nothing was paused. If it fails, ask for `gorgi-helper.log` ("volume:" / "YouTube Music").
 
 ## Handover for the next session (2026-10-24)
 
