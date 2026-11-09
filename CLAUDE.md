@@ -242,7 +242,8 @@ Done and confirmed:
   `tabs.cpp` (mini player), and in `ui.cpp` the music bar (`textIn`, letter-safe `fit`). `ui::toAscii(text, keepHebrew)`:
   only `setMedia` keeps Hebrew; everything else (face, to-dos, alerts, notifications) stays English-only.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
-- **4.8.6 - laptop volume + Play** (helper only; NOT confirmed yet): user: volume did nothing on the laptop, Play did
+- **4.8.7 - laptop volume + Play** (helper only, on top of 4.8.6 Hebrew song names; branch
+  `claude/project-thread-yk3jm5`, PR #11; NOT confirmed yet): user: volume did nothing on the laptop, Play did
   nothing with YouTube Music closed. `media_windows.py` now looks up the current default speakers (every 5 s; one
   kept volume object per device id) instead of the first speakers forever, reads the volume back and falls back to the
   volume keys (2% a press). `youtube_music.py`: Play with no media session -> use a "YouTube Music" window, else the
@@ -261,7 +262,9 @@ Done and confirmed:
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **Hebrew was dropped** by the user; **4.8.5 (= 4.6.2 + clean-ups) is confirmed** ("Works") and merged to main.
 - **4.8.6** (Hebrew song names on the music screen and bar) is on branch `claude/project-thread-vbs4n9`, waiting for the
-  user's test. On "works": mark confirmed, merge.
+  user's test. On "works": mark confirmed, merge. The user was running 4.8.6.
+- **4.8.7** (laptop volume follows the current speakers, Play opens YouTube Music) = 4.8.6 + that fix, PR #11 (it
+  includes the 4.8.6 branch). Waiting for the user's test. Lesson: check existing release tags before picking a version.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
