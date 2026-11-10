@@ -304,8 +304,8 @@ Done and confirmed:
   publishes the numbers; free-tier chats may be used by Google). If talking fails, ask for `gorgi-helper.log`
   ("AI limit at", "AI key refused", "no AI could answer", "AI reply (Groq|Gemini...").
 
-- **4.8.16 - YouTube Music step 1** (firmware + helper, on top of 4.8.15; branch `claude/project-thread-oqip3l`; NOT
-  confirmed). Plan doc https://claude.ai/artifact/4JhjcYYHRA7gL5DbCYGhBM, mock-ups /mnt/project-files/youtube-music/.
+- **4.8.16 - YouTube Music step 1** (firmware + helper, on top of 4.8.15; branch `claude/project-thread-oqip3l`;
+  confirmed with 4.8.17: "works great", 2026-11-10; merged to main). Plan doc https://claude.ai/artifact/4JhjcYYHRA7gL5DbCYGhBM, mock-ups /mnt/project-files/youtube-music/.
   User chose the one-time sign-in. Helper `ytmusic.py` (ytmusicapi 1.12.3, unofficial; `--collect-all ytmusicapi`):
   Settings "Connect YouTube Music..." = paste a `browse` request copied from F12 (cURL bash/cmd, raw headers or the Headers table: `normalize_headers`; newer Chrome has no "Copy request headers") -> checked with
   get_liked_songs -> `youtube-music.json` in the settings folder. Liked songs read every 5 min (`ytm_loop`), matched
@@ -350,10 +350,11 @@ Done and confirmed:
 - **4.8.14** (clear message when Ollama usage runs out, HTTP 402) = 4.8.13 + that. Waiting for the user's test.
 - **4.8.15** (free brain: Groq first, Gemini backup, Ollama last) = 4.8.14 + that, branch
   `claude/project-thread-jzmg31`. The user has made both keys; user said "it looks great" (2026-11-10).
-- **4.8.16** (YouTube Music: sign-in, thumbs, "play X" by voice) = 4.8.15 + that, branch `claude/project-thread-oqip3l`.
-  Waiting for the user's test; then step 2 (Browse view).
-- **4.8.17** (helper: Connect YouTube Music accepts "Copy as cURL" and the Headers table; the user's Chrome has no
-  "Copy request headers") = 4.8.16 + that. Waiting for the user's test.
+- **4.8.16 + 4.8.17 are confirmed** ("works great", 2026-11-10: YouTube Music sign-in via "Copy as cURL (bash)",
+  thumbs, voice) and merged to main together with 4.8.7-4.8.15 (same chain). 4.8.17 = Connect accepts "Copy as cURL"
+  and the Headers table (the user's Chrome has no "Copy request headers"). After 4.8.17: Connect shows YouTube's
+  reason when it refuses (not released yet). Next: user asked for a seek bar (drag the song's progress bar on the
+  Music screen, like volume) - offered, waiting for a go; then step 2 (Browse view).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
