@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (Hebrew dropped, 4.8.5 confirmed and merged; 4.8.6 Hebrew song names on branch claude/project-thread-vbs4n9)
+## Where things stand (4.8.6 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -243,7 +243,7 @@ Done and confirmed:
   only `setMedia` keeps Hebrew; everything else (face, to-dos, alerts, notifications) stays English-only.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
 
-## Handover for the next session (2026-10-24)
+## Handover for the next session (2026-11-10)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
@@ -254,8 +254,8 @@ Done and confirmed:
 - **4.6.2 is confirmed** ("looks great!", reply text word by word with the voice) and merged to main.
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **Hebrew was dropped** by the user; **4.8.5 (= 4.6.2 + clean-ups) is confirmed** ("Works") and merged to main.
-- **4.8.6** (Hebrew song names on the music screen and bar) is on branch `claude/project-thread-vbs4n9`, waiting for the
-  user's test. On "works": mark confirmed, merge.
+- **4.8.6 is confirmed** ("Works", 2026-11-10: Hebrew song names on the music screen and bar) and merged to main.
+  Nothing is waiting. Next: ask what to build next (plan first).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
