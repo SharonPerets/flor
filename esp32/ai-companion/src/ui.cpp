@@ -69,6 +69,12 @@ int tabCount = 0, tabCurrent = 0;
 uint32_t tabBadges = 0;
 bool callVisible = false, callShown = false, dirtyCall = false;
 bool noticeDot = false;
+// The round Talk button left of the face (since 4.8.8: tapping the face itself does nothing)
+constexpr float FT_CX = 50, FT_CY = 186, FT_R = 36;
+constexpr Rect FACE_TALK_AREA{0, 128, 100, 136};
+const Color STOP_RED = gfx::rgb(0xE5484D);
+bool faceTalkActive = false;  // a conversation is on: the button says Stop
+bool dirtyFaceTalk = true;
 bool barOpen = false;
 uint32_t barOpenUntil = 0;
 constexpr uint32_t BAR_OPEN_MS = 10000;
@@ -174,6 +180,26 @@ void drawStatus(Canvas& c) {
   c.fillRRect(x + 1, 9, w - 2, 30, 15, PANEL);
   iconMic(c, x + 21, 24, (statusPulse && !pulseOn) ? BORDER : statusColor);
   c.text(gfont::SMALL, text.c_str(), x + 38, 29, statusColor);
+}
+
+void drawFaceTalk(Canvas& c) {
+  const bool down = pressed == Target::Talk;
+  const char* label = faceTalkActive ? "Stop" : "Talk";
+  if (faceTalkActive) {
+    c.fillCircle(FT_CX, FT_CY, FT_R + 6, STOP_RED, 0.18f);
+    c.fillCircle(FT_CX, FT_CY, FT_R, down ? gfx::rgb(0xF07A7E) : STOP_RED);
+    c.fillRRect(FT_CX - 11, FT_CY - 11, 22, 22, 5, TEXT_TITLE);
+  } else {
+    c.fillCircle(FT_CX, FT_CY, FT_R + 6, ACCENT, 0.18f);
+    c.fillCircle(FT_CX, FT_CY, FT_R, down ? ACCENT_PRESSED : ACCENT);
+    // a big microphone
+    c.fillCapsule(FT_CX, FT_CY - 13, FT_CX, FT_CY - 2, 7.5f, PLAY_ICON);
+    c.strokeArc(FT_CX, FT_CY - 3, 14, 3.2f, 15, 165, PLAY_ICON);
+    c.fillCapsule(FT_CX, FT_CY + 11, FT_CX, FT_CY + 17, 1.8f, PLAY_ICON);
+    c.fillCapsule(FT_CX - 7, FT_CY + 18, FT_CX + 7, FT_CY + 18, 1.8f, PLAY_ICON);
+  }
+  c.text(gfont::SMALL, label, FT_CX - Canvas::textWidth(gfont::SMALL, label) * 0.5f, (int)(FT_CY + FT_R + 28),
+         TEXT_MUTED);
 }
 
 void drawTabs(Canvas& c) {
@@ -365,7 +391,7 @@ bool musicBarOpen() { return barOpen; }
 void redrawAll() {
   display::render(Rect{0, 0, SCREEN_W, TOP_H}, BG, [](Canvas&) {});
   display::render(Rect{0, subtitleVisible ? SUB_Y + SUB_H : 376, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
-  dirtyClock = dirtyStatus = dirtyTabs = dirtySub = dirtyBar = dirtyCall = true;
+  dirtyClock = dirtyStatus = dirtyTabs = dirtySub = dirtyBar = dirtyCall = dirtyFaceTalk = true;
 }
 
 void setCallButton(bool visible) {
@@ -384,7 +410,7 @@ void drawSubtitleNow() {
 void setSubtitleVisible(bool visible) {
   if (visible == subtitleVisible) return;
   subtitleVisible = visible;
-  if (visible) dirtySub = dirtyCall = true;  // when hidden, the other screen draws over it
+  if (visible) dirtySub = dirtyCall = dirtyFaceTalk = true;  // when hidden, the other screen draws over it
 }
 
 void setClock(const String& text) {
@@ -413,6 +439,12 @@ void setBottomHidden(bool hidden) {
   if (hidden == bottomHidden) return;
   bottomHidden = hidden;
   if (!hidden) dirtyBar = true;
+}
+
+void setFaceTalkActive(bool active) {
+  if (active == faceTalkActive) return;
+  faceTalkActive = active;
+  dirtyFaceTalk = true;
 }
 
 void setTalkButton(bool on) {
@@ -467,16 +499,20 @@ void setVolume(int volume) {
 }
 
 void showPressed(Target t) {
-  if (t != Target::Prev && t != Target::PlayPause && t != Target::Next && t != Target::CallMute) return;
+  if (t != Target::Prev && t != Target::PlayPause && t != Target::Next && t != Target::CallMute &&
+      !(t == Target::Talk && subtitleVisible))
+    return;
   pressed = t;
   pressedUntil = millis() + 180;
   if (t == Target::CallMute) dirtyCall = true;
+  else if (t == Target::Talk) dirtyFaceTalk = true;
   else dirtyButtons = true;
 }
 
 void update(uint32_t now) {
   if (pressed != Target::None && (int32_t)(now - pressedUntil) >= 0) {
     if (pressed == Target::CallMute) dirtyCall = true;
+    else if (pressed == Target::Talk) dirtyFaceTalk = true;
     else dirtyButtons = true;
     pressed = Target::None;
   }
@@ -494,6 +530,7 @@ void update(uint32_t now) {
     callShown = callVisible;
   }
   if (subtitleVisible) dirtyCall = false;
+  if (dirtyFaceTalk && subtitleVisible) { redraw(FACE_TALK_AREA, BG, drawFaceTalk); dirtyFaceTalk = false; }
   if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
   if (bottomHidden) {  // the screen draws down there itself
     dirtyText = dirtyButtons = dirtyVolume = false;
@@ -539,6 +576,10 @@ Target hitTest(int x, int y) {
   if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
   if (y < TOP_H && talkButton && statusText.length() == 0 && x >= 780 - TALK_W - 8) return Target::Talk;
   if (callVisible && subtitleVisible && tabs::onCallButton(x, y)) return Target::CallMute;
+  if (subtitleVisible) {  // the round Talk button left of the face (a generous touch area)
+    const float dx = x - FT_CX, dy = y - FT_CY;
+    if (dx * dx + dy * dy <= (FT_R + 16) * (FT_R + 16)) return Target::Talk;
+  }
   if (y >= TOP_H && y < SUB_Y + SUB_H) return Target::Face;
   return Target::None;
 }

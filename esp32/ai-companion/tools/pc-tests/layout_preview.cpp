@@ -24,10 +24,6 @@ static void topBar(gfx::Canvas& c, int current, bool dot) {
   const uint8_t icons[] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::TODO, tabs::CLAUDE};
   tabs::draw(c, icons, 5, current, 0);
   panel::drawHandle(c, dot);
-  const char* st = "Tap me to talk";
-  const float w = gfx::Canvas::textWidth(gfont::SMALL, st) + 52, x = 780 - w;
-  c.fillRRect(x, 7, w, 30, 15, BORDER); c.fillRRect(x + 1, 8, w - 2, 28, 14, PANEL);
-  c.fillCapsule(x + 21, 17, x + 21, 22, 3.2f, DIM); c.text(gfont::SMALL, st, x + 38, 27, DIM);
 }
 static void faceMock(gfx::Canvas& c) {  // stand-in for the real face (it needs the board)
   const gfx::Color eye = gfx::rgb(0x4FE3D6);
@@ -36,8 +32,25 @@ static void faceMock(gfx::Canvas& c) {  // stand-in for the real face (it needs 
   const char* sub = "Hi! What are we working on today?";
   c.text(gfont::SUBTITLE, sub, 400 - gfx::Canvas::textWidth(gfont::SUBTITLE, sub) / 2, 390, gfx::rgb(0xE8EEF4));
 }
+static void faceTalk(gfx::Canvas& c, bool stop) {  // same drawing as ui.cpp drawFaceTalk
+  const float X = 50, Y = 186, R = 36;
+  const gfx::Color A = gfx::rgb(0x4FE3D6), RED = gfx::rgb(0xE5484D), INK = gfx::rgb(0x05201E);
+  const char* label = stop ? "Stop" : "Talk";
+  if (stop) {
+    c.fillCircle(X, Y, R + 6, RED, 0.18f); c.fillCircle(X, Y, R, RED);
+    c.fillRRect(X - 11, Y - 11, 22, 22, 5, gfx::rgb(0xF2F6FA));
+  } else {
+    c.fillCircle(X, Y, R + 6, A, 0.18f); c.fillCircle(X, Y, R, A);
+    c.fillCapsule(X, Y - 13, X, Y - 2, 7.5f, INK);
+    c.strokeArc(X, Y - 3, 14, 3.2f, 15, 165, INK);
+    c.fillCapsule(X, Y + 11, X, Y + 17, 1.8f, INK);
+    c.fillCapsule(X - 7, Y + 18, X + 7, Y + 18, 1.8f, INK);
+  }
+  c.text(gfont::SMALL, label, X - gfx::Canvas::textWidth(gfont::SMALL, label) * 0.5f, (int)(Y + R + 28), gfx::rgb(0x9AA7B5));
+}
 int main() {
-  save("l_face.ppm", [](gfx::Canvas& c, void*) { topBar(c, 1, false); faceMock(c); tabs::drawMiniPlayer(c, "Wicked Garden", "Stone Temple Pilots", true); }, nullptr);
+  save("l_face.ppm", [](gfx::Canvas& c, void*) { topBar(c, 1, false); faceMock(c); faceTalk(c, false); tabs::drawMiniPlayer(c, "Wicked Garden", "Stone Temple Pilots", true); }, nullptr);
+  save("l_face_stop.ppm", [](gfx::Canvas& c, void*) { topBar(c, 1, false); faceMock(c); faceTalk(c, true); tabs::drawMiniPlayer(c, "Wicked Garden", "Stone Temple Pilots", true); }, nullptr);
   save("l_time.ppm", [](gfx::Canvas& c, void*) {
     topBar(c, 2, true);
     timescreen::View v; v.clockKnown = true; v.rings[0] = timescreen::Ring{1, timescreen::FOCUS, "Focus", 1490, 1500, false}; v.ringCount = 1; v.focusRunning = true;

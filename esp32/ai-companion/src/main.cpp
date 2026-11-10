@@ -151,7 +151,7 @@ uint32_t ignorePcVolumeUntil = 0;  // don't let the PC move the slider while you
 
 const gfx::Color CALL_RED = gfx::rgb(0xFF6B6B);
 void showIdleStatus() {
-  // Nothing when idle: on the face you tap the face; screens without one have a Talk button
+  // Nothing when idle: the face screen has its round Talk button
   if (callOn) ui::setStatus("On a call", CALL_RED, false);
   else ui::setStatus("", ui::COLOR_TEXT_DIM, false);
 }
@@ -1701,7 +1701,8 @@ void handleTouch(uint32_t now) {
     bool wasAsleep = isSleeping();
     lastActivity = now;
     if (wasAsleep) {
-      if (touchTarget == ui::Target::None || touchTarget == ui::Target::Clock) {
+      if (touchTarget == ui::Target::None || touchTarget == ui::Target::Clock ||
+          (touchTarget == ui::Target::Face && page == Page::Face)) {
         wakeUp();
         touchTarget = ui::Target::None;  // a touch on nothing in particular just wakes Gorgi
       } else {
@@ -1779,11 +1780,16 @@ void handleTouch(uint32_t now) {
       ui::openMusicBar();
       return;
     }
-    if (released == ui::Target::Talk) {  // a Talk button in the top bar: to the face, listening
-      showPage(Page::Face);
-      if (!inConversation) onTap(ui::Target::Face);
+    if (released == ui::Target::Talk) {
+      if (page == Page::Face) {  // the round button by the face: talk, or stop talking
+        onTap(ui::Target::Face);
+      } else {  // a Talk button on another screen: to the face, listening
+        showPage(Page::Face);
+        if (!inConversation) onTap(ui::Target::Face);
+      }
       return;
     }
+    if (released == ui::Target::Face && page == Page::Face) return;  // touching the face does nothing (4.8.8)
     if (released == ui::Target::CallMute) {
       pclink::sendCommand("teams_mute");
       return;
@@ -1924,6 +1930,7 @@ void drawFrame(uint32_t now) {
     musicDirty = false;
     musicProgressKey = key;
   }
+  ui::setFaceTalkActive(inConversation);
   ui::update(now);
 }
 
@@ -1983,7 +1990,7 @@ void setup() {
   else if (pclink::wifiState() == pclink::WifiState::SetupPortal)
     say(Mood::Confused, restingSubtitle());
   else
-    say(Mood::Happy, String("Hi, I'm Gorgi! (version ") + GORGI_VERSION + ") Tap me to talk.");
+    say(Mood::Happy, String("Hi, I'm Gorgi! (version ") + GORGI_VERSION + ") Tap Talk to chat.");
   Serial.println("Gorgi ready");
 }
 
