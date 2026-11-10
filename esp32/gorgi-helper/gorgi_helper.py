@@ -729,7 +729,10 @@ class Helper:
             if action in ("like", "dislike"):
                 asyncio.get_running_loop().create_task(self.rate_current(action))
                 continue
-            if action in ("playpause", "next", "prev"):
+            if action == "seek" and isinstance(msg.get("value"), (int, float)):
+                if hasattr(self.media, "seek"):
+                    await self.media.seek(msg["value"])
+            elif action in ("playpause", "next", "prev"):
                 await self.media.command(action)
             elif action == "volume" and isinstance(msg.get("value"), (int, float)):
                 self.media.set_volume(msg["value"])

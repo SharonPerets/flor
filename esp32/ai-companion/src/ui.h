@@ -13,7 +13,7 @@ constexpr int TOP_H = 44;   // the top bar
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 56;  // a little lower since 4.3: the music bar folds away
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk, Like, Dislike };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk, Like, Dislike, Seek };
 
 struct MediaInfo {
   String title;

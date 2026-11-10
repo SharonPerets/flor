@@ -25,5 +25,8 @@ void draw(gfx::Canvas& c, const ui::MediaInfo& song, uint32_t nowMs, const char*
 constexpr gfx::Rect PROGRESS_AREA{320, 280, 470, 60};
 // Changes whenever the progress bar would look different (-1 = no bar)
 int progressKey(const ui::MediaInfo& song, uint32_t nowMs);
+// The progress bar can be dragged or tapped to jump in the song (since 4.8.18)
+bool onProgress(int x, int y, const ui::MediaInfo& song);
+float progressAt(int x, const ui::MediaInfo& song);  // seconds into the song at that x
 
 }  // namespace music

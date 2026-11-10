@@ -219,6 +219,23 @@ class WindowsMedia:
         except Exception as e:
             log.warning("play failed: %s", e)
 
+    async def seek(self, seconds):
+        """Jumps to that many seconds into the song (Gorgi's progress bar). True if the app took it."""
+        try:
+            session = await self._session()
+            if session is None:
+                return False
+            t = session.get_timeline_properties()
+            start = t.start_time.total_seconds() if t.start_time else 0.0
+            ticks = int((start + max(0.0, float(seconds))) * 10_000_000)  # Windows counts in 100 ns steps
+            ok = await session.try_change_playback_position_async(ticks)
+            log.info("seek to %.0f s: %s", seconds, "ok" if ok else "the app refused")
+            return bool(ok)
+        except Exception as e:
+            log.warning("seek failed: %s", e)
+            self._manager = None
+            return False
+
     async def play_link(self, url):
         """Plays a YouTube Music link (a song, a band, your Liked songs) in the background."""
         if self._opening is not None and not self._opening.done():

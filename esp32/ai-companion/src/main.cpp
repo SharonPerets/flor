@@ -67,6 +67,7 @@ enum class Page { Music, Face, Time, Todo, Claude, Count };  // the weather move
 const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::TIME, tabs::TODO, tabs::CLAUDE};
 Page page = Page::Face;
 bool musicDirty = true;      // the music screen needs drawing
+uint32_t ignorePcPosUntil = 0;  // after a jump in the song: the PC's old position is ignored until then
 int musicProgressKey = -2;   // what the progress bar showed last
 
 constexpr int SWIPE_MIN_PX = 80;  // a sideways drag at least this long changes screens
@@ -538,11 +539,18 @@ void onMedia(const ui::MediaInfo& m) {
   gotMediaSinceConnect = true;
 
   int keepVolume = media.volume;
+  const float keepPos = media.pos;
+  const uint32_t keepPosAt = media.posAtMs;
   if (m.title != media.title || m.artist != media.artist || m.album != media.album || m.playing != media.playing ||
       m.artId != media.artId)
     musicDirty = true;
   media = m;
   if (touchTarget == ui::Target::Volume || millis() < ignorePcVolumeUntil) media.volume = keepVolume;
+  // While you drag the song's progress bar (and a moment after), your spot wins over the PC's
+  if (m.title == oldTitle && (touchTarget == ui::Target::Seek || (int32_t)(millis() - ignorePcPosUntil) < 0)) {
+    media.pos = keepPos;
+    media.posAtMs = keepPosAt;
+  }
 
   if (media.title.length() == 0) {
     showMediaPlaceholder();
@@ -1729,6 +1737,8 @@ void handleTouch(uint32_t now) {
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
     if (page == Page::Todo && touchTarget == ui::Target::Face) todoBegin(tp.x, tp.y);
+    if (page == Page::Music && touchTarget == ui::Target::Face && music::onProgress(tp.x, tp.y, media))
+      touchTarget = ui::Target::Seek;  // the song's progress bar: drag or tap to jump
 
     bool wasAsleep = isSleeping();
     lastActivity = now;
@@ -1767,6 +1777,10 @@ void handleTouch(uint32_t now) {
       return;
     }
     if (page == Page::Todo && touchTarget == ui::Target::Face) todoMove(tp.x, tp.y);
+    if (touchTarget == ui::Target::Seek) {  // the knob follows the finger; the PC jumps on release
+      media.pos = music::progressAt(tp.x, media);
+      media.posAtMs = now;
+    }
     if (touchTarget == ui::Target::Volume) {
       media.volume = ui::volumeFromX(tp.x);
       ui::setVolume(media.volume);
@@ -1829,6 +1843,16 @@ void handleTouch(uint32_t now) {
     if (released == ui::Target::Face && page != Page::Face) {
       if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
       if (page == Page::Todo) onTodoTap(touchX0, touchY0);
+      return;
+    }
+    if (released == ui::Target::Seek) {
+      if (!pclink::helperConnected()) {
+        react(Mood::Confused, "My PC helper isn't connected yet.");
+        return;
+      }
+      media.posAtMs = millis();  // media.pos was set by the finger
+      ignorePcPosUntil = millis() + 2000;
+      pclink::sendCommand("seek", (int)(media.pos + 0.5f));
       return;
     }
     if (released == ui::Target::Volume)

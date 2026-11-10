@@ -141,6 +141,17 @@ void drawProgress(Canvas& c, const ui::MediaInfo& s, uint32_t now) {
 
 }  // namespace
 
+bool onProgress(int x, int y, const ui::MediaInfo& song) {
+  return showsProgress(song) && y >= BAR_Y - 30 && y <= BAR_Y + 36 && x >= TEXT_X - 20 && x <= TEXT_R + 20;
+}
+
+float progressAt(int x, const ui::MediaInfo& song) {
+  float f = (float)(x - TEXT_X) / (TEXT_R - TEXT_X);
+  if (f < 0) f = 0;
+  if (f > 1) f = 1;
+  return f * song.dur;
+}
+
 bool begin() {
 #if defined(ESP_PLATFORM)
   art = (uint16_t*)heap_caps_malloc(ART * ART * 2, MALLOC_CAP_SPIRAM);

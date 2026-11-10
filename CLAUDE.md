@@ -352,8 +352,12 @@ Done and confirmed:
 - **4.8.16 + 4.8.17 are confirmed** ("works great", 2026-11-10: YouTube Music sign-in via "Copy as cURL (bash)",
   thumbs, voice) and merged to main together with 4.8.7-4.8.15 (same chain). 4.8.17 = Connect accepts "Copy as cURL"
   and the Headers table (the user's Chrome has no "Copy request headers"). After 4.8.17: Connect shows YouTube's
-  reason when it refuses (not released yet). Next: user asked for a seek bar (drag the song's progress bar on the
-  Music screen, like volume) - offered, waiting for a go; then step 2 (Browse view).
+  reason when it refuses (in 4.8.18). Next after 4.8.18: step 2 (Browse view).
+- **4.8.18** (seek bar: drag / tap the song's progress bar on the Music screen; user: "yes build it") = 4.8.17 + that,
+  branch `claude/project-thread-oqip3l`. Firmware: `music::onProgress/progressAt`, `Target::Seek` (set in main on the
+  Music page), knob follows the finger, `cmd seek` {value: seconds} on release, PC position ignored 2 s
+  (`ignorePcPosUntil`). Helper: `WindowsMedia.seek` = `try_change_playback_position_async` (100 ns ticks + timeline
+  start). Waiting for the user's test; if it doesn't move, ask for `gorgi-helper.log` ("seek to").
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
