@@ -250,6 +250,11 @@ Done and confirmed:
   Start menu shortcut "YouTube Music*.lnk", else music.youtube.com; then session play or Space in its window. Voice
   "play" also starts music when nothing was paused. If it fails, ask for `gorgi-helper.log` ("volume:" / "YouTube Music").
 
+- **4.8.8 - Claude alerts clear themselves** (firmware only, on top of 4.8.7; branch `claude/project-thread-7124lh`;
+  NOT confirmed yet): user: the "Claude finished" face and text stayed until touched. Now Claude alerts (finished and
+  needs you) leave the face after `CLAUDE_ALERT_MS` 8 s and go into the Action Center as a CLAUDE notice (same path as
+  the 10-min give-up for timers). A tap still clears it with no notice; timers/reminders unchanged.
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -265,6 +270,8 @@ Done and confirmed:
   user's test. On "works": mark confirmed, merge. The user was running 4.8.6.
 - **4.8.7** (laptop volume follows the current speakers, Play opens YouTube Music) = 4.8.6 + that fix, PR #11 (it
   includes the 4.8.6 branch). Waiting for the user's test. Lesson: check existing release tags before picking a version.
+- **4.8.8** (Claude alerts leave the face after 8 s, kept in the Action Center) = 4.8.7 + that, branch
+  `claude/project-thread-7124lh`. Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
