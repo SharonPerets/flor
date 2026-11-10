@@ -420,7 +420,9 @@ def connect(folder, headers_raw):
     except Exception as e:
         trial.unlink(missing_ok=True)
         log.info("YouTube Music sign-in check failed: %s", e)
-        return False, "YouTube Music didn't accept it. Make sure you're signed in there, then copy it again."
+        reason = re.sub(r"\s+", " ", str(e))[:120]  # e.g. "Server returned HTTP 401: Unauthorized." (no sign-in in it)
+        return False, ("YouTube Music didn't accept it. Make sure you're signed in there, then copy it again."
+                       f"\n(Details: {type(e).__name__}: {reason})")
     trial.replace(path)
     return True, f"Connected: {count} liked songs." if count is not None else "Connected."
 
