@@ -263,6 +263,11 @@ Done and confirmed:
   needs you) leave the face after `CLAUDE_ALERT_MS` 8 s and go into the Action Center as a CLAUDE notice (same path as
   the 10-min give-up for timers). A tap still clears it with no notice; timers/reminders unchanged.
 
+- **4.8.10 - mute Claude alerts** (firmware + helper, on top of 4.8.9; branch `claude/project-thread-ync5e8`; NOT
+  confirmed yet): a "Claude alerts" on/off switch at the top right of the Action Center's Notifications card
+  (`Tap::MuteClaude`, NVS "claude"/"muted", sent to the helper as `claude_mute` {on} on change and on connect).
+  Muted (user chose): no face alert, no Windows pop-up or voice; the alert still goes quietly into the Notifications list.
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -282,6 +287,9 @@ Done and confirmed:
   `claude/project-thread-7124lh`. Waiting for the user's test.
 - **4.8.9** (Play opens YouTube Music on Liked songs and makes sure it plays) = 4.8.8 + that fix, branch
   `claude/project-thread-jhei65`. Waiting for the user's test.
+
+- **4.8.10** (Claude alerts on/off switch in the Action Center) = 4.8.9 + that, branch `claude/project-thread-ync5e8`.
+  Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
