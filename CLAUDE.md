@@ -268,6 +268,11 @@ Done and confirmed:
   (`Tap::MuteClaude`, NVS "claude"/"muted", sent to the helper as `claude_mute` {on} on change and on connect).
   Muted (user chose): no face alert, no Windows pop-up or voice; the alert still goes quietly into the Notifications list.
 
+- **4.8.11 - volume on the Music screen** (firmware only, on top of 4.8.10; branch `claude/project-thread-fkdcer`; NOT
+  confirmed yet; mock-ups in /mnt/project-files/volume/, user picked B): on the Music screen the slim music line is
+  replaced by an always-open "deck" (`ui::setMusicDeck`, `drawDeck` in ui.cpp): back / play-pause / next (bigger) and a
+  wide volume slider (x 340..680) with the % next to it. Other screens keep the slim line + 10 s bar. Same `volume` cmd.
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -290,6 +295,8 @@ Done and confirmed:
 
 - **4.8.10** (Claude alerts on/off switch in the Action Center) = 4.8.9 + that, branch `claude/project-thread-ync5e8`.
   Waiting for the user's test.
+- **4.8.11** (Music screen: always-open bar with buttons + wide volume slider) = 4.8.10 + that, branch
+  `claude/project-thread-fkdcer`. Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
