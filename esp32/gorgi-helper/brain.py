@@ -1,4 +1,4 @@
-"""Gorgi's brain: talks to an AI model on Ollama Cloud (or a local Ollama).
+"""Gorgi's brain: asks a free AI service (Groq first, then Gemini as backup, then Ollama if set up).
 
 The model answers in Gorgi's personality and starts every reply with a mood
 tag like [happy]. It can also ask for music actions with tags like
@@ -17,8 +17,12 @@ import todolist
 
 log = logging.getLogger("gorgi.brain")
 
+GROQ_URL = "https://api.groq.com/openai/v1"
+GROQ_MODEL = "openai/gpt-oss-20b"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]  # free: ~500 a day each
 OLLAMA_CLOUD_URL = "https://ollama.com"
-DEFAULT_MODEL = "gpt-oss:20b"
+DEFAULT_MODEL = "gpt-oss:20b"  # Ollama's model
 MAX_HISTORY_TURNS = 8          # remembered question/answer pairs
 FORGET_AFTER_SECONDS = 15 * 60  # start fresh after a long break
 
@@ -94,90 +98,211 @@ def parse_reply(reply):
     return mood or "happy", text, actions
 
 
+class Service:
+    """One place Gorgi can think: Groq, Gemini (both OpenAI-style) or Ollama."""
+
+    def __init__(self, name, url, key, models, style="openai", effort="low"):
+        self.name = name
+        self.url = url
+        self.key = key
+        self.models = models          # first one that exists wins (later ones if a model is gone)
+        self.style = style            # "openai" or "ollama"
+        self.effort = effort          # thinking effort, or None
+        self.rest_until = 0.0         # skip this service until then (its limit ran out)
+
+    def headers(self):
+        return {"Authorization": f"Bearer {self.key}"} if self.key else {}
+
+    def chat_url(self):
+        return self.url + ("/api/chat" if self.style == "ollama" else "/chat/completions")
+
+    def models_url(self):
+        return self.url + ("/api/tags" if self.style == "ollama" else "/models")
+
+    def body(self, model, messages):
+        body = {"model": model, "messages": messages, "stream": False}
+        if self.style == "ollama":
+            if model.startswith("gpt-oss"):
+                body["think"] = "low"  # these models think before answering; keep it quick
+        elif self.effort:
+            body["reasoning_effort"] = self.effort
+        return body
+
+    def reply_text(self, data):
+        if self.style == "ollama":
+            return (data.get("message") or {}).get("content") or ""
+        choices = data.get("choices") or [{}]
+        return (choices[0].get("message") or {}).get("content") or ""
+
+
+class _Failed(Exception):
+    """A service couldn't answer. kind: limit / key / model / down / other."""
+
+    def __init__(self, kind, detail=""):
+        super().__init__(f"{kind}: {detail}")
+        self.kind = kind
+
+
+def _retry_after(r, default):
+    try:
+        return max(5.0, min(float(r.headers.get("retry-after", "")), 24 * 3600.0))
+    except ValueError:
+        return default
+
+
 class Brain:
     def __init__(self, config, memory=None):
         self.config = config
         self.memory = memory
         self.history = []
         self.last_chat = 0.0
+        self._services = {}  # name -> Service, kept so a "limit reached" pause is remembered
 
-    def _base_url(self):
-        return (self.config.get("ollama_url") or OLLAMA_CLOUD_URL).rstrip("/")
-
-    def _headers(self):
-        key = (self.config.get("ollama_api_key") or "").strip()
-        return {"Authorization": f"Bearer {key}"} if key else {}
+    def services(self):
+        """The services that have a key, in the order Gorgi asks them: Groq, Gemini, Ollama."""
+        c = self.config
+        wanted = []
+        groq = (c.get("groq_api_key") or "").strip()
+        if groq:
+            wanted.append(("Groq", GROQ_URL, groq, [c.get("groq_model") or GROQ_MODEL], "openai", "low"))
+        gemini = (c.get("gemini_api_key") or "").strip()
+        if gemini:
+            models = [c["gemini_model"]] if c.get("gemini_model") else list(GEMINI_MODELS)
+            wanted.append(("Gemini", GEMINI_URL, gemini, models, "openai", "low"))
+        ollama = (c.get("ollama_api_key") or "").strip()
+        ollama_url = (c.get("ollama_url") or "").strip()
+        if ollama or ollama_url:
+            wanted.append(("Ollama", (ollama_url or OLLAMA_CLOUD_URL).rstrip("/"), ollama,
+                           [c.get("model") or DEFAULT_MODEL], "ollama", None))
+        result = []
+        for name, url, key, models, style, effort in wanted:
+            s = self._services.get(name)
+            if s is None or (s.url, s.key, s.models[:1]) != (url, key, models[:1]):
+                s = self._services[name] = Service(name, url, key, models, style, effort)
+            result.append(s)
+        return result
 
     def needs_key(self):
-        return self._base_url() == OLLAMA_CLOUD_URL and not (self.config.get("ollama_api_key") or "").strip()
+        return not self.services()
 
-    async def list_models(self):
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(f"{self._base_url()}/api/tags", headers=self._headers())
-            r.raise_for_status()
-            return sorted(m["name"] for m in r.json().get("models", []))
+    async def check(self, service):
+        """For the Settings window: (ok, short text). Lists the service's models (uses no quota)."""
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(service.models_url(), headers=service.headers())
+        except httpx.HTTPError as e:
+            return False, f"can't reach it ({type(e).__name__})"
+        if r.status_code in (400, 401, 403):
+            return False, "the key doesn't work"
+        if r.status_code >= 400:
+            return False, f"error {r.status_code}"
+        data = r.json()
+        names = [m.get("name") or m.get("id") or "" for m in (data.get("models") or data.get("data") or [])]
+        names = [n.split("/", 1)[1] if n.startswith("models/") else n for n in names]
+        found = [m for m in service.models if m in names]
+        if names and not found:
+            return False, f"key works, but model {service.models[0]} is missing"
+        return True, "works" + (f" ({found[0]})" if found else "")
 
-    async def _post_chat(self, body):
+    async def _post_chat(self, service, body):
         """Sends the chat request. A server hiccup (5xx, a dropped connection) or a 400 gets a second
-        try after a short pause; a 400 for a thinking model is tried again without "think"."""
+        try after a short pause; a 400 for a thinking model is tried again without the thinking setting."""
         r = None
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=60) as client:
-                    r = await client.post(f"{self._base_url()}/api/chat", json=body, headers=self._headers())
+                    r = await client.post(service.chat_url(), json=body, headers=service.headers())
             except httpx.HTTPError as e:
-                log.warning("AI request failed (try %d): %r", attempt + 1, e)
+                log.warning("AI request to %s failed (try %d): %r", service.name, attempt + 1, e)
                 if attempt == 2:
-                    raise BrainError("I can't reach my brain right now. Is the internet working?")
+                    raise _Failed("down", repr(e))
                 await asyncio.sleep(1.5)
                 continue
             if r.status_code < 400 or r.status_code in (401, 402, 403, 404, 429):
                 return r
-            log.warning("AI error %s (try %d, model %s): %s", r.status_code, attempt + 1, body.get("model"),
-                        r.text[:300])
+            log.warning("AI error %s from %s (try %d, model %s): %s", r.status_code, service.name, attempt + 1,
+                        body.get("model"), r.text[:300])
+            if r.status_code == 400 and "api key" in r.text.lower():
+                return r  # Gemini says "API key not valid" with a 400
             if attempt == 2:
                 break
-            if r.status_code == 400 and "think" in body:
+            if r.status_code == 400:
                 body = dict(body)
-                body.pop("think")  # some servers refuse it
+                body.pop("think", None)  # some servers refuse it
+                body.pop("reasoning_effort", None)
             await asyncio.sleep(1.5)
         return r
+
+    async def _ask_service(self, service, messages):
+        """One service's reply text, or raises _Failed."""
+        for model in service.models:
+            r = await self._post_chat(service, service.body(model, messages))
+            code = r.status_code
+            if code == 429 or code == 402:
+                # 429 = slow down / today's limit reached; 402 = Ollama's usage ran out
+                pause = _retry_after(r, 10 * 60.0 if code == 429 else 60 * 60.0)
+                service.rest_until = time.monotonic() + pause
+                log.warning("AI limit at %s (%s), resting it %.0f s: %s", service.name, code, pause, r.text[:300])
+                raise _Failed("limit")
+            if code in (401, 403) or (code == 400 and "api key" in r.text.lower()):
+                log.warning("AI key refused by %s: %s", service.name, r.text[:200])
+                raise _Failed("key")
+            if code == 404:
+                log.warning("AI model %s not found at %s", model, service.name)
+                continue  # try the next model
+            if code >= 400:
+                raise _Failed("other", f"{code}")
+            try:
+                reply = service.reply_text(r.json()).strip()
+            except ValueError:
+                raise _Failed("other", "not JSON")
+            if not reply:
+                raise _Failed("blank")
+            log.info("AI reply (%s, %s): %s", service.name, model, reply)
+            return reply
+        raise _Failed("model")
+
+    async def _ask_any(self, messages):
+        """Asks Groq, then Gemini, then Ollama (each only if it has a key and isn't resting)."""
+        services = self.services()
+        ready = [s for s in services if time.monotonic() >= s.rest_until]
+        if not ready:  # all resting: try the one that rests the shortest anyway
+            ready = [min(services, key=lambda s: s.rest_until)]
+        problems = []
+        for service in ready:
+            try:
+                return await self._ask_service(service, messages)
+            except _Failed as e:
+                problems.append((service.name, e.kind))
+        log.warning("no AI could answer: %s", problems)
+        kinds = {k for _, k in problems}
+        bad_keys = [n for n, k in problems if k == "key"]
+        if kinds == {"limit"}:
+            raise BrainError("I've used up my free thinking for now. Let's try again in a little while.", "sleepy")
+        if bad_keys:
+            raise BrainError(f"My {bad_keys[0]} key doesn't work. Please check it in Settings.", "confused")
+        if kinds == {"down"}:
+            raise BrainError("I can't reach my brain right now. Is the internet working?")
+        if "blank" in kinds:
+            raise BrainError("Hmm, my mind went blank. Can you ask again?", "confused")
+        if "model" in kinds:
+            raise BrainError("I can't find my thinking model. Please check Settings.", "confused")
+        raise BrainError("Something went wrong in my brain. Let's try again.", "confused")
 
     async def ask(self, text, context):
         """Ask Gorgi something. context: a line about time / music to help the model."""
         if self.needs_key():
-            raise BrainError("I need an Ollama key to think. Open Settings from my tray icon on your PC.", "confused")
+            raise BrainError("I need a Groq or Gemini key to think. Open Settings from my tray icon on your PC.",
+                             "confused")
         if time.monotonic() - self.last_chat > FORGET_AFTER_SECONDS:
             self.history = []
 
-        model = self.config.get("model") or DEFAULT_MODEL
         system = PERSONALITY + "\n" + context
         if self.memory is not None:
             system += "\n\n" + self.memory.prompt_block()
         messages = [{"role": "system", "content": system}] + self.history + [{"role": "user", "content": text}]
-        body = {"model": model, "messages": messages, "stream": False}
-        if model.startswith("gpt-oss"):
-            body["think"] = "low"  # these models think before answering; keep it quick
 
-        r = await self._post_chat(body)
-
-        if r.status_code in (401, 403):
-            raise BrainError("My Ollama key doesn't work. Please check it in Settings.", "confused")
-        if r.status_code == 402:  # Ollama: the free usage ran out (resets later) or credits are needed
-            log.warning("AI error 402: %s", r.text[:300])
-            raise BrainError("My Ollama usage ran out for now. It refills after a while, or you can add credits"
-                             " at ollama.com.", "sleepy")
-        if r.status_code == 404:
-            raise BrainError(f"I can't find the model {model}. Please pick another one in Settings.", "confused")
-        if r.status_code == 429:
-            raise BrainError("I've been thinking too much today. Ollama says to slow down for a bit.", "sleepy")
-        if r.status_code >= 400:
-            raise BrainError("Something went wrong in my brain. Let's try again.", "confused")
-
-        reply = (r.json().get("message") or {}).get("content", "").strip()
-        log.info("AI reply: %s", reply)
-        if not reply:
-            raise BrainError("Hmm, my mind went blank. Can you ask again?", "confused")
+        reply = await self._ask_any(messages)
 
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
         self.history = self.history[-MAX_HISTORY_TURNS * 2:]

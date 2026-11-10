@@ -65,9 +65,11 @@ def data_dir():
 
 DEFAULT_CONFIG = {
     "gorgi_address": "",          # leave empty to find Gorgi automatically
-    "ollama_api_key": "",
+    "groq_api_key": "",           # Gorgi asks Groq first (free)
+    "gemini_api_key": "",         # then Gemini (free), when Groq's limit runs out
+    "ollama_api_key": "",         # then Ollama, if set up
     "ollama_url": "",             # empty = Ollama Cloud; or e.g. http://localhost:11434
-    "model": "gpt-oss:20b",
+    "model": "gpt-oss:20b",       # Ollama's model
     "voice": "en-US-AnaNeural",
     "whisper_model": "base.en",   # "small.en" understands better but is slower
 }
@@ -94,7 +96,7 @@ def load_config():
 
 
 HEBREW_LEFTOVERS = ("language", "voice_he", "whisper_model_he", "hearing_he", "hearing",
-                    "groq_api_key", "openai_api_key")
+                    "openai_api_key")  # (groq_api_key is used again since 4.8.15: Gorgi's brain)
 
 
 def save_config(config):
@@ -1023,7 +1025,9 @@ def show_settings(config):
     def wait_and_reload(process):
         process.wait()
         config.update(load_config())  # the brain and voice read this same dict
-        log.info("settings reloaded (model: %s, voice: %s)", config.get("model"), config.get("voice"))
+        keys = [n for n, k in (("Groq", "groq_api_key"), ("Gemini", "gemini_api_key"), ("Ollama", "ollama_api_key"))
+                if config.get(k)]
+        log.info("settings reloaded (AI keys: %s, voice: %s)", ", ".join(keys) or "none", config.get("voice"))
 
     threading.Thread(target=wait_and_reload, args=(_settings_process,), daemon=True).start()
 
@@ -1035,10 +1039,15 @@ def run_settings_window():
 
     config = load_config()
 
-    async def list_models(key):
-        return await Brain({**config, "ollama_api_key": key}).list_models()
+    def check_keys(keys):
+        brain = Brain({**config, **keys})
 
-    show_window(config, save_config, list_models)
+        async def check_all():
+            return [(s.name, *(await brain.check(s))) for s in brain.services()]
+
+        return asyncio.run(check_all())
+
+    show_window(config, save_config, check_keys)
 
 
 # ---------------------------------------------------------------- voice
@@ -1200,14 +1209,17 @@ def self_test(out_path):
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
             raise RuntimeError("whisper did not understand the test sentence")
-        # Talk to Ollama Cloud with a fake key: must come back as "key doesn't work"
+        # Talk to each AI service with a fake key: must come back as "key doesn't work"
         from brain import Brain, BrainError
 
-        try:
-            asyncio.run(Brain({"ollama_api_key": "selftest-fake-key"}).ask("hello", "selftest"))
-            lines.append("ollama: unexpected success")
-        except BrainError as e:
-            lines.append(f"ollama: reached, answered as expected ({e.spoken})")
+        for name in ("groq", "gemini", "ollama"):
+            try:
+                asyncio.run(Brain({f"{name}_api_key": "selftest-fake-key"}).ask("hello", "selftest"))
+                lines.append(f"{name}: unexpected success")
+            except BrainError as e:
+                lines.append(f"{name}: reached, answered: {e.spoken}")
+                if "key" not in e.spoken:
+                    raise RuntimeError(f"{name} did not say the key is wrong")
 
         import sounddevice
 
@@ -1290,8 +1302,8 @@ def main():
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)
-        if not config.get("ollama_api_key") and not config.get("ollama_url"):
-            show_settings(config)  # first run: ask for the Ollama key
+        if not any(config.get(k) for k in ("groq_api_key", "gemini_api_key", "ollama_api_key", "ollama_url")):
+            show_settings(config)  # first run: ask for the AI keys
     log.info("%s started", APP_NAME)
     try:
         if claude_setup.upgrade():  # connected by an older helper: add the new hooks
