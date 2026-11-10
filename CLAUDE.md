@@ -304,6 +304,22 @@ Done and confirmed:
   publishes the numbers; free-tier chats may be used by Google). If talking fails, ask for `gorgi-helper.log`
   ("AI limit at", "AI key refused", "no AI could answer", "AI reply (Groq|Gemini...").
 
+- **4.8.16 - YouTube Music step 1** (firmware + helper, on top of 4.8.15; branch `claude/project-thread-oqip3l`; NOT
+  confirmed). Plan doc https://claude.ai/artifact/4JhjcYYHRA7gL5DbCYGhBM, mock-ups /mnt/project-files/youtube-music/.
+  User chose the one-time sign-in. Helper `ytmusic.py` (ytmusicapi 1.12.3, unofficial; `--collect-all ytmusicapi`):
+  Settings "Connect YouTube Music..." = paste the browser's copied request headers of a `browse` request -> checked with
+  get_liked_songs -> `youtube-music.json` in the settings folder. Liked songs read every 5 min (`ytm_loop`), matched
+  to the playing song by title/artist -> `media` {liked} -> Gorgi's thumbs. `cmd like` (toggle LIKE/INDIFFERENT) /
+  `cmd dislike` (DISLIKE + next). Voice tags `[music: band X]`, `[music: song X by Y]`, `[music: album X by Y]`,
+  `[music: play X]`, `[music: liked]`, `[music: shuffle liked]` (random start in list=LM), `[music: like|dislike]`.
+  Links: song = watch?v=ID&list=RDAMVM<ID>, band = artist shuffleId, album = audioPlaylistId.
+  `youtube_music.play_url`: pauses, opens the link in the app, closes the OLD app window (never a browser window:
+  title has "Google Chrome"/"Microsoft Edge"...), nudges play. Firmware: deck = prev 80 / play 146 / next 212,
+  thumbs 292 / 352 (`Target::Like/Dislike`, `MediaInfo.liked` -1/0/1), volume 440..690. The CI self-test prints
+  search results as `::notice::` annotations. Tests: `test_ytmusic.py`. If it fails, ask for `gorgi-helper.log`
+  ("search", "music:", "rated", "Liked songs", "YouTube Music"). **Step 2 (next)**: Browse view on the Music screen
+  (Playing/Browse switch, search by typing/voice, mood chips that play at once, Liked songs list, results).
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -333,7 +349,9 @@ Done and confirmed:
 - **4.8.13** (helper retries Ollama errors) = 4.8.12 + that, branch `claude/project-thread-9uc4k7`. Waiting for the user's test.
 - **4.8.14** (clear message when Ollama usage runs out, HTTP 402) = 4.8.13 + that. Waiting for the user's test.
 - **4.8.15** (free brain: Groq first, Gemini backup, Ollama last) = 4.8.14 + that, branch
-  `claude/project-thread-jzmg31`. The user has made both keys; waiting for the user's test.
+  `claude/project-thread-jzmg31`. The user has made both keys; user said "it looks great" (2026-11-10).
+- **4.8.16** (YouTube Music: sign-in, thumbs, "play X" by voice) = 4.8.15 + that, branch `claude/project-thread-oqip3l`.
+  Waiting for the user's test; then step 2 (Browse view).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
