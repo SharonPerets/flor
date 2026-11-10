@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.8.17 released and confirmed by the user; merged to main)
+## Where things stand (4.8.20 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -337,6 +337,16 @@ Done and confirmed:
   `ytmd.py` uses its Companion server (127.0.0.1:9863, auth/requestcode + auth/request -> token in `ytmd.json`,
   command changeVideo {videoId, playlistId}); the user must click Allow once (needs Settings > Integrations >
   Companion server + companion authorization). If it fails, ask for `gorgi-helper.log` ("YTMD", "music:", "search").
+
+- **4.8.20 - Browse fixes** (firmware + helper, on top of 4.8.19; branch `claude/project-thread-oqip3l`; NOT confirmed).
+  User on 4.8.19: moods didn't work and they don't want them; nothing played from Browse; lyrics said "No lyrics" while
+  the app had them. Now: **mood chips removed** (home row = "Liked songs" + Play / Shuffle; every list shows 4 rows from
+  y 154). Lyrics: the timed ask (mobile client) gave HTTP 400 / nothing for plain-only songs -> falls back to
+  `get_lyrics(timestamps=False)`; the song id comes from YTMD's `/api/v1/state` first. Nothing played because YTMD
+  refused the permission code (`403 AUTHORIZATION_DISABLED`: the user must turn on Settings > Integrations >
+  "Enable companion authorization", which turns itself off after a while, then click Allow). `ytmd.problem` (short
+  text) is now shown on the Browse screen ("Starting X..." -> "Playing X" or the reason), plus a pop-up on the PC.
+  The user's app lives in `%LOCALAPPDATA%\youtube_music_desktop_app\youtube-music-desktop-app.exe`.
 
 ## Handover for the next session (2026-10-24)
 

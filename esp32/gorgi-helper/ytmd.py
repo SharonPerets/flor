@@ -34,6 +34,16 @@ TURN_ON = ("To play songs in YouTube Music Desktop App, open its Settings > Inte
            "\"Companion server\" and \"Enable companion authorization\". Then ask Gorgi again.")
 
 
+ALLOW_OFF = ("YouTube Music Desktop App doesn't let Gorgi in yet: open its Settings > Integrations, turn on "
+             "\"Enable companion authorization\", then tap the song again and click Allow.")
+
+
+SHORT = {}  # pop-up text -> the short version shown on Gorgi's screen
+SHORT[TURN_ON] = "Turn on the Companion server in the app's Integrations"
+SHORT[ALLOW_OFF] = "Turn on companion authorization in the app, tap again"
+_refused = None  # the last refusal, said again while we wait before asking again
+
+
 def setup(settings_folder, on_notify):
     global folder, notify
     folder = Path(settings_folder)
@@ -43,7 +53,7 @@ def setup(settings_folder, on_notify):
 def _tell(text, every=300):
     """A pop-up, at most once every few minutes for the same text."""
     global problem
-    problem = text
+    problem = SHORT.get(text, text)
     if time.monotonic() - _told.get(text, -1e9) >= every:
         _told[text] = time.monotonic()
         try:
@@ -56,7 +66,8 @@ def program():
     """The app's program (YouTube Music Desktop App.exe), or None if it isn't installed."""
     local = os.environ.get("LOCALAPPDATA", "")
     for path in (os.path.join(local, "Programs", "youtube-music-desktop-app", "YouTube Music Desktop App.exe"),
-                 os.path.join(local, "youtube_music_desktop_app", "YouTube Music Desktop App.exe")):
+                 os.path.join(local, "youtube_music_desktop_app", "YouTube Music Desktop App.exe"),
+                 os.path.join(local, "youtube_music_desktop_app", "youtube-music-desktop-app.exe")):
         if os.path.isfile(path):
             return path
     roots = [os.path.join(os.environ.get(v, ""), "Microsoft", "Windows", "Start Menu", "Programs")
@@ -89,9 +100,9 @@ def running():
 def app_open():
     """True when YouTube Music Desktop App is running."""
     try:
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq YouTube Music Desktop App.exe", "/NH"],
-                             capture_output=True, text=True, timeout=5, creationflags=CREATE_NO_WINDOW).stdout
-        return "youtube music desktop app" in out.lower()
+        out = subprocess.run(["tasklist", "/NH"], capture_output=True, text=True, timeout=5,
+                             creationflags=CREATE_NO_WINDOW).stdout.lower()
+        return "youtube music desktop app.exe" in out or "youtube-music-desktop-app.exe" in out
     except Exception:
         return False
 
@@ -145,8 +156,9 @@ def _save_token(token):
 
 def authorize():
     """Asks the app for permission (you click Allow in it). Returns the token, or None."""
-    global _asked_at
-    if time.monotonic() - _asked_at < 60:
+    global _asked_at, _refused, problem
+    if time.monotonic() - _asked_at < 8:
+        problem = _refused
         return None
     _asked_at = time.monotonic()
     http = _http()
@@ -155,18 +167,22 @@ def authorize():
                       json={"appId": APP_ID, "appName": "Gorgi Helper", "appVersion": "1.0.0"})
         if r.status_code != 200:
             log.info("YTMD permission code refused: %s %s", r.status_code, r.text[:200])
-            _tell(TURN_ON)
+            _tell(ALLOW_OFF if "AUTHORIZATION_DISABLED" in r.text else TURN_ON)
+            _refused = problem
             return None
         code = r.json().get("code")
         log.info("YTMD: asking for permission (code %s)", code)
         _tell(f"YouTube Music Desktop App is asking if Gorgi may control it (code {code}). Click Allow there.", 0)
+        problem = f"Click Allow in YouTube Music Desktop App (code {code})"
         r = http.post(BASE + "/api/v1/auth/request", timeout=40, json={"appId": APP_ID, "code": code})
         if r.status_code != 200:
             log.info("YTMD permission not given: %s %s", r.status_code, r.text[:200])
             _tell("Gorgi didn't get permission from YouTube Music Desktop App. Ask Gorgi to play something to try again.")
+            problem = _refused = "No permission from the app. Tap again to retry"
             return None
         token = r.json().get("token")
         _save_token(token)
+        problem = _refused = None
         log.info("YTMD: permission given")
         return token
     except Exception as e:
