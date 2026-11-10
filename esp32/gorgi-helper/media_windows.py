@@ -165,8 +165,8 @@ class WindowsMedia:
         """action: "playpause", "next" or "prev"."""
         try:
             session = await self._session()
-            if session is None and action == "playpause":
-                await self.start_music()  # no music app is open: open YouTube Music
+            if action == "playpause" and not (await self.get_info())["playing"]:
+                await self.start_music()  # play: resume, or open YouTube Music
                 return
             if session is not None:
                 if action == "playpause":
@@ -184,24 +184,40 @@ class WindowsMedia:
         key = {"playpause": VK_MEDIA_PLAY_PAUSE, "next": VK_MEDIA_NEXT_TRACK, "prev": VK_MEDIA_PREV_TRACK}[action]
         press_media_key(key)
 
-    async def start_music(self):
-        """Play: resumes the music app if one is open, otherwise opens YouTube Music
-        and starts it."""
+    async def play_session(self):
+        """Presses play on the music app Windows knows about. True if it was asked."""
         try:
             session = await self._session()
-            if session is not None:
-                if await session.try_play_async():
-                    return
+            if session is not None and await session.try_play_async():
+                return True
         except Exception as e:
             log.debug("play failed: %s", e)
             self._manager = None
-            session = None
-        if session is not None:
-            press_media_key(VK_MEDIA_PLAY_PAUSE)
-            return
-        # Opening takes a while: do it on the side, once at a time
-        if self._opening is None or self._opening.done():
-            self._opening = asyncio.get_running_loop().create_task(youtube_music.open_and_play(self))
+        return False
+
+    async def start_music(self):
+        """Play: resumes the music app if one is open; if nothing is open, or it
+        doesn't actually start, opens YouTube Music on your Liked songs and plays."""
+        if self._opening is not None and not self._opening.done():
+            return  # already opening YouTube Music
+        self._opening = asyncio.get_running_loop().create_task(self._start_music())
+
+    async def _start_music(self):
+        try:
+            if await self._session() is not None:
+                await self.play_session()
+                for _ in range(6):  # give the app up to 3 s to start
+                    await asyncio.sleep(0.5)
+                    if (await self.get_info())["playing"]:
+                        return
+                info = await self.get_info()
+                log.info("play: the open media app (%r) didn't start; opening YouTube Music",
+                         info.get("title"))
+            else:
+                log.info("play: no music app is open; opening YouTube Music")
+            await youtube_music.open_and_play(self)
+        except Exception as e:
+            log.warning("play failed: %s", e)
 
     async def set_playing(self, play):
         """Explicit play or pause (used to pause music while you talk to Gorgi)."""

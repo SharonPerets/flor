@@ -43,7 +43,7 @@ import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.8.8"  # must match esp32/VERSION
+VERSION = "4.8.10"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -226,6 +226,7 @@ class Helper:
         # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
         self.claude = ClaudeWatch(on_change=self._claude_changed, on_alert=self._claude_alert)
         self.on_call = False
+        self.claude_muted = False  # muted on Gorgi (Action Center switch): no Claude pop-ups or voice
         self._paused_for_call = False
         self.on_status = on_status or (lambda text, connected: None)
         # make_conversation(send) -> Conversation, or None when voice isn't available
@@ -677,6 +678,10 @@ class Helper:
                 self.offer_updates()
                 self._push()
                 continue
+            if msg.get("type") == "claude_mute":
+                self.claude_muted = bool(msg.get("on"))
+                log.info("Claude alerts %s on Gorgi", "muted" if self.claude_muted else "on")
+                continue
             if msg.get("type") == "weather":
                 weather.update(msg)
                 log.info("weather for %s from Gorgi", msg.get("city"))
@@ -734,10 +739,12 @@ class Helper:
         asyncio.get_running_loop().create_task(self.send(self.claude_message()))
 
     def _claude_alert(self, kind, name, text):
-        log.info("claude alert (%s): %s", kind, text)
+        log.info("claude alert (%s)%s: %s", kind, " (muted)" if self.claude_muted else "", text)
         loop = asyncio.get_running_loop()
+        # Gorgi keeps it as a quiet notification when muted
         loop.create_task(self.send({"type": "claude_alert", "kind": kind, "name": name, "text": text}))
-        loop.create_task(self.announce(text))
+        if not self.claude_muted:  # muted: no pop-up or voice on the PC
+            loop.create_task(self.announce(text))
 
     async def call_loop(self):
         """Every 2 s: is Teams using the microphone?"""
@@ -1103,7 +1110,9 @@ def self_test(out_path):
         if sys.platform == "win32":
             import youtube_music
 
-            lines.append(f"youtube music: window {youtube_music.find_window()}, app {youtube_music.find_shortcut()}")
+            app = youtube_music.find_shortcut()
+            lines.append(f"youtube music: window {youtube_music.find_window()}, app {app}"
+                         f" {youtube_music.read_shortcut(app) if app else ''}")
         from icon import make_image
 
         make_image(64)
