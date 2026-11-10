@@ -46,6 +46,11 @@ constexpr Rect BAR_AREA{BAR_X, BAR_Y, BAR_W, BAR_H};
 constexpr Rect TEXT_AREA{TEXT_X - 8, BAR_Y + 4, TEXT_W + 16, BAR_H - 8};
 constexpr Rect BUTTON_AREA{PREV_X - 34, BAR_Y + 4, NEXT_X - PREV_X + 68, BAR_H - 8};
 constexpr Rect VOLUME_AREA{560, BAR_Y + 4, 224, BAR_H - 8};
+// The Music screen's own bar ("deck"): bigger buttons and a wide volume slider, always open
+constexpr int DECK_PREV_X = 100, DECK_PLAY_X = 168, DECK_NEXT_X = 236;
+constexpr int DECK_VOL_X0 = 340, DECK_VOL_X1 = 680;
+constexpr Rect DECK_BUTTON_AREA{60, BAR_Y + 4, 220, BAR_H - 8};
+constexpr Rect DECK_VOLUME_AREA{290, BAR_Y + 4, 486, BAR_H - 8};
 
 String clockText = "Gorgi";
 String chipText = "";
@@ -76,6 +81,7 @@ const Color STOP_RED = gfx::rgb(0xE5484D);
 bool faceTalkActive = false;  // a conversation is on: the button says Stop
 bool dirtyFaceTalk = true;
 bool barOpen = false;
+bool deck = false;  // the Music screen: the big bar stays open
 uint32_t barOpenUntil = 0;
 constexpr uint32_t BAR_OPEN_MS = 10000;
 constexpr Rect BOTTOM_AREA{0, 388, 800, 92};  // the music bar or the slim line
@@ -340,6 +346,35 @@ void drawBar(Canvas& c) {
   iconSpeaker(c, 760, BAR_CY, TEXT_MUTED, true);
 }
 
+void drawDeck(Canvas& c) {
+  c.fillRRect(BAR_X, BAR_Y, BAR_W, BAR_H, 20, BORDER);
+  c.fillRRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, 19, PANEL);
+
+  // buttons (a little bigger than in the slim bar)
+  c.fillCircle(DECK_PREV_X, BAR_CY, 28, pressed == Target::Prev ? BTN_PRESSED : BTN);
+  iconPrev(c, DECK_PREV_X, BAR_CY, TEXT);
+  c.fillCircle(DECK_PLAY_X, BAR_CY, 32, pressed == Target::PlayPause ? ACCENT_PRESSED : ACCENT);
+  if (media.playing)
+    iconPause(c, DECK_PLAY_X, BAR_CY, PLAY_ICON);
+  else
+    iconPlay(c, DECK_PLAY_X + 2, BAR_CY, PLAY_ICON);
+  c.fillCircle(DECK_NEXT_X, BAR_CY, 28, pressed == Target::Next ? BTN_PRESSED : BTN);
+  iconNext(c, DECK_NEXT_X, BAR_CY, TEXT);
+
+  // volume: wide slider, big knob, and the number
+  iconSpeaker(c, 312, BAR_CY, TEXT_MUTED, false);
+  const int v = constrain(media.volume, 0, 100);
+  const float kx = DECK_VOL_X0 + (DECK_VOL_X1 - DECK_VOL_X0) * v / 100.0f;
+  c.fillRRect(DECK_VOL_X0, BAR_CY - 5, DECK_VOL_X1 - DECK_VOL_X0, 10, 5, TRACK);
+  if (kx > DECK_VOL_X0) c.fillRRect(DECK_VOL_X0, BAR_CY - 5, kx - DECK_VOL_X0, 10, 5, ACCENT);
+  c.fillCircle(kx, BAR_CY + 1, 16, BG, 0.35f);  // soft shadow
+  c.fillCircle(kx, BAR_CY, 14, TEXT);
+  iconSpeaker(c, 706, BAR_CY, TEXT_MUTED, true);
+  char pct[8];
+  snprintf(pct, sizeof pct, "%d%%", v);
+  c.text(gfont::SMALL, pct, 728, BAR_CY + 7, TEXT_MUTED);
+}
+
 void drawMini(Canvas& c) { tabs::drawMiniPlayer(c, media.title.c_str(), media.artist.c_str(), media.playing); }
 
 void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
@@ -386,7 +421,13 @@ void openMusicBar() {
   dirtyBar = true;
 }
 
-bool musicBarOpen() { return barOpen; }
+bool musicBarOpen() { return barOpen || deck; }
+
+void setMusicDeck(bool on) {
+  if (on == deck) return;
+  deck = on;
+  dirtyBar = true;
+}
 
 void redrawAll() {
   display::render(Rect{0, 0, SCREEN_W, TOP_H}, BG, [](Canvas&) {});
@@ -536,6 +577,13 @@ void update(uint32_t now) {
     dirtyText = dirtyButtons = dirtyVolume = false;
     return;
   }
+  if (deck) {  // the Music screen's own bar: never folds away
+    if (dirtyBar) redraw(BOTTOM_AREA, BG, drawDeck);
+    if (!dirtyBar && dirtyButtons) redraw(DECK_BUTTON_AREA, BG, drawDeck);
+    if (!dirtyBar && dirtyVolume) redraw(DECK_VOLUME_AREA, BG, drawDeck);
+    dirtyBar = dirtyText = dirtyButtons = dirtyVolume = false;
+    return;
+  }
   if (barOpen && (int32_t)(now - barOpenUntil) >= 0) {  // fold the bar away again
     barOpen = false;
     dirtyBar = true;
@@ -560,7 +608,15 @@ Target hitTest(int x, int y) {
     if (y < TOP_H && talkButton && x >= 780 - TALK_W - 8) return Target::Talk;
     return y >= TOP_H ? Target::Face : Target::None;
   }
-  if (!barOpen && y >= tabs::MINI.y - 10) {
+  if (deck && y >= BAR_Y - 8) {
+    auto near = [&](int cx, int r) { return abs(x - cx) <= r && abs(y - BAR_CY) <= r; };
+    if (near(DECK_PREV_X, 34)) return Target::Prev;
+    if (near(DECK_PLAY_X, 34)) return Target::PlayPause;
+    if (near(DECK_NEXT_X, 34)) return Target::Next;
+    if (x >= DECK_VOL_X0 - 40 && x <= DECK_VOL_X1 + 30) return Target::Volume;
+    return Target::None;
+  }
+  if (!deck && !barOpen && y >= tabs::MINI.y - 10) {
     const Rect& m = tabs::MINI;
     return x >= m.x - 10 && x < m.right() + 10 ? Target::Mini : Target::None;
   }
@@ -585,6 +641,7 @@ Target hitTest(int x, int y) {
 }
 
 int volumeFromX(int x) {
+  if (deck) return constrain((x - DECK_VOL_X0) * 100 / (DECK_VOL_X1 - DECK_VOL_X0), 0, 100);
   return constrain((x - VOL_X0) * 100 / (VOL_X1 - VOL_X0), 0, 100);
 }
 
