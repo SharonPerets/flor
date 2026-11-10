@@ -249,6 +249,14 @@ Done and confirmed:
   volume keys (2% a press). `youtube_music.py`: Play with no media session -> use a "YouTube Music" window, else the
   Start menu shortcut "YouTube Music*.lnk", else music.youtube.com; then session play or Space in its window. Voice
   "play" also starts music when nothing was paused. If it fails, ask for `gorgi-helper.log` ("volume:" / "YouTube Music").
+- **4.8.8 - Play really starts YouTube Music** (helper only, on top of 4.8.7; branch `claude/project-thread-jhei65`;
+  NOT confirmed yet): user on 4.8.7: with YouTube Music closed, Gorgi said playing but nothing played. Cause: a fresh
+  YouTube Music has no song loaded, so play / Space did nothing. Now `youtube_music.launch()` opens
+  `https://music.youtube.com/watch?list=LM` (Liked songs): the installed Chrome/Edge app via its shortcut's program +
+  args + `--app-launch-url-for-shortcuts-menu-item=<url>` (shortcut read with PowerShell WScript.Shell), else the
+  browser. `open_and_play` waits up to 40 s and presses play through the media session (no more Space key).
+  `WindowsMedia.command("playpause")` while nothing plays -> `start_music()`: try the open app, and if it isn't playing
+  after 3 s, open YouTube Music. If it fails, ask for `gorgi-helper.log` (lines "play:" / "YouTube Music").
 
 ## Handover for the next session (2026-10-24)
 
@@ -265,6 +273,8 @@ Done and confirmed:
   user's test. On "works": mark confirmed, merge. The user was running 4.8.6.
 - **4.8.7** (laptop volume follows the current speakers, Play opens YouTube Music) = 4.8.6 + that fix, PR #11 (it
   includes the 4.8.6 branch). Waiting for the user's test. Lesson: check existing release tags before picking a version.
+- **4.8.8** (Play opens YouTube Music on Liked songs and makes sure it plays) = 4.8.7 + that fix, branch
+  `claude/project-thread-jhei65`. Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
