@@ -307,7 +307,7 @@ Done and confirmed:
 - **4.8.16 - YouTube Music step 1** (firmware + helper, on top of 4.8.15; branch `claude/project-thread-oqip3l`; NOT
   confirmed). Plan doc https://claude.ai/artifact/4JhjcYYHRA7gL5DbCYGhBM, mock-ups /mnt/project-files/youtube-music/.
   User chose the one-time sign-in. Helper `ytmusic.py` (ytmusicapi 1.12.3, unofficial; `--collect-all ytmusicapi`):
-  Settings "Connect YouTube Music..." = paste the browser's copied request headers of a `browse` request -> checked with
+  Settings "Connect YouTube Music..." = paste a `browse` request copied from F12 (cURL bash/cmd, raw headers or the Headers table: `normalize_headers`; newer Chrome has no "Copy request headers") -> checked with
   get_liked_songs -> `youtube-music.json` in the settings folder. Liked songs read every 5 min (`ytm_loop`), matched
   to the playing song by title/artist -> `media` {liked} -> Gorgi's thumbs. `cmd like` (toggle LIKE/INDIFFERENT) /
   `cmd dislike` (DISLIKE + next). Voice tags `[music: band X]`, `[music: song X by Y]`, `[music: album X by Y]`,
@@ -352,6 +352,8 @@ Done and confirmed:
   `claude/project-thread-jzmg31`. The user has made both keys; user said "it looks great" (2026-11-10).
 - **4.8.16** (YouTube Music: sign-in, thumbs, "play X" by voice) = 4.8.15 + that, branch `claude/project-thread-oqip3l`.
   Waiting for the user's test; then step 2 (Browse view).
+- **4.8.17** (helper: Connect YouTube Music accepts "Copy as cURL" and the Headers table; the user's Chrome has no
+  "Copy request headers") = 4.8.16 + that. Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).

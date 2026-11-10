@@ -340,13 +340,70 @@ class Account:
         return None
 
 
+HEADER_NAMES = {"accept", "accept-encoding", "accept-language", "authorization", "content-encoding", "content-length",
+                "content-type", "cookie", "origin", "priority", "referer", "user-agent", "x-goog-authuser",
+                "x-goog-visitor-id", "x-origin", "x-youtube-bootstrap-logged-in", "x-youtube-client-name",
+                "x-youtube-client-version", "x-browser-channel", "x-browser-copyright", "x-browser-validation",
+                "x-browser-year", "x-client-data", "dnt"}
+
+
+def _unquote(value):
+    value = value.strip()
+    value = value.replace("^\\^\"", '"').replace('^"', '"').replace("^%", "%").replace("^^", "^")  # cmd's escapes
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return value
+
+
+def normalize_headers(text):
+    """Request headers copied from the browser, in any of its layouts, as "name: value" lines:
+    the raw headers, the Headers tab's table (name and value on separate lines or with a tab),
+    or "Copy as cURL" (bash or cmd)."""
+    text = (text or "").replace("\r", "")
+    headers = {}
+    if re.match(r"\s*curl\b", text):
+        for flag, value in re.findall(r"(?:^|\s)(-H|--header|-b|--cookie)\s+(\^?\"(?:[^\"\\]|\\.|\^\")*\^?\"|'[^']*')",
+                                      text):
+            value = _unquote(value)
+            if flag in ("-b", "--cookie"):
+                headers["cookie"] = value
+            elif ":" in value:
+                name, _, val = value.partition(":")
+                headers[name.strip().lower()] = val.strip()
+    else:
+        lines = [line.strip() for line in text.split("\n")]
+        lines = [line for line in lines if line]
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if "\t" in line:  # name<TAB>value
+                name, _, val = line.partition("\t")
+                headers[name.strip().rstrip(":").lower()] = val.strip()
+                i += 1
+                continue
+            bare = line.rstrip(":").lower()
+            if (bare in HEADER_NAMES or line.startswith(":")) and (": " not in line or line.endswith(":")) \
+                    and i + 1 < len(lines):  # name, then its value on the next line
+                headers[bare] = lines[i + 1]
+                i += 2
+                continue
+            if ": " in line:
+                name, _, val = line.partition(": ")
+                headers[name.strip().lower()] = val.strip()
+            i += 1
+    headers = {k: v for k, v in headers.items() if k and not k.startswith(":")}
+    if "cookie" in headers and "x-goog-authuser" not in headers:
+        headers["x-goog-authuser"] = "0"
+    return "\n".join(f"{k}: {v}" for k, v in headers.items())
+
+
 def connect(folder, headers_raw):
     """For Settings: checks the copied request headers and saves them. Returns (ok, message)."""
     from ytmusicapi import YTMusic, setup
 
-    text = (headers_raw or "").strip()
-    if not text:
+    if not (headers_raw or "").strip():
         return False, "Paste the copied request headers first."
+    text = normalize_headers(headers_raw)
     path = Path(folder) / AUTH_FILE
     trial = path.with_suffix(".new.json")
     try:

@@ -172,6 +172,19 @@ def test_conversation_actions():
     asyncio.run(run())
 
 
+def test_pasted_headers():
+    want = {"cookie: SID=x; SAPISID=y", "x-goog-authuser: 0"}
+    table = ":authority\nmusic.youtube.com\nAccept\n*/*\nCookie\nSID=x; SAPISID=y\nX-Goog-AuthUser\n0\n"
+    tabs = ":authority\tmusic.youtube.com\nCookie\tSID=x; SAPISID=y\n"
+    raw = "accept: */*\ncookie: SID=x; SAPISID=y\nx-goog-authuser: 0\n"
+    bash = "curl 'https://music.youtube.com/youtubei/v1/browse' \\\n  -H 'accept: */*' \\\n  -b 'SID=x; SAPISID=y' \\\n" \
+           "  -H 'x-goog-authuser: 0' \\\n  --data-raw '{\"a\":1}'"
+    cmd = 'curl ^"https://music.youtube.com/x^" ^\n  -H ^"accept: */*^" ^\n  -b ^"SID=x; SAPISID=y^"'
+    for text in (table, tabs, raw, bash, cmd):
+        lines = set(ytmusic.normalize_headers(text).split("\n"))
+        assert want <= lines, (text, lines)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

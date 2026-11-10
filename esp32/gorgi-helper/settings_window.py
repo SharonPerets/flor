@@ -25,7 +25,8 @@ Copy it once from your browser (about 2 minutes):
 2. Press F12. In the panel that opens, click the Network tab.
 3. In its Filter box, type:  browse
 4. On the YouTube Music page, click Library. A line called "browse" appears in the list.
-5. Right-click that line → Copy → Copy request headers.
+5. Right-click that line → Copy → Copy as cURL (bash).
+   (Or: click the line, Headers tab, select everything under "Request headers" and copy it.)
 6. Paste it in the box below and press Connect. You can close the F12 panel after that.
 
 This works like a password: it stays only on this PC (in Gorgi Helper's settings folder)
