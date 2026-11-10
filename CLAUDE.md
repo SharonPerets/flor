@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.8.20 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
+## Where things stand (4.8.21 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -347,6 +347,10 @@ Done and confirmed:
   "Enable companion authorization", which turns itself off after a while, then click Allow). `ytmd.problem` (short
   text) is now shown on the Browse screen ("Starting X..." -> "Playing X" or the reason), plus a pop-up on the PC.
   The user's app lives in `%LOCALAPPDATA%\youtube_music_desktop_app\youtube-music-desktop-app.exe`.
+
+- **4.8.21 - timed lyrics with the sign-in** (helper only, on top of 4.8.20; NOT confirmed): the timed-lyrics ask uses
+  YouTube's mobile client, which answers HTTP 400 when sent with the user's browser sign-in (CI, without sign-in, got
+  28 timed lines for Would?). Lyrics are now always asked WITHOUT the sign-in (`self.ytm._anyone()`).
 
 ## Handover for the next session (2026-10-24)
 

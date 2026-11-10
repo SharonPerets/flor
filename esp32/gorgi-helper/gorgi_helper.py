@@ -46,7 +46,7 @@ import ytmd  # noqa: E402
 import ytmusic  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.8.20"  # must match esp32/VERSION
+VERSION = "4.8.21"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."

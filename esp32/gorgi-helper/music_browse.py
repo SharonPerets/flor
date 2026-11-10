@@ -379,7 +379,8 @@ class Browser:
     def _find_lyrics(self, title, artist):
         if not title:
             return {}
-        api = self.ytm._search_api()
+        # Without the sign-in: with your browser sign-in, YouTube refuses the timed-lyrics ask (HTTP 400)
+        api = self.ytm._anyone()
         video_id = ytmd.playing_id(title) or self.ytm.find_song_id(title, artist)
         if not video_id:
             return {}
