@@ -1313,6 +1313,12 @@ def self_test(out_path):
         lines.append(f"to-do from speech: {task}")
         # YouTube Music search (no sign-in): what "play ..." would open. ::notice:: lines show up on GitHub.
         acc = ytmusic.Account(Path(out_path).resolve().parent)
+        # The Music screen's Browse view: search, a band's albums, an album, a mood, lyrics, a picture
+        # (first: GitHub shows only the first 10 notices)
+        try:
+            lines.extend(reversed(asyncio.run(_browse_self_test(acc))))
+        except Exception as e:
+            lines.append(f"::warning::youtube music browse failed: {e!r}")
         for kind, query in (("band", "Muse"), ("song", "Hysteria by Muse"), ("album", "Absolution by Muse"),
                             (None, "Bohemian Rhapsody"), (None, "Pink Floyd"), (None, "chill jazz")):
             try:
@@ -1320,11 +1326,6 @@ def self_test(out_path):
                 lines.append(f"::notice::youtube music: {kind} {query!r} -> {name!r} {url}")
             except Exception as e:
                 lines.append(f"::warning::youtube music search {query!r} failed: {e!r}")
-        # The Music screen's Browse view: search, a band's albums, an album, a mood, lyrics, a picture
-        try:
-            lines.extend(asyncio.run(_browse_self_test(acc)))
-        except Exception as e:
-            lines.append(f"::warning::youtube music browse failed: {e!r}")
         from voice import word_timings
 
         assert word_timings("Hi there", [(0.1, "Hi"), (0.4, "there")], 1.0) == [[100, 1], [400, 2]]

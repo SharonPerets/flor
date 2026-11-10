@@ -320,6 +320,24 @@ Done and confirmed:
   ("search", "music:", "rated", "Liked songs", "YouTube Music"). **Step 2 (next)**: Browse view on the Music screen
   (Playing/Browse switch, search by typing/voice, mood chips that play at once, Liked songs list, results).
 
+- **4.8.19 - Music screen Browse view + YouTube Music Desktop App** (firmware + helper, on top of 4.8.18; branch
+  `claude/project-thread-oqip3l`; NOT confirmed; mock-ups /mnt/project-files/music-browse/, approved). User picked:
+  search (voice/typing) with a band's **albums**, Liked songs list, mood chips that play at once, Song radio, Lyrics
+  (optional button); not focus music / sleep timer. Firmware: `music_browse.cpp` (pure drawing + taps, PC preview
+  `tools/pc-tests/music_browse_preview.cpp`): Playing / Browse switch (16,52), Song radio + Lyrics pills (Playing),
+  search bar + mic (Browse), mood chips y 108, Liked songs (Play / Shuffle, 3 rows) or a page (Back, tabs Songs /
+  Albums / Artists, 4 rows of 58 px, drag to scroll), keyboard (deck hidden), lyrics in x 322..780 y 152..280 (synced
+  line highlighted). Album art moved to y 100. `music_page.cpp` keeps the lists (home + 3 pages, 120 items each,
+  PSRAM), 48 cached 48x48 pictures (binary "GTHM" + id + RGB565), routes touches (`musicTouch` in main).
+  Messages: Gorgi -> `{"type":"music","do": home|search{q}|pick{list,index}|play|shuffle{list}|mood{name}|radio|
+  lyrics{title,artist}|thumbs{ids}}`, `dictate` {mode search}; helper -> `music_list` (pieces of 20), `music_status`,
+  `lyrics` {title, synced, lines [[ms,text]]}. Helper `music_browse.py` (Browser; tests `test_music_browse.py`, CI
+  self-test prints `::notice::browse ...`). **"play X" opened a Chrome tab**: the user has **YouTube Music Desktop
+  App** (ytmdesktop, Electron), its shortcut has no `--app-id`, so 4.8.9's launch fell back to the browser. Now
+  `ytmd.py` uses its Companion server (127.0.0.1:9863, auth/requestcode + auth/request -> token in `ytmd.json`,
+  command changeVideo {videoId, playlistId}); the user must click Allow once (needs Settings > Integrations >
+  Companion server + companion authorization). If it fails, ask for `gorgi-helper.log` ("YTMD", "music:", "search").
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.

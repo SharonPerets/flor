@@ -52,6 +52,12 @@ paired helper, then set it up again.
 - Music commands work too: "next song", "pause the music", "volume 30", "turn it up".
 - YouTube Music: "play Muse", "put on Hysteria by Muse", "play my liked songs", "shuffle my liked songs",
   "I love this song" (like) and "I hate this song" (dislike, skips it). Songs play in the YouTube Music app.
+- Gorgi's Music screen has a **Browse** view (since 4.8.19): search by voice or typing, your Liked songs,
+  mood chips, a band's albums and songs, an album's songs, Song radio and Lyrics (`music_browse.py`).
+- **YouTube Music Desktop App** (ytmdesktop): songs play in that app, not in a browser tab. The first time,
+  the app asks if Gorgi may control it: click **Allow**. If nothing happens, open the app's
+  Settings → Integrations and turn on **Companion server** and **Enable companion authorization** (`ytmd.py`;
+  the permission is kept in `ytmd.json` in the settings folder).
 - Ask about the weather: "will it rain tomorrow?". Gorgi uses the forecast from its weather screen
   (for the city picked there).
 

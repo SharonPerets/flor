@@ -113,6 +113,8 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 | `src/face.cpp` | The face: expressions, blinking, looking around, talking mouth |
 | `src/ui.cpp` | Top bar, subtitles, media bar |
 | `src/music_screen.cpp` | The music screen: album art, song, progress |
+| `src/music_browse.cpp` | The Music screen's Playing / Browse switch, search, lists, keyboard, lyrics (drawing) |
+| `src/music_page.cpp` | The Music screen on the device: lists and pictures from the helper, touches |
 | `src/weather.cpp` | The weather screen: forecast, weather pictures, city picker |
 | `src/weather_net.cpp` | Downloads the forecast in the background |
 | `src/time_screen.cpp` | The Time screen: countdown rings, buttons, the reminder list |
