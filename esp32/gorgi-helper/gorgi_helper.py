@@ -226,6 +226,7 @@ class Helper:
         # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
         self.claude = ClaudeWatch(on_change=self._claude_changed, on_alert=self._claude_alert)
         self.on_call = False
+        self.claude_muted = False  # muted on Gorgi (Action Center switch): no Claude pop-ups or voice
         self._paused_for_call = False
         self.on_status = on_status or (lambda text, connected: None)
         # make_conversation(send) -> Conversation, or None when voice isn't available
@@ -677,6 +678,10 @@ class Helper:
                 self.offer_updates()
                 self._push()
                 continue
+            if msg.get("type") == "claude_mute":
+                self.claude_muted = bool(msg.get("on"))
+                log.info("Claude alerts %s on Gorgi", "muted" if self.claude_muted else "on")
+                continue
             if msg.get("type") == "weather":
                 weather.update(msg)
                 log.info("weather for %s from Gorgi", msg.get("city"))
@@ -734,6 +739,9 @@ class Helper:
         asyncio.get_running_loop().create_task(self.send(self.claude_message()))
 
     def _claude_alert(self, kind, name, text):
+        if self.claude_muted:
+            log.info("claude alert (%s), muted: %s", kind, text)
+            return
         log.info("claude alert (%s): %s", kind, text)
         loop = asyncio.get_running_loop()
         loop.create_task(self.send({"type": "claude_alert", "kind": kind, "name": name, "text": text}))

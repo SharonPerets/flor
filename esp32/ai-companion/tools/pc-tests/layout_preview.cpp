@@ -57,6 +57,8 @@ int main() {
   save("l_action.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &a);
   static actioncenter::View e = a; e.noticeCount = 0;
   save("l_action_empty.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &e);
+  static actioncenter::View m = a; m.claudeMuted = true;
+  save("l_action_muted.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &m);
   static actioncenter::View w = a; w.weatherOpen = true;
   save("l_action_weather.ppm", [](gfx::Canvas& c, void* p) { actioncenter::draw(c, *(actioncenter::View*)p); }, &w);
   printf("pictures: l_face l_time l_action l_action_empty l_action_weather\n");
