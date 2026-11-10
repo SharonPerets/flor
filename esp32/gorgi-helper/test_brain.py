@@ -45,4 +45,9 @@ try:
     raise SystemExit("expected BrainError")
 except brain.BrainError as e:
     assert "key" in e.spoken and len(calls) == 1
+try:
+    run([(402, {"error": "Add usage credits"})])
+    raise SystemExit("expected BrainError")
+except brain.BrainError as e:
+    assert "ran out" in e.spoken and len(calls) == 1
 print("brain retries: ok")

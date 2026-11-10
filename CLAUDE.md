@@ -285,6 +285,11 @@ Done and confirmed:
   (1.5 s apart) on 5xx / 400 / dropped connections, drops `think` after a 400, and logs "AI error <code> (try n, model)".
   Test: `test_brain.py`. If it still fails, ask for `gorgi-helper.log` lines "AI error".
 
+- **4.8.14 - Ollama usage ran out** (helper only, on top of 4.8.13; branch `claude/project-thread-9uc4k7`; NOT confirmed):
+  the user's log showed `AI error 402 "Add usage credits or subscribe"` from Ollama Cloud (from 2026-11-10 12:56 local;
+  worked on 11-09) = the Ollama account's usage ran out, not a Gorgi bug. 402 is no longer retried and Gorgi now says
+  "My Ollama usage ran out for now..." instead of "Something went wrong in my brain".
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -312,6 +317,7 @@ Done and confirmed:
 - **4.8.12** (round Talk button left of the face; touching the face no longer talks) = 4.8.11 + that, branch
   `claude/project-thread-9uc4k7`. Waiting for the user's test.
 - **4.8.13** (helper retries Ollama errors) = 4.8.12 + that, branch `claude/project-thread-9uc4k7`. Waiting for the user's test.
+- **4.8.14** (clear message when Ollama usage runs out, HTTP 402) = 4.8.13 + that. Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).

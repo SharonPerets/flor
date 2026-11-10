@@ -131,7 +131,7 @@ class Brain:
                     raise BrainError("I can't reach my brain right now. Is the internet working?")
                 await asyncio.sleep(1.5)
                 continue
-            if r.status_code < 400 or r.status_code in (401, 403, 404, 429):
+            if r.status_code < 400 or r.status_code in (401, 402, 403, 404, 429):
                 return r
             log.warning("AI error %s (try %d, model %s): %s", r.status_code, attempt + 1, body.get("model"),
                         r.text[:300])
@@ -163,6 +163,10 @@ class Brain:
 
         if r.status_code in (401, 403):
             raise BrainError("My Ollama key doesn't work. Please check it in Settings.", "confused")
+        if r.status_code == 402:  # Ollama: the free usage ran out (resets later) or credits are needed
+            log.warning("AI error 402: %s", r.text[:300])
+            raise BrainError("My Ollama usage ran out for now. It refills after a while, or you can add credits"
+                             " at ollama.com.", "sleepy")
         if r.status_code == 404:
             raise BrainError(f"I can't find the model {model}. Please pick another one in Settings.", "confused")
         if r.status_code == 429:
