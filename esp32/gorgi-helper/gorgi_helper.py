@@ -43,7 +43,7 @@ import updater  # noqa: E402
 import weather  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.8.8"  # must match esp32/VERSION
+VERSION = "4.8.9"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -1110,7 +1110,9 @@ def self_test(out_path):
         if sys.platform == "win32":
             import youtube_music
 
-            lines.append(f"youtube music: window {youtube_music.find_window()}, app {youtube_music.find_shortcut()}")
+            app = youtube_music.find_shortcut()
+            lines.append(f"youtube music: window {youtube_music.find_window()}, app {app}"
+                         f" {youtube_music.read_shortcut(app) if app else ''}")
         from icon import make_image
 
         make_image(64)
