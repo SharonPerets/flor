@@ -41,6 +41,8 @@ from timekeeper import TimeKeeper  # noqa: E402
 from todolist import TodoKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
+import music_browse  # noqa: E402
+import ytmd  # noqa: E402
 import ytmusic  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
@@ -217,11 +219,70 @@ def make_update_window(on_word):
     return UpdateWindow(on_word)
 
 
+async def _browse_self_test(acc):
+    """Runs the Browse view against the real YouTube Music (no sign-in). Returns ::notice:: lines."""
+    got, pictures, played = [], [], []
+
+    class Media:
+        async def play_link(self, url):
+            played.append(url)
+
+        async def get_info(self):
+            return {"title": "Would?", "artist": "Alice in Chains", "playing": True}
+
+    async def send(msg):
+        got.append(msg)
+
+    async def send_bytes(data):
+        pictures.append(data)
+
+    b = music_browse.Browser(acc, Media(), send, send_bytes)
+    out = []
+
+    def last_list():
+        lists = [m for m in got if m["type"] == "music_list"]
+        return lists[-1] if lists else None
+
+    def items_of(list_id):
+        return [i for m in got if m["type"] == "music_list" and m["list"] == list_id for i in m["items"]]
+
+    await b.search("Alice in Chains")
+    q = last_list()
+    rows = items_of(q["list"])
+    out.append(f"::notice::browse search: tabs {q['tabs']} tab {q['tab']}, {len(rows)} rows, "
+               f"first per kind: {[next((r[2] for r in rows if r[0] == k), '') for k in q['tabs']]}")
+    band = next(i for i, r in enumerate(rows) if r[0] == "r")
+    await b.pick(q["list"], band)
+    artist = last_list()
+    rows = items_of(artist["list"])
+    out.append(f"::notice::browse artist {artist['title']!r}: tabs {artist['tabs']}, "
+               f"albums {[r[2] + ' / ' + r[3] for r in rows if r[0] == 'a'][:6]}")
+    album = next(i for i, r in enumerate(rows) if r[0] == "a")
+    await b.pick(artist["list"], album)
+    alb = last_list()
+    out.append(f"::notice::browse album {alb['title']!r} ({alb['sub']}): {[r[2] for r in items_of(alb['list'])][:5]}")
+    await b.pick(alb["list"], 1)
+    await b.play_list(artist["list"], True)
+    await b.mood("Focus")
+    out.append(f"::notice::browse played: {played}")
+    await b.lyrics("Would?", "Alice in Chains")
+    ly = [m for m in got if m["type"] == "lyrics"][-1]
+    out.append(f"::notice::browse lyrics: {len(ly['lines'])} lines, timed {ly['synced']}, {ly['lines'][:3]}")
+    img = next((r[1] for r in rows if r[1]), 0)
+    await b.thumbs([img])
+    out.append(f"::notice::browse picture: {len(pictures[0]) if pictures else 0} bytes (want "
+               f"{8 + music_browse.THUMB * music_browse.THUMB * 2})")
+    out.append(f"::notice::browse status messages: {[m['text'] for m in got if m['type'] == 'music_status']}")
+    return out
+
+
 class Helper:
     def __init__(self, media, config, on_status=None, make_conversation=None, timekeeper=None, speak=None,
                  todos=None, ytm=None):
         self.media = media
         self.ytm = ytm  # your YouTube Music account (Liked songs, like / dislike), or None
+        # the Browse view on Gorgi's Music screen (search, albums, lyrics...)
+        self.browser = music_browse.Browser(ytm, media, self.send, self.send_bytes) if ytm is not None else None
         self.config = config
         self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
         self.todos = todos or TodoKeeper()  # Gorgi's to-do list, for the AI
@@ -614,6 +675,15 @@ class Helper:
         except websockets.exceptions.WebSocketException:
             pass
 
+    async def send_bytes(self, data):
+        ws = self.ws
+        if ws is None:
+            return
+        try:
+            await ws.send(data)
+        except websockets.exceptions.WebSocketException:
+            pass
+
     def stop_conversation(self):
         if self.conversation_task and not self.conversation_task.done():
             self.conversation_task.cancel()
@@ -661,6 +731,9 @@ class Helper:
             self.gorgi_version = None
             self.timekeeper.forget()
             self.todos.forget()
+            if self.browser is not None:
+                self.browser.sent_liked = None
+                self.browser.wants_home = False
             self.on_changed()
             self._push()
             self.stop_conversation()
@@ -704,9 +777,15 @@ class Helper:
                 log.info("Gorgi was tapped: starting a conversation")
                 self.start_conversation()
                 continue
+            if msg.get("type") == "music":
+                if self.browser is not None:
+                    asyncio.get_running_loop().create_task(self.browser.handle(msg))
+                else:
+                    await self.send({"type": "music_status", "text": "YouTube Music isn't installed in the helper"})
+                continue
             if msg.get("type") == "dictate":
-                mode = "text" if msg.get("mode") == "text" else "todo"
-                log.info("voice typing on the To-do screen (%s)", mode)
+                mode = msg.get("mode") if msg.get("mode") in ("text", "search") else "todo"
+                log.info("voice typing on Gorgi (%s)", mode)
                 self.start_conversation(dictate=True, mode=mode)
                 continue
             if msg.get("type") == "cancel":
@@ -776,6 +855,8 @@ class Helper:
                         log.info("YouTube Music connected: reading your Liked songs")
                     await asyncio.to_thread(self.ytm.refresh_liked)
                     self.refresh_event.set()
+                    if self.browser is not None and self.browser.wants_home and self.ws is not None:
+                        await self.browser.send_home()  # Gorgi's Liked songs list, when it changed
                 except Exception as e:
                     log.warning("Liked songs: %s", e)
             elif self.ytm.liked_at:
@@ -1177,6 +1258,7 @@ def self_test(out_path):
             import youtube_music
 
             app = youtube_music.find_shortcut()
+            lines.append(f"youtube music desktop app: {ytmd.program()}, server {ytmd.running()}")
             lines.append(f"youtube music: window {youtube_music.find_window()}, app {app}"
                          f" {youtube_music.read_shortcut(app) if app else ''}")
         from icon import make_image
@@ -1238,6 +1320,11 @@ def self_test(out_path):
                 lines.append(f"::notice::youtube music: {kind} {query!r} -> {name!r} {url}")
             except Exception as e:
                 lines.append(f"::warning::youtube music search {query!r} failed: {e!r}")
+        # The Music screen's Browse view: search, a band's albums, an album, a mood, lyrics, a picture
+        try:
+            lines.extend(asyncio.run(_browse_self_test(acc)))
+        except Exception as e:
+            lines.append(f"::warning::youtube music browse failed: {e!r}")
         from voice import word_timings
 
         assert word_timings("Hi there", [(0.1, "Hi"), (0.4, "there")], 1.0) == [[100, 1], [400, 2]]
@@ -1366,6 +1453,8 @@ def main():
                          if voice_factory else None)
     helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak,
                     todos=todos, ytm=ytm)
+    # YouTube Music Desktop App: its permission is kept in the settings folder; pop-ups go through the tray
+    ytmd.setup(data_dir(), lambda title, text: helper.on_notify(title, text))
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)

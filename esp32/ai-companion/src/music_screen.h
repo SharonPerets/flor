@@ -19,7 +19,9 @@ bool artChunk(uint32_t id, uint32_t total, uint32_t offset, const uint8_t* data,
 bool artReady(uint32_t id);
 
 // emptyTitle / emptyHint are shown when nothing is playing.
-void draw(gfx::Canvas& c, const ui::MediaInfo& song, uint32_t nowMs, const char* emptyTitle, const char* emptyHint);
+// lyrics: the lyrics are shown (music_browse.cpp draws them): only the song's name on one line
+void draw(gfx::Canvas& c, const ui::MediaInfo& song, uint32_t nowMs, const char* emptyTitle, const char* emptyHint,
+          bool lyrics = false);
 
 // The progress bar and times, redrawn every second while a song plays
 constexpr gfx::Rect PROGRESS_AREA{320, 280, 470, 60};

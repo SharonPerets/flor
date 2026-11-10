@@ -5,6 +5,7 @@
 #   claude_preview: draws the Claude screen, the top-bar tabs, the call button and the pull-down panel
 #   layout_preview: whole screens - top bar, the slim music line, the Action Center (4.3 design)
 #   todo_preview: checks the to-do list (days, order, saving) and draws the To-do screen and keyboard
+#   music_browse_preview: the Music screen's Browse view, search results, artist / album pages, keyboard, lyrics
 #   bidi_test: Hebrew song names in drawing order (right to left) and letter-safe cutting
 # Needs g++. Downloads the ArduinoJson header once.
 set -e
@@ -20,6 +21,7 @@ g++ $FLAGS "$HERE/time_screen_preview.cpp" "$SRC/time_screen.cpp" "$SRC/gfx.cpp"
 g++ $FLAGS "$HERE/claude_preview.cpp" "$SRC/claude_screen.cpp" "$SRC/tabs.cpp" "$SRC/panel.cpp" "$SRC/gfx.cpp" "$SRC/gfont_data.cpp" "$SRC/gfont_hebrew.cpp" "$SRC/bidi.cpp" -o "$OUT/claude_preview"
 g++ $FLAGS "$HERE/layout_preview.cpp" "$SRC/action_center.cpp" "$SRC/weather.cpp" "$SRC/tabs.cpp" "$SRC/panel.cpp" "$SRC/time_screen.cpp" "$SRC/gfx.cpp" "$SRC/gfont_data.cpp" "$SRC/gfont_hebrew.cpp" "$SRC/bidi.cpp" -o "$OUT/layout_preview"
 g++ $FLAGS -I"$HERE/stub" -I"$OUT" "$HERE/todo_preview.cpp" "$SRC/todos.cpp" "$SRC/todo_screen.cpp" "$SRC/gfx.cpp" "$SRC/gfont_data.cpp" "$SRC/gfont_hebrew.cpp" "$SRC/bidi.cpp" -o "$OUT/todo_preview"
+g++ $FLAGS -I"$HERE/stub" "$HERE/music_browse_preview.cpp" "$SRC/music_browse.cpp" "$SRC/tabs.cpp" "$SRC/panel.cpp" "$SRC/gfx.cpp" "$SRC/gfont_data.cpp" "$SRC/gfont_hebrew.cpp" "$SRC/bidi.cpp" -o "$OUT/music_browse_preview"
 g++ $FLAGS "$HERE/bidi_test.cpp" "$SRC/bidi.cpp" -o "$OUT/bidi_test"
 cd "$OUT"
 ./bidi_test
@@ -28,4 +30,5 @@ cd "$OUT"
 ./todo_preview
 ./claude_preview
 ./layout_preview
+./music_browse_preview
 echo "pictures: $OUT/*.ppm"

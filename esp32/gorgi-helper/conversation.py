@@ -32,7 +32,8 @@ class Conversation:
         self.speaker = speaker
         self.followup_seconds = followup_seconds
         self.dictate = False  # True: just write down what's said (To-do screen; no AI, no voice)
-        self.dictate_mode = "todo"  # "todo": a new task (with its day); "text": words for the keyboard's text box
+        self.dictate_mode = "todo"  # "todo": a new task (with its day); "text": words for the keyboard's text box;
+        # "search": words for the Music screen's search
 
     async def run(self):
         if self.dictate:
@@ -77,6 +78,8 @@ class Conversation:
                 msg = todolist.to_message(task, "dictation")
                 msg["mode"] = "todo"
                 await self.send(msg)
+            elif text and self.dictate_mode == "search":  # the Music screen's search: the words, without the dot
+                await self.send({"type": "dictation", "text": text.strip().rstrip(".!?").strip(), "mode": "search"})
             elif text:
                 await self.send({"type": "dictation", "text": text, "mode": "text"})
             else:

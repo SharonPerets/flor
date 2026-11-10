@@ -157,6 +157,7 @@ class Account:
         self._lock = threading.Lock()
         self.liked = []          # [{"videoId", "title", "artists": [{"name"}]}], newest first
         self.liked_count = 0
+        self.liked_version = 0   # goes up each time the list is read (Gorgi's Liked songs list is sent again)
         self.liked_at = 0.0      # when the list was last read (time.monotonic)
         self.problem = None      # last problem with the sign-in, or None
 
@@ -213,9 +214,13 @@ class Account:
                 self.liked_at = time.monotonic() - REFRESH_SECONDS + 60  # try again in a minute
                 return False
             tracks = [t for t in (data.get("tracks") or []) if t.get("videoId")]
+            before = [x["videoId"] for x in self.liked]
             self.liked = [{"videoId": t["videoId"], "title": t.get("title") or "",
-                           "artists": [{"name": a.get("name", "")} for a in (t.get("artists") or [])]}
+                           "artists": [{"name": a.get("name", "")} for a in (t.get("artists") or [])],
+                           "duration": t.get("duration") or "", "thumbnails": t.get("thumbnails") or []}
                           for t in tracks]
+            if [x["videoId"] for x in self.liked] != before:
+                self.liked_version += 1
             self.liked_count = data.get("trackCount") or len(self.liked)
             self.liked_at = time.monotonic()
             self.problem = None
@@ -337,6 +342,7 @@ class Account:
                 self.liked = [s for s in self.liked
                               if s["videoId"] != video_id and not find_liked([s], title, artist)]
             self.liked_at = self.liked_at or time.monotonic()
+            self.liked_version += 1
         return None
 
 

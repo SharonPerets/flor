@@ -25,7 +25,7 @@ const Color DIM = gfx::rgb(0x7D8996);
 const Color TRACK = gfx::rgb(0x2A3441);
 const Color ACCENT = gfx::rgb(0x4FE3D6);
 
-constexpr int ART_X = 48, ART_Y = 90;  // album art, top left
+constexpr int ART_X = 48, ART_Y = 100;  // album art, top left (under the Playing / Browse row)
 constexpr float ART_R = 18;            // corner roundness
 constexpr int TEXT_X = 336, TEXT_R = 764;
 constexpr int BAR_Y = 300;  // progress bar centre
@@ -179,7 +179,7 @@ bool artChunk(uint32_t id, uint32_t total, uint32_t offset, const uint8_t* data,
 
 bool artReady(uint32_t id) { return id != 0 && id == artDone; }
 
-void draw(Canvas& c, const ui::MediaInfo& s, uint32_t now, const char* emptyTitle, const char* emptyHint) {
+void draw(Canvas& c, const ui::MediaInfo& s, uint32_t now, const char* emptyTitle, const char* emptyHint, bool lyrics) {
   const float maxW = TEXT_R - TEXT_X;
   if (artReady(s.artId) && s.title.length())
     drawArt(c);
@@ -193,10 +193,16 @@ void draw(Canvas& c, const ui::MediaInfo& s, uint32_t now, const char* emptyTitl
     return;
   }
 
+  if (lyrics) {  // the lyrics take the text's place: just the song on one line above them
+    c.textIn(gfont::TITLE, fit(gfont::TITLE, s.title, maxW).c_str(), TEXT_X, maxW, 124, TEXT);
+    if (s.artist.length()) c.textIn(gfont::SMALL, fit(gfont::SMALL, s.artist, maxW).c_str(), TEXT_X, maxW, 146, MUTED);
+    drawProgress(c, s, now);
+    return;
+  }
   String lines[2];
   const int n = wrap(gfont::HEADLINE, s.title, maxW, lines);
   // Keep the text block in the middle of the art's height
-  int y = n == 2 ? 118 : 138;
+  int y = n == 2 ? 126 : 146;
   c.text(gfont::SMALL, s.playing ? "NOW PLAYING" : "PAUSED", TEXT_X, y, s.playing ? ACCENT : DIM);
   y += 44;
   // Hebrew titles sit at the right edge (both lines, even if the second starts with an English word)

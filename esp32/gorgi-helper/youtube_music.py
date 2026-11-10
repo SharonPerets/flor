@@ -2,6 +2,8 @@
 
 - YouTube Music has no song loaded when it opens fresh, so pressing play does
   nothing. So it is opened straight on a "play this" link: your Liked songs.
+- YouTube Music Desktop App (ytmdesktop) gets the link through its Companion
+  server (see ytmd.py), so it never opens a browser tab.
 - The installed YouTube Music app (a Chrome or Edge app with a Start menu
   shortcut) is opened on that link; without the app, the default browser is.
 - Once a song is loaded it is started through Windows' media controls (no key
@@ -14,6 +16,8 @@ import logging
 import os
 import subprocess
 import time
+
+import ytmd
 
 log = logging.getLogger("gorgi.music")
 
@@ -123,10 +127,35 @@ async def _playing(media):
     return bool(info.get("playing"))
 
 
+async def _via_ytmd(media, url, timeout=20.0):
+    """YouTube Music Desktop App installed: plays url there (never a browser tab).
+    Returns True / False when that app is installed, None when it isn't."""
+    if not await asyncio.to_thread(ytmd.installed):
+        return None
+    if not await asyncio.to_thread(ytmd.play, url):
+        return False
+    start = time.monotonic()
+    nudged = False
+    while time.monotonic() - start < timeout:
+        await asyncio.sleep(1)
+        if await _playing(media):
+            log.info("YouTube Music Desktop App: playing after %.0f s", time.monotonic() - start)
+            return True
+        if not nudged and time.monotonic() - start >= 5:
+            nudged = True
+            log.info("YouTube Music Desktop App: not playing yet, pressing play")
+            await asyncio.to_thread(ytmd.command, "play", None, False)
+    log.warning("YouTube Music Desktop App didn't start playing within %d s", timeout)
+    return True  # it took the link; nothing else to try
+
+
 async def open_and_play(media, url=PLAY_URL, timeout=40.0, play_after=5.0):
     """media: WindowsMedia (get_info, _session). Opens YouTube Music on url and makes
     sure it plays. Never raises."""
     try:
+        done = await _via_ytmd(media, url)
+        if done is not None:
+            return done
         await asyncio.to_thread(launch, url)
         start = time.monotonic()
         loaded_at = None  # when a song first showed up in Windows' media controls
@@ -159,6 +188,9 @@ async def play_url(media, url, timeout=40.0, play_after=5.0):
     first and closed once the new one is there (two players would fight over the
     media keys). Never raises. Returns True when it plays."""
     try:
+        done = await _via_ytmd(media, url)
+        if done is not None:
+            return done
         old = set(await asyncio.to_thread(find_windows))
         if old and (await media.get_info()).get("playing"):
             await media.set_playing(False)

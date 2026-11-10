@@ -11,6 +11,9 @@
 //                    {"type":"media","title":"..","artist":"..","album":"..","playing":true,"volume":40,
 //                     "pos":63.5,"dur":215.0,"art":7}   (pos/dur in seconds, art = album art id)
 //                    binary "GART" + id + total + offset + RGB565 data   (album art, in pieces)
+//                    binary "GTHM" + id + 48x48 RGB565 data   (a picture for the Browse view's lists)
+//                    {"type":"music_list"...}, {"type":"music_status"...}, {"type":"lyrics"...}
+//                        (the Music screen's Browse view and lyrics: see gorgi-helper/music_browse.py)
 //                    {"type":"clock","text":"21:45","epoch":1761245100}  (epoch: seconds since 1970)
 //                    {"type":"time_add","kind":"timer","seconds":600,"label":"pasta"}
 //                    {"type":"time_add","kind":"focus","seconds":1500}
@@ -72,6 +75,8 @@ struct Handlers {
   std::function<void(const char* type, JsonObjectConst msg)> onTime;
   // Anything else: "claude" (sessions + usage), "claude_alert", "call" (Teams call on/off)
   std::function<void(const char* type, JsonObjectConst msg)> onOther;
+  // A small list picture for the Music screen's Browse view: id + THUMB x THUMB RGB565 (see music_browse.h)
+  std::function<void(uint32_t id, const uint8_t* data, size_t len)> onThumb;
   // A piece of album art (see music_screen.h)
   std::function<void(uint32_t id, uint32_t total, uint32_t offset, const uint8_t* data, size_t len)> onArt;
   // Firmware update over Wi-Fi: percent 0..100, or -1 if it failed

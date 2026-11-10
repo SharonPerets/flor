@@ -127,6 +127,10 @@ void onSocketEvent(uint8_t client, WStype_t type, uint8_t* payload, size_t lengt
         uint32_t head[3];
         memcpy(head, payload + 4, sizeof head);
         handlers.onArt(head[0], head[1], head[2], payload + 16, length - 16);
+      } else if ((int)client == helperClient && length > 8 && memcmp(payload, "GTHM", 4) == 0 && handlers.onThumb) {
+        uint32_t id;
+        memcpy(&id, payload + 4, sizeof id);
+        handlers.onThumb(id, payload + 8, length - 8);
       }
       break;
     default:

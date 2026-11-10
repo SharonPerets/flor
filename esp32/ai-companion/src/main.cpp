@@ -23,6 +23,7 @@
 #include "claude_screen.h"
 #include "display.h"
 #include "face.h"
+#include "music_page.h"
 #include "music_screen.h"
 #include "action_center.h"
 #include "pclink.h"
@@ -68,7 +69,7 @@ const uint8_t TAB_ICONS[(int)Page::Count] = {tabs::MUSIC, tabs::FACE, tabs::TIME
 Page page = Page::Face;
 bool musicDirty = true;      // the music screen needs drawing
 uint32_t ignorePcPosUntil = 0;  // after a jump in the song: the PC's old position is ignored until then
-int musicProgressKey = -2;   // what the progress bar showed last
+bool musicTouch = false;     // this touch belongs to the Music screen's buttons and lists (music_page.cpp)
 
 constexpr int SWIPE_MIN_PX = 80;  // a sideways drag at least this long changes screens
 constexpr gfx::Rect MIDDLE{0, 44, 800, 332};  // the part of the screen that changes
@@ -288,6 +289,7 @@ void drawClaude(uint32_t now);
 void showPage(Page p) {
   if (p == page) return;
   if (page == Page::Todo) todoHidden();
+  if (page == Page::Music) musicpage::hidden();
   page = p;
   ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
@@ -307,6 +309,8 @@ void showPage(Page p) {
     timeConfirm = -1;
   } else if (p == Page::Todo) {
     todoShown();
+  } else if (p == Page::Music) {
+    musicpage::shown();
   }
   markPageDirty(p);
   drawFrame(millis());  // the new screen right away, in one go
@@ -510,6 +514,7 @@ void onVoice(const char* type, JsonObjectConst msg) {
 void onHelper(bool connected, const String& name) {
   gotMediaSinceConnect = false;
   todoVoiceReset();  // (voice typing ended with the connection)
+  musicpage::helperConnected(connected);
   if (inConversation) endConversation();
   if (connected) {
     pcName = name;
@@ -535,6 +540,7 @@ void onHelper(bool connected, const String& name) {
 
 void onMedia(const ui::MediaInfo& m) {
   String oldTitle = media.title;
+  const String oldArtist = media.artist;
   bool first = !gotMediaSinceConnect;
   gotMediaSinceConnect = true;
 
@@ -552,6 +558,7 @@ void onMedia(const ui::MediaInfo& m) {
     media.posAtMs = keepPosAt;
   }
 
+  musicpage::onMedia(media, media.title != oldTitle || m.artist != oldArtist);
   if (media.title.length() == 0) {
     showMediaPlaceholder();
   } else {
@@ -1408,6 +1415,7 @@ void showClaudeAlert(const String& name, bool waiting, const String& text) {
 }
 
 void onOther(const char* type, JsonObjectConst msg) {
+  if (musicpage::onMessage(type, msg)) return;  // the Music screen's lists, lyrics, voice search
   if (strncmp(type, "todo_", 5) == 0) {
     onTodoMessage(type, msg);
     return;
@@ -1737,8 +1745,15 @@ void handleTouch(uint32_t now) {
     Serial.printf("touch at %d,%d -> target %d\n", tp.x, tp.y, (int)touchTarget);
 
     if (page == Page::Todo && touchTarget == ui::Target::Face) todoBegin(tp.x, tp.y);
-    if (page == Page::Music && touchTarget == ui::Target::Face && music::onProgress(tp.x, tp.y, media))
-      touchTarget = ui::Target::Seek;  // the song's progress bar: drag or tap to jump
+    musicTouch = false;
+    if (page == Page::Music && touchTarget == ui::Target::Face) {
+      if (musicpage::usesTouch(tp.x, tp.y)) {  // Playing / Browse, search, lists, lyrics
+        musicTouch = true;
+        musicpage::touchBegin(tp.x, tp.y);
+      } else if (music::onProgress(tp.x, tp.y, media)) {
+        touchTarget = ui::Target::Seek;  // the song's progress bar: drag or tap to jump
+      }
+    }
 
     bool wasAsleep = isSleeping();
     lastActivity = now;
@@ -1769,14 +1784,19 @@ void handleTouch(uint32_t now) {
     // A sideways drag in the middle of the screen moves the screens
     if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(dx) > 16 &&
         abs(dx) * 5 > abs(tp.y - touchY0) * 6 &&
-        !(page == Page::Todo && (todoView.kb.open || todoScrolled))) {
+        !(page == Page::Todo && (todoView.kb.open || todoScrolled)) && !(musicTouch && musicpage::blocksSwipe())) {
       swiping = true;
+      if (musicTouch) {
+        musicTouch = false;
+        musicpage::touchCancel();
+      }
     }
     if (swiping) {
       touchEndX = tp.x;
       return;
     }
     if (page == Page::Todo && touchTarget == ui::Target::Face) todoMove(tp.x, tp.y);
+    if (musicTouch) musicpage::touchMove(tp.x, tp.y);
     if (touchTarget == ui::Target::Seek) {  // the knob follows the finger; the PC jumps on release
       media.pos = music::progressAt(tp.x, media);
       media.posAtMs = now;
@@ -1833,6 +1853,11 @@ void handleTouch(uint32_t now) {
         showPage(Page::Face);
         if (!inConversation) onTap(ui::Target::Face);
       }
+      return;
+    }
+    if (musicTouch) {
+      musicTouch = false;
+      musicpage::touchEnd(touchX0, touchY0);
       return;
     }
     if (released == ui::Target::Face && page == Page::Face) return;  // touching the face does nothing (4.8.8)
@@ -1976,16 +2001,9 @@ void drawFrame(uint32_t now) {
   } else if (page == Page::Claude) {
     drawClaude(now);
   } else if (page == Page::Music) {
-    const int key = music::progressKey(media, now);
-    if (musicDirty) {
-      display::render(MIDDLE, ui::BACKGROUND,
-                      [&](gfx::Canvas& c) { music::draw(c, media, now, musicEmptyTitle(), musicEmptyHint()); });
-    } else if (key != musicProgressKey) {
-      display::render(music::PROGRESS_AREA, ui::BACKGROUND,
-                      [&](gfx::Canvas& c) { music::draw(c, media, now, musicEmptyTitle(), musicEmptyHint()); });
-    }
+    if (musicDirty) musicpage::markDirty();
     musicDirty = false;
-    musicProgressKey = key;
+    musicpage::draw(now, media, musicEmptyTitle(), musicEmptyHint());
   }
   ui::setFaceTalkActive(inConversation);
   ui::update(now);
@@ -2005,7 +2023,7 @@ void setup() {
   if (!psramFound()) fatal("PSRAM not found - check board settings");
   if (!display::begin(lcd)) fatal("Not enough memory for the drawing buffer");
   if (!face.begin(lcd)) fatal("Could not start the face");
-  if (!music::begin()) fatal("Not enough memory for the music screen");
+  if (!music::begin() || !musicpage::begin()) fatal("Not enough memory for the music screen");
 
   ui::begin(lcd);
   media.volume = 50;
@@ -2027,6 +2045,7 @@ void setup() {
   h.onVoice = onVoice;
   h.onUpdate = onUpdate;
   h.onArt = onArt;
+  h.onThumb = musicpage::onThumb;
   h.onTime = onTime;
   h.onOther = onOther;
   pclink::begin(h);
