@@ -252,29 +252,32 @@ class Account:
         kind: "band", "song", "album", or None (work it out)."""
         api = self._search_api()
         title, by = split_by(query)
+        songs, pick = [], None
+        if kind in ("song", None):
+            songs = [r for r in api.search(query, filter="songs", limit=10) if r.get("videoId")]
+            pick = best(songs, title, by)
+            exact = pick and _plain(pick.get("title")) == _plain(title)
+            if pick and (kind == "song" or exact):  # unclear: a song with exactly that name wins
+                names = ", ".join(a.get("name", "") for a in (pick.get("artists") or [])[:1])
+                return song_url(pick["videoId"]), (pick.get("title") or title) + (f" by {names}" if names else "")
         if kind in ("band", None) and not by:
             artists = [r for r in api.search(title, filter="artists", limit=5) if r.get("browseId")]
             exact = [r for r in artists if _plain(r.get("artist") or r.get("title")) == _plain(title)]
-            pick = (exact or (artists if kind == "band" else []) or [None])[0]
-            if pick:
-                url = self._artist_url(api, pick["browseId"])
+            band = (exact or (artists if kind == "band" else []) or [None])[0]
+            if band:
+                url = self._artist_url(api, band["browseId"])
                 if url:
-                    return url, pick.get("artist") or title
+                    return url, band.get("artist") or title
         if kind == "album":
             albums = [r for r in api.search(query, filter="albums", limit=10) if r.get("browseId")]
-            pick = best(albums, title, by)
-            if pick:
+            album_pick = best(albums, title, by)
+            if album_pick:
                 try:
-                    album = api.get_album(pick["browseId"])
+                    album = api.get_album(album_pick["browseId"])
                     if album.get("audioPlaylistId"):
-                        return playlist_url(album["audioPlaylistId"]), pick.get("title") or title
+                        return playlist_url(album["audioPlaylistId"]), album_pick.get("title") or title
                 except Exception as e:
-                    log.info("album %s: %s", pick["browseId"], e)
-        songs = [r for r in api.search(query, filter="songs", limit=10) if r.get("videoId")]
-        pick = best(songs, title, by)
-        if pick and (kind == "song" or _plain(pick.get("title")) == _plain(title) or by):
-            names = ", ".join(a.get("name", "") for a in (pick.get("artists") or [])[:1])
-            return song_url(pick["videoId"]), (pick.get("title") or title) + (f" by {names}" if names else "")
+                    log.info("album %s: %s", album_pick["browseId"], e)
         # Not clear: whatever YouTube Music puts on top
         kind2, name, item = choose(api.search(query, limit=10), query)
         log.info("search %r -> %s %s", query, kind2, name)
