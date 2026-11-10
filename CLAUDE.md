@@ -7,8 +7,8 @@ This repo holds a few unrelated things. The active project is **Gorgi**, in `esp
 
 An AI desk companion on a **Waveshare ESP32-S3-Touch-LCD-7** (800x480 RGB LCD, GT911 touch,
 CH422G IO expander, 8 MB flash, 8 MB octal PSRAM). Gorgi shows an animated face and screens;
-a Windows app, **Gorgi Helper**, does the listening (PC mic + Whisper), thinking (Ollama Cloud,
-default model `gpt-oss:20b`), talking (Edge TTS `en-US-AnaNeural`, PC speakers), music control
+a Windows app, **Gorgi Helper**, does the listening (PC mic + Whisper), thinking (since 4.8.15: free Groq
+`openai/gpt-oss-20b` first, Gemini `gemini-3.5-flash-lite` as backup, Ollama last if keyed), talking (Edge TTS `en-US-AnaNeural`, PC speakers), music control
 and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via mDNS `gorgi.local`).
 
 - `esp32/ai-companion/` - firmware (PlatformIO, Arduino-ESP32 **2.x**, LovyanGFX 1.1.16). README there.
@@ -290,6 +290,20 @@ Done and confirmed:
   worked on 11-09) = the Ollama account's usage ran out, not a Gorgi bug. 402 is no longer retried and Gorgi now says
   "My Ollama usage ran out for now..." instead of "Something went wrong in my brain".
 
+- **4.8.15 - free brain: Groq, then Gemini** (helper only, on top of 4.8.14; branch `claude/project-thread-jzmg31`; NOT
+  confirmed). Ollama Cloud has no free plan any more (pay as you go / Pro $20), so the user picked (2026-11-10) Groq
+  first + Gemini as automatic backup. `brain.py`: `Service` (Groq `https://api.groq.com/openai/v1`, Gemini
+  `https://generativelanguage.googleapis.com/v1beta/openai`, both OpenAI-style `/chat/completions` with
+  `reasoning_effort: low`; Ollama `/api/chat` as before). Order Groq -> Gemini -> Ollama, only services with a key.
+  429/402 -> that service rests (Retry-After, else 10 min / 1 h) and the next one answers at once; 401/403 or a 400
+  with "API key" = bad key (named in the spoken error); 404 -> next model (Gemini: 3.5 then 3.1 flash-lite).
+  All used up -> "I've used up my free thinking for now...". Config keys `groq_api_key`, `gemini_api_key`
+  (`groq_api_key` was a Hebrew leftover deleted by 4.8.5; no longer deleted). Settings: 3 key boxes + "Test keys"
+  (lists each service's models, no quota used). Free limits (checked 2026-11-10): Groq gpt-oss-20b 30/min, 1000/day,
+  8K tokens/min, 200K tokens/day (~80-100 questions); Gemini Flash-Lite ~15/min, 500/day (Google no longer
+  publishes the numbers; free-tier chats may be used by Google). If talking fails, ask for `gorgi-helper.log`
+  ("AI limit at", "AI key refused", "no AI could answer", "AI reply (Groq|Gemini...").
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -318,6 +332,8 @@ Done and confirmed:
   `claude/project-thread-9uc4k7`. Waiting for the user's test.
 - **4.8.13** (helper retries Ollama errors) = 4.8.12 + that, branch `claude/project-thread-9uc4k7`. Waiting for the user's test.
 - **4.8.14** (clear message when Ollama usage runs out, HTTP 402) = 4.8.13 + that. Waiting for the user's test.
+- **4.8.15** (free brain: Groq first, Gemini backup, Ollama last) = 4.8.14 + that, branch
+  `claude/project-thread-jzmg31`. The user has made both keys; waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
