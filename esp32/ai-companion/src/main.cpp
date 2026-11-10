@@ -104,6 +104,14 @@ String alertText, alertTitle;  // for a notification if nobody taps it
 uint8_t alertNotice = 0;
 String alertSession;       // ...for this session
 
+// Claude alerts can be muted from the Action Center (saved, and told to the helper so it stays quiet too)
+bool claudeMuted = false;
+Preferences claudePrefs;
+
+void sendClaudeMute() {
+  pclink::sendText(claudeMuted ? "{\"type\":\"claude_mute\",\"on\":true}" : "{\"type\":\"claude_mute\",\"on\":false}");
+}
+
 // A Teams call is going on (the helper notices the microphone)
 bool callOn = false;
 
@@ -127,6 +135,7 @@ uint32_t alertStart = 0, alertNudge = 0, alertMoodBack = 0;
 Mood alertMood = Mood::Happy;
 constexpr uint32_t ALERT_NUDGE_MS = 30 * 1000;
 constexpr uint32_t ALERT_GIVE_UP_MS = 10 * 60 * 1000;
+constexpr uint32_t CLAUDE_ALERT_MS = 8 * 1000;  // Claude alerts go away by themselves (into the Action Center)
 
 ui::MediaInfo media;
 String pcName;
@@ -151,7 +160,7 @@ uint32_t ignorePcVolumeUntil = 0;  // don't let the PC move the slider while you
 
 const gfx::Color CALL_RED = gfx::rgb(0xFF6B6B);
 void showIdleStatus() {
-  // Nothing when idle: on the face you tap the face; screens without one have a Talk button
+  // Nothing when idle: the face screen has its round Talk button
   if (callOn) ui::setStatus("On a call", CALL_RED, false);
   else ui::setStatus("", ui::COLOR_TEXT_DIM, false);
 }
@@ -282,6 +291,7 @@ void showPage(Page p) {
   ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
   ui::setBottomHidden(p == Page::Todo);  // the To-do screen uses the whole height
+  ui::setMusicDeck(p == Page::Music);     // the Music screen: buttons + volume always open
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
     display::render(gfx::Rect{0, ui::TOP_H, 800, ui::FACE_Y - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
@@ -505,6 +515,7 @@ void onHelper(bool connected, const String& name) {
     sendWeather();
     sendTimeList();
     sendTodoList();
+    sendClaudeMute();
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
   } else {
@@ -658,7 +669,8 @@ void endAlert(bool tapped) {
 }
 
 void updateAlert(uint32_t now) {
-  if (msSince(now, alertStart) > ALERT_GIVE_UP_MS) {  // nobody tapped it: keep it as a notification
+  // nobody tapped it: keep it as a notification
+  if (msSince(now, alertStart) > (alertClaude ? CLAUDE_ALERT_MS : ALERT_GIVE_UP_MS)) {
     const String text = alertText, title = alertTitle;
     const uint8_t kind = alertNotice;
     endAlert(false);
@@ -1431,7 +1443,8 @@ void onOther(const char* type, JsonObjectConst msg) {
     updateClaudeBadge();
   } else if (strcmp(type, "claude_alert") == 0) {
     const bool waiting = strcmp(msg["kind"] | "done", "waiting") == 0;
-    if (inConversation || updating || (alertOn && !alertClaude)) {  // busy: keep it for the Action Center
+    // muted in the Action Center (no pop-up), or busy: keep it quietly for the Action Center
+    if (claudeMuted || inConversation || updating || (alertOn && !alertClaude)) {
       addMissed(actioncenter::CLAUDE, waiting ? "Claude needed you" : "Claude finished",
                 String((const char*)(msg["text"] | "")));
       return;
@@ -1555,6 +1568,12 @@ void onActionCenterRelease() {
     case actioncenter::Tap::Dismiss:
       removeNotice(t.index);
       break;
+    case actioncenter::Tap::MuteClaude:
+      claudeMuted = !claudeMuted;
+      claudePrefs.putBool("muted", claudeMuted);
+      sendClaudeMute();
+      if (claudeMuted && alertOn && alertClaude) endAlert(false);
+      break;
     case actioncenter::Tap::None:
       return;
   }
@@ -1574,7 +1593,8 @@ void sendVolume(bool force) {
 
 void onTap(ui::Target target) {
   bool pc = pclink::helperConnected();
-  bool mediaButton = target == ui::Target::PlayPause || target == ui::Target::Next || target == ui::Target::Prev;
+  bool mediaButton = target == ui::Target::PlayPause || target == ui::Target::Next || target == ui::Target::Prev ||
+                     target == ui::Target::Like || target == ui::Target::Dislike;
   if (mediaButton && !pc) {
     react(Mood::Confused, "My PC helper isn't connected yet.");
     return;
@@ -1608,6 +1628,18 @@ void onTap(ui::Target target) {
     case ui::Target::Prev:
       pclink::sendCommand("prev");
       react(Mood::Happy, "Going back!");
+      break;
+    case ui::Target::Like:  // YouTube Music: like it, or un-like it when it's already liked
+      pclink::sendCommand("like");
+      media.liked = media.liked == 1 ? 0 : 1;  // the PC confirms a moment later
+      ui::setLiked(media.liked);
+      if (media.liked == 1) react(Mood::Love, "Ooh, I like this one too!");
+      break;
+    case ui::Target::Dislike:  // YouTube Music: dislike it (and it skips to the next song)
+      pclink::sendCommand("dislike");
+      media.liked = 0;
+      ui::setLiked(0);
+      react(Mood::Neutral, "Okay, skipping that one.");
       break;
     default:
       break;
@@ -1701,7 +1733,8 @@ void handleTouch(uint32_t now) {
     bool wasAsleep = isSleeping();
     lastActivity = now;
     if (wasAsleep) {
-      if (touchTarget == ui::Target::None || touchTarget == ui::Target::Clock) {
+      if (touchTarget == ui::Target::None || touchTarget == ui::Target::Clock ||
+          (touchTarget == ui::Target::Face && page == Page::Face)) {
         wakeUp();
         touchTarget = ui::Target::None;  // a touch on nothing in particular just wakes Gorgi
       } else {
@@ -1779,11 +1812,16 @@ void handleTouch(uint32_t now) {
       ui::openMusicBar();
       return;
     }
-    if (released == ui::Target::Talk) {  // a Talk button in the top bar: to the face, listening
-      showPage(Page::Face);
-      if (!inConversation) onTap(ui::Target::Face);
+    if (released == ui::Target::Talk) {
+      if (page == Page::Face) {  // the round button by the face: talk, or stop talking
+        onTap(ui::Target::Face);
+      } else {  // a Talk button on another screen: to the face, listening
+        showPage(Page::Face);
+        if (!inConversation) onTap(ui::Target::Face);
+      }
       return;
     }
+    if (released == ui::Target::Face && page == Page::Face) return;  // touching the face does nothing (4.8.8)
     if (released == ui::Target::CallMute) {
       pclink::sendCommand("teams_mute");
       return;
@@ -1884,6 +1922,7 @@ void drawActionCenter() {
   acView.noticeCount = noticeCount < actioncenter::MAX_NOTICES ? noticeCount : actioncenter::MAX_NOTICES;
   for (int i = 0; i < acView.noticeCount; ++i) acView.notices[i] = notices[i];
   acView.busy = updateBusy;
+  acView.claudeMuted = claudeMuted;
   const int rssi = pclink::wifiRssi();
   const char* wifi = rssi == 0 ? "no Wi-Fi" : rssi > -60 ? "Wi-Fi good" : rssi > -72 ? "Wi-Fi OK" : "Wi-Fi weak";
   if (pclink::helperConnected())
@@ -1924,6 +1963,7 @@ void drawFrame(uint32_t now) {
     musicDirty = false;
     musicProgressKey = key;
   }
+  ui::setFaceTalkActive(inConversation);
   ui::update(now);
 }
 
@@ -1972,6 +2012,8 @@ void setup() {
 
   wxPrefs.begin("weather", false);
   wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
+  claudePrefs.begin("claude", false);
+  claudeMuted = claudePrefs.getBool("muted", false);
   ui::setTabs(TAB_ICONS, (int)Page::Count);
   ui::setTab((int)page);
   weather::beginFetching();
@@ -1983,7 +2025,7 @@ void setup() {
   else if (pclink::wifiState() == pclink::WifiState::SetupPortal)
     say(Mood::Confused, restingSubtitle());
   else
-    say(Mood::Happy, String("Hi, I'm Gorgi! (version ") + GORGI_VERSION + ") Tap me to talk.");
+    say(Mood::Happy, String("Hi, I'm Gorgi! (version ") + GORGI_VERSION + ") Tap Talk to chat.");
   Serial.println("Gorgi ready");
 }
 

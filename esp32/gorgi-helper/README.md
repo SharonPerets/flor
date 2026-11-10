@@ -4,6 +4,7 @@ A small app that connects your PC to Gorgi over Wi-Fi:
 
 - Gorgi's **play/pause, next, previous** buttons control whatever is playing (Spotify, YouTube in a browser, ...)
 - Gorgi's **volume slider** controls the PC volume, and follows it when you change it on the PC
+  (always the speakers Windows uses right now; if the driver ignores it, the volume keys are pressed instead)
 - Gorgi shows the **song title and artist** and the PC's **time**
 - **Talk to Gorgi**: tap its face, speak into the PC microphone, and Gorgi answers out loud
 - **Timers and reminders** by voice, and Gorgi's voice says them out loud when they're due
@@ -15,8 +16,10 @@ A small app that connects your PC to Gorgi over Wi-Fi:
    click **More info → Run anyway**. It installs for your user only (no admin password).
 3. A small Gorgi face appears in the taskbar tray (click the **^** arrow near the clock if you don't see it).
    It turns teal when it's connected to Gorgi.
-4. The **Settings** window opens the first time: paste your **Ollama API key**
-   (ollama.com → Settings → Keys), click **Test key / load models**, pick a model, and **Save**.
+4. The **Settings** window opens the first time: paste a free **Groq key** (console.groq.com → API Keys)
+   and a free **Gemini key** (aistudio.google.com → Get API key), click **Test keys**, and **Save**.
+   Gorgi asks Groq first (`openai/gpt-oss-20b`), Gemini Flash-Lite when Groq's free limit runs out,
+   and Ollama last if you add an Ollama key.
    You can reopen Settings any time by double-clicking the tray icon.
 
 Gorgi and the PC must be on the same Wi-Fi network.
@@ -47,8 +50,19 @@ paired helper, then set it up again.
 - After answering, Gorgi listens about 5 more seconds for a follow-up. Stay quiet to end.
 - **Tap the face again** to stop at any time.
 - Music commands work too: "next song", "pause the music", "volume 30", "turn it up".
+- YouTube Music: "play Muse", "put on Hysteria by Muse", "play my liked songs", "shuffle my liked songs",
+  "I love this song" (like) and "I hate this song" (dislike, skips it). Songs play in the YouTube Music app.
 - Ask about the weather: "will it rain tomorrow?". Gorgi uses the forecast from its weather screen
   (for the city picked there).
+
+### YouTube Music sign-in (for Liked songs and the thumbs)
+
+Searching and playing need nothing. To like / dislike songs (the thumbs on Gorgi's Music screen, or by voice)
+and to see which songs you liked, open **Settings → Connect YouTube Music...** and follow the steps: in
+Chrome or Edge on music.youtube.com press F12, Network tab, filter `browse`, click Library, right-click the
+"browse" line → Copy → Copy request headers, paste, Connect. It's kept only in `youtube-music.json` in the
+settings folder (it works like a password). It uses ytmusicapi, which is unofficial: if YouTube changes
+something, Gorgi says so and everything else keeps working.
 
 If Gorgi says it didn't hear anything: Windows **Settings → Privacy & security → Microphone**,
 turn on **Let desktop apps access your microphone**, and check the right microphone is the
@@ -136,8 +150,11 @@ python gorgi_helper.py --no-tray
 
 | Setting | What it does |
 |---|---|
-| `ollama_api_key` | Your Ollama Cloud key |
-| `model` | AI model, e.g. `gpt-oss:20b` |
+| `groq_api_key` | Groq key (asked first) |
+| `gemini_api_key` | Gemini key (backup) |
+| `groq_model` / `gemini_model` | Only to override the built-in models |
+| `ollama_api_key` | Your Ollama Cloud key (asked last, optional) |
+| `model` | Ollama's AI model, e.g. `gpt-oss:20b` |
 | `ollama_url` | Empty for Ollama Cloud, or `http://localhost:11434` for Ollama on your PC |
 | `voice` | Gorgi's voice, e.g. `en-US-AnaNeural` |
 | `whisper_model` | `base.en` (fast) or `small.en` (understands better, slower) |

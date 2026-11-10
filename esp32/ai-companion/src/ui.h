@@ -13,7 +13,7 @@ constexpr int TOP_H = 44;   // the top bar
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 56;  // a little lower since 4.3: the music bar folds away
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk, Like, Dislike };
 
 struct MediaInfo {
   String title;
@@ -26,6 +26,7 @@ struct MediaInfo {
   float pos = 0, dur = 0;
   uint32_t posAtMs = 0;
   uint32_t artId = 0;  // album art sent by the helper (0 = none)
+  int8_t liked = -1;   // in your YouTube Music Liked songs: 1 yes, 0 no, -1 don't know
 };
 
 // Draws the empty screen background. Call once, after display::begin().
@@ -39,6 +40,9 @@ void setStatus(const String& text, const gfx::Color& color, bool pulse);
 // A real "Talk" button in the top right (screens without a face to tap). It shows
 // while the status is empty; Listening / Thinking / On a call show instead.
 void setTalkButton(bool on);
+// The round Talk button left of the face (face screen only). Active = a conversation
+// is on, so it shows Stop. Tapping it gives Target::Talk.
+void setFaceTalkActive(bool active);
 // No music bar or slim line at the bottom (the Sketch screen uses all of it)
 void setBottomHidden(bool hidden);
 void setSubtitle(const String& text);
@@ -48,6 +52,7 @@ void setSubtitleReveal(int words);
 void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
+void setLiked(int8_t liked);  // the thumbs-up on the Music screen (1 = lit)
 void showPressed(Target t);  // brief highlight on a button
 // Screens: icons in the top bar (tabs.h), tap one to go there.
 void setTabs(const uint8_t* icons, int count);
@@ -61,6 +66,8 @@ void setNoticeDot(bool on);
 // The music bar: folded into a slim "now playing" line, opened by tapping it
 void openMusicBar();     // opens it for 10 s (again: another 10 s)
 bool musicBarOpen();
+// The Music screen shows its own always-open bar: big buttons and a wide volume slider
+void setMusicDeck(bool on);
 // Everything was covered (the Action Center): draw all of it again
 void redrawAll();
 // Draws the subtitle right away (used to draw the face screen into a picture)

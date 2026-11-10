@@ -7,8 +7,8 @@ This repo holds a few unrelated things. The active project is **Gorgi**, in `esp
 
 An AI desk companion on a **Waveshare ESP32-S3-Touch-LCD-7** (800x480 RGB LCD, GT911 touch,
 CH422G IO expander, 8 MB flash, 8 MB octal PSRAM). Gorgi shows an animated face and screens;
-a Windows app, **Gorgi Helper**, does the listening (PC mic + Whisper), thinking (Ollama Cloud,
-default model `gpt-oss:20b`), talking (Edge TTS `en-US-AnaNeural`, PC speakers), music control
+a Windows app, **Gorgi Helper**, does the listening (PC mic + Whisper), thinking (since 4.8.15: free Groq
+`openai/gpt-oss-20b` first, Gemini `gemini-3.5-flash-lite` as backup, Ollama last if keyed), talking (Edge TTS `en-US-AnaNeural`, PC speakers), music control
 and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via mDNS `gorgi.local`).
 
 - `esp32/ai-companion/` - firmware (PlatformIO, Arduino-ESP32 **2.x**, LovyanGFX 1.1.16). README there.
@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.8.6 released and confirmed by the user; merged to main)
+## Where things stand (4.8.17 released and confirmed by the user; merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -242,8 +242,85 @@ Done and confirmed:
   `tabs.cpp` (mini player), and in `ui.cpp` the music bar (`textIn`, letter-safe `fit`). `ui::toAscii(text, keepHebrew)`:
   only `setMedia` keeps Hebrew; everything else (face, to-dos, alerts, notifications) stays English-only.
 - Screens now: **Music ← Face → Time → To-do → Claude** (icon tabs at the top).
+- **4.8.7 - laptop volume + Play** (helper only, on top of 4.8.6 Hebrew song names; branch
+  `claude/project-thread-yk3jm5`, PR #11; NOT confirmed yet): user: volume did nothing on the laptop, Play did
+  nothing with YouTube Music closed. `media_windows.py` now looks up the current default speakers (every 5 s; one
+  kept volume object per device id) instead of the first speakers forever, reads the volume back and falls back to the
+  volume keys (2% a press). `youtube_music.py`: Play with no media session -> use a "YouTube Music" window, else the
+  Start menu shortcut "YouTube Music*.lnk", else music.youtube.com; then session play or Space in its window. Voice
+  "play" also starts music when nothing was paused. If it fails, ask for `gorgi-helper.log` ("volume:" / "YouTube Music").
+- **4.8.9 - Play really starts YouTube Music** (helper only, on top of 4.8.8; branch `claude/project-thread-jhei65`;
+  NOT confirmed yet): user on 4.8.7: with YouTube Music closed, Gorgi said playing but nothing played. Cause: a fresh
+  YouTube Music has no song loaded, so play / Space did nothing. Now `youtube_music.launch()` opens
+  `https://music.youtube.com/watch?list=LM` (Liked songs): the installed Chrome/Edge app via its shortcut's program +
+  args + `--app-launch-url-for-shortcuts-menu-item=<url>` (shortcut read with PowerShell WScript.Shell), else the
+  browser. `open_and_play` waits up to 40 s and presses play through the media session (no more Space key).
+  `WindowsMedia.command("playpause")` while nothing plays -> `start_music()`: try the open app, and if it isn't playing
+  after 3 s, open YouTube Music. If it fails, ask for `gorgi-helper.log` (lines "play:" / "YouTube Music").
 
-## Handover for the next session (2026-11-10)
+- **4.8.8 - Claude alerts clear themselves** (firmware only, on top of 4.8.7; branch `claude/project-thread-7124lh`;
+  NOT confirmed yet): user: the "Claude finished" face and text stayed until touched. Now Claude alerts (finished and
+  needs you) leave the face after `CLAUDE_ALERT_MS` 8 s and go into the Action Center as a CLAUDE notice (same path as
+  the 10-min give-up for timers). A tap still clears it with no notice; timers/reminders unchanged.
+
+- **4.8.10 - mute Claude alerts** (firmware + helper, on top of 4.8.9; branch `claude/project-thread-ync5e8`; NOT
+  confirmed yet): a "Claude alerts" on/off switch at the top right of the Action Center's Notifications card
+  (`Tap::MuteClaude`, NVS "claude"/"muted", sent to the helper as `claude_mute` {on} on change and on connect).
+  Muted (user chose): no face alert, no Windows pop-up or voice; the alert still goes quietly into the Notifications list.
+
+- **4.8.11 - volume on the Music screen** (firmware only, on top of 4.8.10; branch `claude/project-thread-fkdcer`; NOT
+  confirmed yet; mock-ups in /mnt/project-files/volume/, user picked B): on the Music screen the slim music line is
+  replaced by an always-open "deck" (`ui::setMusicDeck`, `drawDeck` in ui.cpp): back / play-pause / next (bigger) and a
+  wide volume slider (x 340..680) with the % next to it. Other screens keep the slim line + 10 s bar. Same `volume` cmd.
+
+- **4.8.12 - Talk button on the face screen** (firmware only, on top of 4.8.11; branch `claude/project-thread-9uc4k7`;
+  NOT confirmed yet): user: touching the face by accident started talking. Now a round teal mic button left of the face
+  (`ui::drawFaceTalk`, centre 50,186, r 36, label "Talk"; red "Stop" while `inConversation`, `ui::setFaceTalkActive`)
+  gives `Target::Talk`; on the face page it starts/stops talking. Touching the face itself does nothing (long press
+  still cycles moods, swipes still work). Mock-up: /mnt/project-files/talk-button/.
+
+- **4.8.13 - brain retries** (helper only, on top of 4.8.12; branch `claude/project-thread-9uc4k7`; NOT confirmed yet):
+  user on 4.8.12: Talk heard them, then "Something went wrong in my brain" (= Ollama answered an HTTP error other than
+  401/403/404/429; not caused by the Talk button, which sends the same `talk`). `Brain._post_chat` now tries 3 times
+  (1.5 s apart) on 5xx / 400 / dropped connections, drops `think` after a 400, and logs "AI error <code> (try n, model)".
+  Test: `test_brain.py`. If it still fails, ask for `gorgi-helper.log` lines "AI error".
+
+- **4.8.14 - Ollama usage ran out** (helper only, on top of 4.8.13; branch `claude/project-thread-9uc4k7`; NOT confirmed):
+  the user's log showed `AI error 402 "Add usage credits or subscribe"` from Ollama Cloud (from 2026-11-10 12:56 local;
+  worked on 11-09) = the Ollama account's usage ran out, not a Gorgi bug. 402 is no longer retried and Gorgi now says
+  "My Ollama usage ran out for now..." instead of "Something went wrong in my brain".
+
+- **4.8.15 - free brain: Groq, then Gemini** (helper only, on top of 4.8.14; branch `claude/project-thread-jzmg31`; NOT
+  confirmed). Ollama Cloud has no free plan any more (pay as you go / Pro $20), so the user picked (2026-11-10) Groq
+  first + Gemini as automatic backup. `brain.py`: `Service` (Groq `https://api.groq.com/openai/v1`, Gemini
+  `https://generativelanguage.googleapis.com/v1beta/openai`, both OpenAI-style `/chat/completions` with
+  `reasoning_effort: low`; Ollama `/api/chat` as before). Order Groq -> Gemini -> Ollama, only services with a key.
+  429/402 -> that service rests (Retry-After, else 10 min / 1 h) and the next one answers at once; 401/403 or a 400
+  with "API key" = bad key (named in the spoken error); 404 -> next model (Gemini: 3.5 then 3.1 flash-lite).
+  All used up -> "I've used up my free thinking for now...". Config keys `groq_api_key`, `gemini_api_key`
+  (`groq_api_key` was a Hebrew leftover deleted by 4.8.5; no longer deleted). Settings: 3 key boxes + "Test keys"
+  (lists each service's models, no quota used). Free limits (checked 2026-11-10): Groq gpt-oss-20b 30/min, 1000/day,
+  8K tokens/min, 200K tokens/day (~80-100 questions); Gemini Flash-Lite ~15/min, 500/day (Google no longer
+  publishes the numbers; free-tier chats may be used by Google). If talking fails, ask for `gorgi-helper.log`
+  ("AI limit at", "AI key refused", "no AI could answer", "AI reply (Groq|Gemini...").
+
+- **4.8.16 - YouTube Music step 1** (firmware + helper, on top of 4.8.15; branch `claude/project-thread-oqip3l`;
+  confirmed with 4.8.17: "works great", 2026-11-10; merged to main). Plan doc https://claude.ai/artifact/4JhjcYYHRA7gL5DbCYGhBM, mock-ups /mnt/project-files/youtube-music/.
+  User chose the one-time sign-in. Helper `ytmusic.py` (ytmusicapi 1.12.3, unofficial; `--collect-all ytmusicapi`):
+  Settings "Connect YouTube Music..." = paste a `browse` request copied from F12 (cURL bash/cmd, raw headers or the Headers table: `normalize_headers`; newer Chrome has no "Copy request headers") -> checked with
+  get_liked_songs -> `youtube-music.json` in the settings folder. Liked songs read every 5 min (`ytm_loop`), matched
+  to the playing song by title/artist -> `media` {liked} -> Gorgi's thumbs. `cmd like` (toggle LIKE/INDIFFERENT) /
+  `cmd dislike` (DISLIKE + next). Voice tags `[music: band X]`, `[music: song X by Y]`, `[music: album X by Y]`,
+  `[music: play X]`, `[music: liked]`, `[music: shuffle liked]` (random start in list=LM), `[music: like|dislike]`.
+  Links: song = watch?v=ID&list=RDAMVM<ID>, band = artist shuffleId, album = audioPlaylistId.
+  `youtube_music.play_url`: pauses, opens the link in the app, closes the OLD app window (never a browser window:
+  title has "Google Chrome"/"Microsoft Edge"...), nudges play. Firmware: deck = prev 80 / play 146 / next 212,
+  thumbs 292 / 352 (`Target::Like/Dislike`, `MediaInfo.liked` -1/0/1), volume 440..690. The CI self-test prints
+  search results as `::notice::` annotations. Tests: `test_ytmusic.py`. If it fails, ask for `gorgi-helper.log`
+  ("search", "music:", "rated", "Liked songs", "YouTube Music"). **Step 2 (next)**: Browse view on the Music screen
+  (Playing/Browse switch, search by typing/voice, mood chips that play at once, Liked songs list, results).
+
+## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
 - **4.3.2** (Claude alerts) and **4.3.3** (one update window) are confirmed and merged to main. If "finished"
@@ -255,7 +332,28 @@ Done and confirmed:
   If voice tasks come out wrong, ask for `gorgi-helper.log` (lines "dictation:" / "new task:" / "to-do ...").
 - **Hebrew was dropped** by the user; **4.8.5 (= 4.6.2 + clean-ups) is confirmed** ("Works") and merged to main.
 - **4.8.6 is confirmed** ("Works", 2026-11-10: Hebrew song names on the music screen and bar) and merged to main.
-  Nothing is waiting. Next: ask what to build next (plan first).
+- **4.8.7** (laptop volume follows the current speakers, Play opens YouTube Music) = 4.8.6 + that fix, PR #11 (it
+  includes the 4.8.6 branch). Waiting for the user's test. Lesson: check existing release tags before picking a version.
+- **4.8.8** (Claude alerts leave the face after 8 s, kept in the Action Center) = 4.8.7 + that, branch
+  `claude/project-thread-7124lh`. Waiting for the user's test.
+- **4.8.9** (Play opens YouTube Music on Liked songs and makes sure it plays) = 4.8.8 + that fix, branch
+  `claude/project-thread-jhei65`. Waiting for the user's test.
+
+- **4.8.10** (Claude alerts on/off switch in the Action Center) = 4.8.9 + that, branch `claude/project-thread-ync5e8`.
+  Waiting for the user's test.
+- **4.8.11** (Music screen: always-open bar with buttons + wide volume slider) = 4.8.10 + that, branch
+  `claude/project-thread-fkdcer`. Waiting for the user's test.
+- **4.8.12** (round Talk button left of the face; touching the face no longer talks) = 4.8.11 + that, branch
+  `claude/project-thread-9uc4k7`. Waiting for the user's test.
+- **4.8.13** (helper retries Ollama errors) = 4.8.12 + that, branch `claude/project-thread-9uc4k7`. Waiting for the user's test.
+- **4.8.14** (clear message when Ollama usage runs out, HTTP 402) = 4.8.13 + that. Waiting for the user's test.
+- **4.8.15** (free brain: Groq first, Gemini backup, Ollama last) = 4.8.14 + that, branch
+  `claude/project-thread-jzmg31`. The user has made both keys; user said "it looks great" (2026-11-10).
+- **4.8.16 + 4.8.17 are confirmed** ("works great", 2026-11-10: YouTube Music sign-in via "Copy as cURL (bash)",
+  thumbs, voice) and merged to main together with 4.8.7-4.8.15 (same chain). 4.8.17 = Connect accepts "Copy as cURL"
+  and the Headers table (the user's Chrome has no "Copy request headers"). After 4.8.17: Connect shows YouTube's
+  reason when it refuses (not released yet). Next: user asked for a seek bar (drag the song's progress bar on the
+  Music screen, like volume) - offered, waiting for a go; then step 2 (Browse view).
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).

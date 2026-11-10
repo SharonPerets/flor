@@ -46,6 +46,12 @@ constexpr Rect BAR_AREA{BAR_X, BAR_Y, BAR_W, BAR_H};
 constexpr Rect TEXT_AREA{TEXT_X - 8, BAR_Y + 4, TEXT_W + 16, BAR_H - 8};
 constexpr Rect BUTTON_AREA{PREV_X - 34, BAR_Y + 4, NEXT_X - PREV_X + 68, BAR_H - 8};
 constexpr Rect VOLUME_AREA{560, BAR_Y + 4, 224, BAR_H - 8};
+// The Music screen's own bar ("deck"): bigger buttons and a wide volume slider, always open
+constexpr int DECK_PREV_X = 80, DECK_PLAY_X = 146, DECK_NEXT_X = 212;
+constexpr int DECK_LIKE_X = 292, DECK_DISLIKE_X = 352;  // thumbs up / down (YouTube Music, since 4.9)
+constexpr int DECK_VOL_X0 = 440, DECK_VOL_X1 = 690;
+constexpr Rect DECK_BUTTON_AREA{40, BAR_Y + 4, 352, BAR_H - 8};
+constexpr Rect DECK_VOLUME_AREA{392, BAR_Y + 4, 384, BAR_H - 8};
 
 String clockText = "Gorgi";
 String chipText = "";
@@ -69,7 +75,14 @@ int tabCount = 0, tabCurrent = 0;
 uint32_t tabBadges = 0;
 bool callVisible = false, callShown = false, dirtyCall = false;
 bool noticeDot = false;
+// The round Talk button left of the face (since 4.8.8: tapping the face itself does nothing)
+constexpr float FT_CX = 50, FT_CY = 186, FT_R = 36;
+constexpr Rect FACE_TALK_AREA{0, 128, 100, 136};
+const Color STOP_RED = gfx::rgb(0xE5484D);
+bool faceTalkActive = false;  // a conversation is on: the button says Stop
+bool dirtyFaceTalk = true;
 bool barOpen = false;
+bool deck = false;  // the Music screen: the big bar stays open
 uint32_t barOpenUntil = 0;
 constexpr uint32_t BAR_OPEN_MS = 10000;
 constexpr Rect BOTTOM_AREA{0, 388, 800, 92};  // the music bar or the slim line
@@ -113,6 +126,21 @@ void iconSpeaker(Canvas& c, float cx, float cy, const Color& col, bool loud) {
     c.strokeArc(cx + 3.0f, cy, 6.5f, 2.2f, -48, 48, col);
     c.strokeArc(cx + 3.0f, cy, 11.5f, 2.2f, -48, 48, col);
   }
+}
+
+// Thumbs up (or down: turned around), from a 24x24 icon grid, `size` px tall
+void iconThumb(Canvas& c, float cx, float cy, bool up, const Color& col, float size = 24) {
+  const float k = size / 24;
+  auto P = [&](float x, float y) {
+    if (!up) { x = 24 - x; y = 24 - y; }
+    return Pt{cx + (x - 12) * k, cy + (y - 12) * k};
+  };
+  const Pt cuff[4] = {P(1, 9.5f), P(5, 9.5f), P(5, 21), P(1, 21)};
+  const Pt finger[6] = {P(7, 9.2f), P(13.4f, 2.2f), P(14.9f, 2.4f), P(15.8f, 3.8f), P(14.8f, 9), P(7, 11)};
+  const Pt palm[8] = {P(7, 9.5f), P(14, 8.2f), P(21.2f, 8.2f), P(23, 10), P(23, 12), P(19.9f, 19.9f), P(18, 21), P(7, 21)};
+  c.fillPolygon(cuff, 4, col, 1.0f, 0.8f * k);
+  c.fillPolygon(finger, 6, col, 1.0f, 1.0f * k);
+  c.fillPolygon(palm, 8, col, 1.0f, 1.2f * k);
 }
 
 void iconMic(Canvas& c, float cx, float cy, const Color& col) {
@@ -174,6 +202,26 @@ void drawStatus(Canvas& c) {
   c.fillRRect(x + 1, 9, w - 2, 30, 15, PANEL);
   iconMic(c, x + 21, 24, (statusPulse && !pulseOn) ? BORDER : statusColor);
   c.text(gfont::SMALL, text.c_str(), x + 38, 29, statusColor);
+}
+
+void drawFaceTalk(Canvas& c) {
+  const bool down = pressed == Target::Talk;
+  const char* label = faceTalkActive ? "Stop" : "Talk";
+  if (faceTalkActive) {
+    c.fillCircle(FT_CX, FT_CY, FT_R + 6, STOP_RED, 0.18f);
+    c.fillCircle(FT_CX, FT_CY, FT_R, down ? gfx::rgb(0xF07A7E) : STOP_RED);
+    c.fillRRect(FT_CX - 11, FT_CY - 11, 22, 22, 5, TEXT_TITLE);
+  } else {
+    c.fillCircle(FT_CX, FT_CY, FT_R + 6, ACCENT, 0.18f);
+    c.fillCircle(FT_CX, FT_CY, FT_R, down ? ACCENT_PRESSED : ACCENT);
+    // a big microphone
+    c.fillCapsule(FT_CX, FT_CY - 13, FT_CX, FT_CY - 2, 7.5f, PLAY_ICON);
+    c.strokeArc(FT_CX, FT_CY - 3, 14, 3.2f, 15, 165, PLAY_ICON);
+    c.fillCapsule(FT_CX, FT_CY + 11, FT_CX, FT_CY + 17, 1.8f, PLAY_ICON);
+    c.fillCapsule(FT_CX - 7, FT_CY + 18, FT_CX + 7, FT_CY + 18, 1.8f, PLAY_ICON);
+  }
+  c.text(gfont::SMALL, label, FT_CX - Canvas::textWidth(gfont::SMALL, label) * 0.5f, (int)(FT_CY + FT_R + 28),
+         TEXT_MUTED);
 }
 
 void drawTabs(Canvas& c) {
@@ -314,6 +362,43 @@ void drawBar(Canvas& c) {
   iconSpeaker(c, 760, BAR_CY, TEXT_MUTED, true);
 }
 
+void drawDeck(Canvas& c) {
+  c.fillRRect(BAR_X, BAR_Y, BAR_W, BAR_H, 20, BORDER);
+  c.fillRRect(BAR_X + 1, BAR_Y + 1, BAR_W - 2, BAR_H - 2, 19, PANEL);
+
+  // buttons (a little bigger than in the slim bar)
+  c.fillCircle(DECK_PREV_X, BAR_CY, 28, pressed == Target::Prev ? BTN_PRESSED : BTN);
+  iconPrev(c, DECK_PREV_X, BAR_CY, TEXT);
+  c.fillCircle(DECK_PLAY_X, BAR_CY, 32, pressed == Target::PlayPause ? ACCENT_PRESSED : ACCENT);
+  if (media.playing)
+    iconPause(c, DECK_PLAY_X, BAR_CY, PLAY_ICON);
+  else
+    iconPlay(c, DECK_PLAY_X + 2, BAR_CY, PLAY_ICON);
+  c.fillCircle(DECK_NEXT_X, BAR_CY, 28, pressed == Target::Next ? BTN_PRESSED : BTN);
+  iconNext(c, DECK_NEXT_X, BAR_CY, TEXT);
+
+  // thumbs up (teal when the song is in your Liked songs) and down
+  const bool liked = media.liked == 1;
+  c.fillCircle(DECK_LIKE_X, BAR_CY, 26,
+               pressed == Target::Like ? (liked ? ACCENT_PRESSED : BTN_PRESSED) : (liked ? ACCENT : BTN));
+  iconThumb(c, DECK_LIKE_X, BAR_CY, true, liked ? PLAY_ICON : TEXT);
+  c.fillCircle(DECK_DISLIKE_X, BAR_CY, 26, pressed == Target::Dislike ? BTN_PRESSED : BTN);
+  iconThumb(c, DECK_DISLIKE_X, BAR_CY, false, TEXT);
+
+  // volume: wide slider, big knob, and the number
+  iconSpeaker(c, 418, BAR_CY, TEXT_MUTED, false);
+  const int v = constrain(media.volume, 0, 100);
+  const float kx = DECK_VOL_X0 + (DECK_VOL_X1 - DECK_VOL_X0) * v / 100.0f;
+  c.fillRRect(DECK_VOL_X0, BAR_CY - 5, DECK_VOL_X1 - DECK_VOL_X0, 10, 5, TRACK);
+  if (kx > DECK_VOL_X0) c.fillRRect(DECK_VOL_X0, BAR_CY - 5, kx - DECK_VOL_X0, 10, 5, ACCENT);
+  c.fillCircle(kx, BAR_CY + 1, 16, BG, 0.35f);  // soft shadow
+  c.fillCircle(kx, BAR_CY, 14, TEXT);
+  iconSpeaker(c, 714, BAR_CY, TEXT_MUTED, true);
+  char pct[8];
+  snprintf(pct, sizeof pct, "%d%%", v);
+  c.text(gfont::SMALL, pct, 734, BAR_CY + 7, TEXT_MUTED);
+}
+
 void drawMini(Canvas& c) { tabs::drawMiniPlayer(c, media.title.c_str(), media.artist.c_str(), media.playing); }
 
 void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
@@ -360,12 +445,18 @@ void openMusicBar() {
   dirtyBar = true;
 }
 
-bool musicBarOpen() { return barOpen; }
+bool musicBarOpen() { return barOpen || deck; }
+
+void setMusicDeck(bool on) {
+  if (on == deck) return;
+  deck = on;
+  dirtyBar = true;
+}
 
 void redrawAll() {
   display::render(Rect{0, 0, SCREEN_W, TOP_H}, BG, [](Canvas&) {});
   display::render(Rect{0, subtitleVisible ? SUB_Y + SUB_H : 376, SCREEN_W, SCREEN_H}, BG, [](Canvas&) {});
-  dirtyClock = dirtyStatus = dirtyTabs = dirtySub = dirtyBar = dirtyCall = true;
+  dirtyClock = dirtyStatus = dirtyTabs = dirtySub = dirtyBar = dirtyCall = dirtyFaceTalk = true;
 }
 
 void setCallButton(bool visible) {
@@ -384,7 +475,7 @@ void drawSubtitleNow() {
 void setSubtitleVisible(bool visible) {
   if (visible == subtitleVisible) return;
   subtitleVisible = visible;
-  if (visible) dirtySub = dirtyCall = true;  // when hidden, the other screen draws over it
+  if (visible) dirtySub = dirtyCall = dirtyFaceTalk = true;  // when hidden, the other screen draws over it
 }
 
 void setClock(const String& text) {
@@ -413,6 +504,12 @@ void setBottomHidden(bool hidden) {
   if (hidden == bottomHidden) return;
   bottomHidden = hidden;
   if (!hidden) dirtyBar = true;
+}
+
+void setFaceTalkActive(bool active) {
+  if (active == faceTalkActive) return;
+  faceTalkActive = active;
+  dirtyFaceTalk = true;
 }
 
 void setTalkButton(bool on) {
@@ -448,6 +545,7 @@ void setMedia(const MediaInfo& info) {
   if (title != media.title || artist != media.artist) dirtyText = true;
   if (info.playing != media.playing) dirtyButtons = true;
   if (info.volume != media.volume) dirtyVolume = true;
+  if (info.liked != media.liked) dirtyButtons = true;
   media = info;
   media.title = title;
   media.artist = artist;
@@ -466,17 +564,28 @@ void setVolume(int volume) {
   dirtyVolume = true;
 }
 
+void setLiked(int8_t liked) {
+  if (liked == media.liked) return;
+  media.liked = liked;
+  dirtyButtons = true;
+}
+
 void showPressed(Target t) {
-  if (t != Target::Prev && t != Target::PlayPause && t != Target::Next && t != Target::CallMute) return;
+  if (t != Target::Prev && t != Target::PlayPause && t != Target::Next && t != Target::CallMute &&
+      !(deck && (t == Target::Like || t == Target::Dislike)) &&
+      !(t == Target::Talk && subtitleVisible))
+    return;
   pressed = t;
   pressedUntil = millis() + 180;
   if (t == Target::CallMute) dirtyCall = true;
+  else if (t == Target::Talk) dirtyFaceTalk = true;
   else dirtyButtons = true;
 }
 
 void update(uint32_t now) {
   if (pressed != Target::None && (int32_t)(now - pressedUntil) >= 0) {
     if (pressed == Target::CallMute) dirtyCall = true;
+    else if (pressed == Target::Talk) dirtyFaceTalk = true;
     else dirtyButtons = true;
     pressed = Target::None;
   }
@@ -494,9 +603,17 @@ void update(uint32_t now) {
     callShown = callVisible;
   }
   if (subtitleVisible) dirtyCall = false;
+  if (dirtyFaceTalk && subtitleVisible) { redraw(FACE_TALK_AREA, BG, drawFaceTalk); dirtyFaceTalk = false; }
   if (dirtySub && subtitleVisible) { redraw(SUB_AREA, BG, drawSubtitle); dirtySub = false; }
   if (bottomHidden) {  // the screen draws down there itself
     dirtyText = dirtyButtons = dirtyVolume = false;
+    return;
+  }
+  if (deck) {  // the Music screen's own bar: never folds away
+    if (dirtyBar) redraw(BOTTOM_AREA, BG, drawDeck);
+    if (!dirtyBar && dirtyButtons) redraw(DECK_BUTTON_AREA, BG, drawDeck);
+    if (!dirtyBar && dirtyVolume) redraw(DECK_VOLUME_AREA, BG, drawDeck);
+    dirtyBar = dirtyText = dirtyButtons = dirtyVolume = false;
     return;
   }
   if (barOpen && (int32_t)(now - barOpenUntil) >= 0) {  // fold the bar away again
@@ -523,7 +640,17 @@ Target hitTest(int x, int y) {
     if (y < TOP_H && talkButton && x >= 780 - TALK_W - 8) return Target::Talk;
     return y >= TOP_H ? Target::Face : Target::None;
   }
-  if (!barOpen && y >= tabs::MINI.y - 10) {
+  if (deck && y >= BAR_Y - 8) {
+    auto near = [&](int cx, int r) { return abs(x - cx) <= r && abs(y - BAR_CY) <= r; };
+    if (near(DECK_PREV_X, 34)) return Target::Prev;
+    if (near(DECK_PLAY_X, 34)) return Target::PlayPause;
+    if (near(DECK_NEXT_X, 34)) return Target::Next;
+    if (near(DECK_LIKE_X, 30)) return Target::Like;
+    if (near(DECK_DISLIKE_X, 30)) return Target::Dislike;
+    if (x >= DECK_VOL_X0 - 40 && x <= DECK_VOL_X1 + 30) return Target::Volume;
+    return Target::None;
+  }
+  if (!deck && !barOpen && y >= tabs::MINI.y - 10) {
     const Rect& m = tabs::MINI;
     return x >= m.x - 10 && x < m.right() + 10 ? Target::Mini : Target::None;
   }
@@ -539,11 +666,16 @@ Target hitTest(int x, int y) {
   if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
   if (y < TOP_H && talkButton && statusText.length() == 0 && x >= 780 - TALK_W - 8) return Target::Talk;
   if (callVisible && subtitleVisible && tabs::onCallButton(x, y)) return Target::CallMute;
+  if (subtitleVisible) {  // the round Talk button left of the face (a generous touch area)
+    const float dx = x - FT_CX, dy = y - FT_CY;
+    if (dx * dx + dy * dy <= (FT_R + 16) * (FT_R + 16)) return Target::Talk;
+  }
   if (y >= TOP_H && y < SUB_Y + SUB_H) return Target::Face;
   return Target::None;
 }
 
 int volumeFromX(int x) {
+  if (deck) return constrain((x - DECK_VOL_X0) * 100 / (DECK_VOL_X1 - DECK_VOL_X0), 0, 100);
   return constrain((x - VOL_X0) * 100 / (VOL_X1 - VOL_X0), 0, 100);
 }
 

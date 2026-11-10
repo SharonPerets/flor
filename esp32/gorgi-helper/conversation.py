@@ -16,11 +16,15 @@ FIRST_WAIT_SECONDS = 7.0  # how long to wait for you to start talking after a ta
 
 class Conversation:
     def __init__(self, send, media, brain, recorder, transcriber, speaker, followup_seconds=5.0, timekeeper=None,
-                 extra_context=None, todos=None):
+                 extra_context=None, todos=None, music=None):
         self.send = send  # async fn(dict): message to Gorgi
         self.media = media
         self.timekeeper = timekeeper  # timers and reminders (see timekeeper.py)
         self.todos = todos  # the to-do list (see todolist.py)
+        self.music = music  # your YouTube Music account (see ytmusic.py), or None
+        self._info = {}  # the song when the chat started
+        self._play_link = None  # a YouTube Music link to play once Gorgi has spoken
+        self._skip_after = False  # skip to the next song once Gorgi has spoken (after a dislike)
         self.extra_context = extra_context  # fn() -> more lines for the AI (Claude Code, calls)
         self.brain = brain
         self.recorder = recorder
@@ -95,6 +99,7 @@ class Conversation:
         info = {"title": "", "artist": "", "playing": False}
         try:
             info = await self.media.get_info()
+            self._info = info
             if info["playing"]:
                 await self.media.set_playing(False)
                 paused_music = True
@@ -152,8 +157,17 @@ class Conversation:
                 await self.send({"type": "voice", "state": "idle"})
             except Exception:
                 pass
-            if paused_music and resume_music:
+            if self._play_link and hasattr(self.media, "play_link"):
+                await self.media.play_link(self._play_link)
+            elif paused_music and resume_music:
                 await self.media.set_playing(True)
+            elif getattr(self, "_start_music", False) and hasattr(self.media, "start_music"):
+                await self.media.start_music()
+            if self._skip_after and not self._play_link:
+                await self.media.command("next")
+            self._start_music = False
+            self._play_link = None
+            self._skip_after = False
 
     async def _say(self, mood, text):
         """Speaks. The text goes to Gorgi when the sound starts, with the time of each word,
@@ -201,10 +215,16 @@ class Conversation:
                 for message in messages:
                     await self.send(message)
                 problem = problem or trouble
+            elif action == "music":
+                trouble, starts = await self._music(value)
+                problem = problem or trouble
+                if starts:
+                    keep_talking = False  # music on: stop listening so the mic doesn't hear it
             elif action == "pause":
                 resume_music = False  # you want quiet: don't restart it afterwards
             elif action == "play":
                 resume_music = True
+                self._start_music = True  # nothing was playing: start it after Gorgi speaks
                 keep_talking = False  # music on: stop listening so the mic doesn't hear it
             elif action in ("next", "prev"):
                 await self.media.command(action)
@@ -217,11 +237,58 @@ class Conversation:
                 self.media.set_volume(current + (15 if action == "volume_up" else -15))
         return keep_talking, resume_music, problem
 
+    async def _music(self, value):
+        """A [music: ...] tag. Returns (problem or None, True when music will start)."""
+        words = " ".join(str(value or "").split())
+        low = words.lower().rstrip(".!")
+        if self.music is None:
+            return "YouTube Music isn't set up on the PC.", False
+        if low in ("like", "love", "like it", "like this", "thumbs up"):
+            return await self._rate("LIKE"), False
+        if low in ("dislike", "hate", "dislike it", "dislike this", "thumbs down"):
+            problem = await self._rate("DISLIKE")
+            if not problem:
+                self._skip_after = True
+            return problem, not problem
+        if "liked" in low and not low.startswith("play ") or low in ("play liked", "play liked songs",
+                                                                     "play my liked songs"):
+            self._play_link = self.music.liked_url(shuffle="shuffle" in low or "random" in low)
+            log.info("music: your Liked songs (%s)", self._play_link)
+            return None, True
+        kind = None
+        for word in ("play", "band", "artist", "song", "album"):
+            if low.startswith(word + " "):
+                kind = {"play": None, "artist": "band"}.get(word, word)
+                words = words[len(word) + 1:].strip()
+                break
+        query = words
+        if not query:
+            return None, False
+        try:
+            url, name = await asyncio.to_thread(self.music.url_for, query, kind)
+        except Exception as e:
+            log.warning("YouTube Music search for %r failed: %s", query, e)
+            return "I couldn't reach YouTube Music just now. Try again in a moment?", False
+        if not url:
+            return f"Hmm, I couldn't find {query} on YouTube Music.", False
+        log.info("music: %s -> %s", name, url)
+        self._play_link = url
+        return None, True
+
+    async def _rate(self, rating):
+        title, artist = self._info.get("title"), self._info.get("artist")
+        if not title:
+            return "Nothing is playing right now, so there's nothing to rate."
+        return await asyncio.to_thread(self.music.rate, title, artist, rating)
+
     def _context(self, info, paused_music):
         lines = [f"Right now it is {time.strftime('%A %d %B %Y, %H:%M')}."]
         if info.get("title"):
             state = "playing (paused while you talk)" if paused_music else "paused"
             lines.append(f"Music on the PC: \"{info['title']}\" by {info.get('artist') or 'unknown artist'}, {state}.")
+            liked = self.music.is_liked(info["title"], info.get("artist")) if self.music else None
+            if liked is not None:
+                lines.append("It is in your friend's Liked songs." if liked else "It is not in their Liked songs.")
         else:
             lines.append("No music is playing on the PC.")
         volume = self.media.get_volume()

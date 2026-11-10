@@ -55,7 +55,7 @@ Then install **Gorgi Helper** on your PC: see `esp32/gorgi-helper/README.md`.
 
 ## What you can do
 
-- **Tap the face**: talk to Gorgi through the PC mic (needs Gorgi Helper). Tap again to stop.
+- **Tap the round Talk button** (left of the face): talk to Gorgi through the PC mic (needs Gorgi Helper). Tap it again (Stop) to stop. Touching the face itself does nothing.
 - **Hold the face for 1 second**: shows the next expression. Keep doing it to see all 12.
 - **Media buttons and volume**: control music and volume on your PC (needs Gorgi Helper).
 - **Change screens**: tap an icon in the top bar (music, face, time, to-do, Claude), or swipe sideways in the

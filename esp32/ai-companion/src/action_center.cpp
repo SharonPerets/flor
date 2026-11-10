@@ -34,6 +34,8 @@ constexpr float WX_X = 456, WX_Y = 34, WX_W = 140, WX_H = 56;  // the weather ch
 constexpr float CARD_Y = 124, CARD_H = 292;
 constexpr float N_X = PAD, N_W = 800 - 2 * PAD;  // notifications: the whole width
 constexpr float ROW_Y = CARD_Y + 58, ROW_H = 66, ROW_GAP = 10;
+constexpr float SW_W = 48, SW_H = 26;  // the "Claude alerts" switch, top right of the card
+constexpr float SW_X = N_X + N_W - 24 - SW_W, SW_Y = CARD_Y + 21;
 constexpr float BACK_X = 24, BACK_Y = 6, BACK_W = 108, BACK_H = 34;
 
 void card(Canvas& c, float x, float y, float w, float h) {
@@ -155,10 +157,20 @@ void weatherPage(Canvas& c, const View& v) {
   weather::draw(c, v.wx ? *v.wx : none, v.city, v.cityPicker, v.wxStatus);
 }
 
+// "Claude alerts" and an on/off switch: off = no pop-ups, no voice
+void claudeSwitch(Canvas& c, bool on) {
+  const char* t = on ? "Claude alerts" : "Claude alerts muted";
+  c.text(gfont::SMALL, t, SW_X - 12 - Canvas::textWidth(gfont::SMALL, t), (int)CARD_Y + 34, on ? TEXT : MUTED);
+  c.fillRRect(SW_X, SW_Y, SW_W, SW_H, SW_H / 2, on ? ACCENT : CARD_EDGE);
+  const float r = SW_H / 2 - 3;
+  c.fillCircle(on ? SW_X + SW_W - SW_H / 2 : SW_X + SW_H / 2, SW_Y + SW_H / 2, r, on ? DARK_TEXT : MUTED);
+}
+
 void noticesCard(Canvas& c, const View& v) {
   card(c, N_X, CARD_Y, N_W, CARD_H);
   const float x = N_X + 24;
   c.text(gfont::SMALL, "NOTIFICATIONS", x, (int)CARD_Y + 34, MUTED);
+  claudeSwitch(c, !v.claudeMuted);
   if (v.noticeCount == 0) {
     const float mx = N_X + N_W / 2;
     bellIcon(c, mx, CARD_Y + 120, FAINT);
@@ -238,6 +250,7 @@ TapResult tap(int x, int y, const View& v) {
   }
   if (inside(x, y, SLEEP_X - 8, SLEEP_Y - 8, SLEEP_W + 16, SLEEP_H + 16)) return TapResult(Tap::Sleep);
   if (inside(x, y, WX_X - 8, WX_Y - 8, WX_W + 12, WX_H + 16)) return TapResult(Tap::Weather);
+  if (inside(x, y, SW_X - 230, CARD_Y, SW_W + 254, ROW_Y - CARD_Y - 2)) return TapResult(Tap::MuteClaude);
   for (int i = 0; i < v.noticeCount && i < 3; ++i) {
     const Notice& n = v.notices[i];
     const float ry = ROW_Y + i * (ROW_H + ROW_GAP), rx = N_X + 14, rw = N_W - 28;

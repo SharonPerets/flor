@@ -41,9 +41,10 @@ from timekeeper import TimeKeeper  # noqa: E402
 from todolist import TodoKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
+import ytmusic  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
-VERSION = "4.8.6"  # must match esp32/VERSION
+VERSION = "4.8.17"  # must match esp32/VERSION
 PORT = 81
 SERVICE_TYPE = "_gorgi._tcp.local."
 SERVICE_NAME = "gorgi._gorgi._tcp.local."
@@ -65,9 +66,11 @@ def data_dir():
 
 DEFAULT_CONFIG = {
     "gorgi_address": "",          # leave empty to find Gorgi automatically
-    "ollama_api_key": "",
+    "groq_api_key": "",           # Gorgi asks Groq first (free)
+    "gemini_api_key": "",         # then Gemini (free), when Groq's limit runs out
+    "ollama_api_key": "",         # then Ollama, if set up
     "ollama_url": "",             # empty = Ollama Cloud; or e.g. http://localhost:11434
-    "model": "gpt-oss:20b",
+    "model": "gpt-oss:20b",       # Ollama's model
     "voice": "en-US-AnaNeural",
     "whisper_model": "base.en",   # "small.en" understands better but is slower
 }
@@ -94,7 +97,7 @@ def load_config():
 
 
 HEBREW_LEFTOVERS = ("language", "voice_he", "whisper_model_he", "hearing_he", "hearing",
-                    "groq_api_key", "openai_api_key")
+                    "openai_api_key")  # (groq_api_key is used again since 4.8.15: Gorgi's brain)
 
 
 def save_config(config):
@@ -216,8 +219,9 @@ def make_update_window(on_word):
 
 class Helper:
     def __init__(self, media, config, on_status=None, make_conversation=None, timekeeper=None, speak=None,
-                 todos=None):
+                 todos=None, ytm=None):
         self.media = media
+        self.ytm = ytm  # your YouTube Music account (Liked songs, like / dislike), or None
         self.config = config
         self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
         self.todos = todos or TodoKeeper()  # Gorgi's to-do list, for the AI
@@ -226,6 +230,7 @@ class Helper:
         # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
         self.claude = ClaudeWatch(on_change=self._claude_changed, on_alert=self._claude_alert)
         self.on_call = False
+        self.claude_muted = False  # muted on Gorgi (Action Center switch): no Claude pop-ups or voice
         self._paused_for_call = False
         self.on_status = on_status or (lambda text, connected: None)
         # make_conversation(send) -> Conversation, or None when voice isn't available
@@ -677,6 +682,10 @@ class Helper:
                 self.offer_updates()
                 self._push()
                 continue
+            if msg.get("type") == "claude_mute":
+                self.claude_muted = bool(msg.get("on"))
+                log.info("Claude alerts %s on Gorgi", "muted" if self.claude_muted else "on")
+                continue
             if msg.get("type") == "weather":
                 weather.update(msg)
                 log.info("weather for %s from Gorgi", msg.get("city"))
@@ -717,6 +726,9 @@ class Helper:
             if action == "check_updates":
                 asyncio.get_running_loop().create_task(self.check_updates_soon())
                 continue
+            if action in ("like", "dislike"):
+                asyncio.get_running_loop().create_task(self.rate_current(action))
+                continue
             if action in ("playpause", "next", "prev"):
                 await self.media.command(action)
             elif action == "volume" and isinstance(msg.get("value"), (int, float)):
@@ -724,6 +736,48 @@ class Helper:
                 self.ignore_volume_until = time.monotonic() + 0.5
             # Report the new state soon, once the media app has reacted
             asyncio.get_running_loop().call_later(0.4, self.refresh_event.set)
+
+    # ------------------------------------------------------------ YouTube Music
+
+    async def rate_current(self, action):
+        """Gorgi's thumbs: "like" likes the song playing now (or un-likes it), "dislike" dislikes it and skips."""
+        try:
+            info = await self.media.get_info()
+            if not info["title"]:
+                return
+            if self.ytm is None or not self.ytm.connected():
+                self.on_notify("Gorgi", "To like songs from Gorgi, connect YouTube Music in Gorgi Helper's settings.")
+                return
+            if action == "like":
+                rating = "INDIFFERENT" if self.ytm.is_liked(info["title"], info["artist"]) else "LIKE"
+            else:
+                rating = "DISLIKE"
+            problem = await asyncio.to_thread(self.ytm.rate, info["title"], info["artist"], rating)
+            if problem:
+                self.on_notify("Gorgi", problem)
+            elif action == "dislike":
+                await self.media.command("next")
+        except Exception as e:
+            log.warning("like / dislike failed: %s", e)
+        finally:
+            self.refresh_event.set()  # Gorgi gets the real thumbs-up state
+
+    async def ytm_loop(self):
+        """Keeps your Liked songs list fresh (for the thumbs-up on Gorgi)."""
+        if self.ytm is None:
+            return
+        while not self.stop_event.is_set():
+            if self.ytm.connected():
+                try:
+                    if not self.ytm.liked_at:
+                        log.info("YouTube Music connected: reading your Liked songs")
+                    await asyncio.to_thread(self.ytm.refresh_liked)
+                    self.refresh_event.set()
+                except Exception as e:
+                    log.warning("Liked songs: %s", e)
+            elif self.ytm.liked_at:
+                self.ytm.liked, self.ytm.liked_at = [], 0.0  # disconnected in Settings
+            await self._sleep(20)
 
     # ------------------------------------------------------------ Claude Code and calls
 
@@ -734,10 +788,12 @@ class Helper:
         asyncio.get_running_loop().create_task(self.send(self.claude_message()))
 
     def _claude_alert(self, kind, name, text):
-        log.info("claude alert (%s): %s", kind, text)
+        log.info("claude alert (%s)%s: %s", kind, " (muted)" if self.claude_muted else "", text)
         loop = asyncio.get_running_loop()
+        # Gorgi keeps it as a quiet notification when muted
         loop.create_task(self.send({"type": "claude_alert", "kind": kind, "name": name, "text": text}))
-        loop.create_task(self.announce(text))
+        if not self.claude_muted:  # muted: no pop-up or voice on the PC
+            loop.create_task(self.announce(text))
 
     async def call_loop(self):
         """Every 2 s: is Teams using the microphone?"""
@@ -855,6 +911,9 @@ class Helper:
                 "volume": 50 if volume is None else volume,
                 "art": art_id,
             }
+            liked = self.ytm.is_liked(info["title"], info["artist"]) if self.ytm else None
+            if liked is not None:
+                media["liked"] = liked  # the thumbs-up on Gorgi's Music screen
             pos, dur = info.get("pos"), info.get("dur")
             # The position moves all the time; Gorgi counts along by itself. It's
             # only sent again when it jumps (you skipped ahead) or with other news.
@@ -1016,7 +1075,9 @@ def show_settings(config):
     def wait_and_reload(process):
         process.wait()
         config.update(load_config())  # the brain and voice read this same dict
-        log.info("settings reloaded (model: %s, voice: %s)", config.get("model"), config.get("voice"))
+        keys = [n for n, k in (("Groq", "groq_api_key"), ("Gemini", "gemini_api_key"), ("Ollama", "ollama_api_key"))
+                if config.get(k)]
+        log.info("settings reloaded (AI keys: %s, voice: %s)", ", ".join(keys) or "none", config.get("voice"))
 
     threading.Thread(target=wait_and_reload, args=(_settings_process,), daemon=True).start()
 
@@ -1028,10 +1089,19 @@ def run_settings_window():
 
     config = load_config()
 
-    async def list_models(key):
-        return await Brain({**config, "ollama_api_key": key}).list_models()
+    def check_keys(keys):
+        brain = Brain({**config, **keys})
 
-    show_window(config, save_config, list_models)
+        async def check_all():
+            return [(s.name, *(await brain.check(s))) for s in brain.services()]
+
+        return asyncio.run(check_all())
+
+    folder = data_dir()
+    show_window(config, save_config, check_keys,
+                youtube=(lambda: (folder / ytmusic.AUTH_FILE).exists(),
+                         lambda headers: ytmusic.connect(folder, headers),
+                         lambda: ytmusic.disconnect(folder)))
 
 
 # ---------------------------------------------------------------- voice
@@ -1059,9 +1129,9 @@ def make_voice(config):
         voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
         return Speaker(voice, pitch="+5Hz")
 
-    def factory(send, media, timekeeper, extra_context=None, todos=None):
+    def factory(send, media, timekeeper, extra_context=None, todos=None, music=None):
         return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper,
-                            extra_context=extra_context, todos=todos)
+                            extra_context=extra_context, todos=todos, music=music)
 
     async def speak(text):
         await speaker().say(text)
@@ -1100,6 +1170,12 @@ def self_test(out_path):
         info = asyncio.run(media.get_info())
         lines.append(f"media info: {info}")
         lines.append(f"volume: {media.get_volume()}")
+        if sys.platform == "win32":
+            import youtube_music
+
+            app = youtube_music.find_shortcut()
+            lines.append(f"youtube music: window {youtube_music.find_window()}, app {app}"
+                         f" {youtube_music.read_shortcut(app) if app else ''}")
         from icon import make_image
 
         make_image(64)
@@ -1150,6 +1226,15 @@ def self_test(out_path):
         task = todolist.parse_spoken("buy milk tomorrow")
         assert task["text"] == "Buy milk" and task["due"], task
         lines.append(f"to-do from speech: {task}")
+        # YouTube Music search (no sign-in): what "play ..." would open. ::notice:: lines show up on GitHub.
+        acc = ytmusic.Account(Path(out_path).resolve().parent)
+        for kind, query in (("band", "Muse"), ("song", "Hysteria by Muse"), ("album", "Absolution by Muse"),
+                            (None, "Bohemian Rhapsody"), (None, "Pink Floyd"), (None, "chill jazz")):
+            try:
+                url, name = acc.url_for(query, kind)
+                lines.append(f"::notice::youtube music: {kind} {query!r} -> {name!r} {url}")
+            except Exception as e:
+                lines.append(f"::warning::youtube music search {query!r} failed: {e!r}")
         from voice import word_timings
 
         assert word_timings("Hi there", [(0.1, "Hi"), (0.4, "there")], 1.0) == [[100, 1], [400, 2]]
@@ -1187,14 +1272,17 @@ def self_test(out_path):
         lines.append(f"whisper heard: {heard!r}")
         if "next song" not in heard.lower():
             raise RuntimeError("whisper did not understand the test sentence")
-        # Talk to Ollama Cloud with a fake key: must come back as "key doesn't work"
+        # Talk to each AI service with a fake key: must come back as "key doesn't work"
         from brain import Brain, BrainError
 
-        try:
-            asyncio.run(Brain({"ollama_api_key": "selftest-fake-key"}).ask("hello", "selftest"))
-            lines.append("ollama: unexpected success")
-        except BrainError as e:
-            lines.append(f"ollama: reached, answered as expected ({e.spoken})")
+        for name in ("groq", "gemini", "ollama"):
+            try:
+                asyncio.run(Brain({f"{name}_api_key": "selftest-fake-key"}).ask("hello", "selftest"))
+                lines.append(f"{name}: unexpected success")
+            except BrainError as e:
+                lines.append(f"{name}: reached, answered: {e.spoken}")
+                if "key" not in e.spoken:
+                    raise RuntimeError(f"{name} did not say the key is wrong")
 
         import sounddevice
 
@@ -1262,6 +1350,7 @@ def main():
     voice_factory, speak = make_voice(config)
     timekeeper = TimeKeeper()
     todos = TodoKeeper()
+    ytm = ytmusic.Account(data_dir())
     helper = None
 
     def extra_context():
@@ -1270,15 +1359,15 @@ def main():
             lines.append("Your friend is on a Teams call right now.")
         return "\n".join(x for x in lines if x)
 
-    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context, todos))
+    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context, todos, ytm))
                          if voice_factory else None)
     helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak,
-                    todos=todos)
+                    todos=todos, ytm=ytm)
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)
-        if not config.get("ollama_api_key") and not config.get("ollama_url"):
-            show_settings(config)  # first run: ask for the Ollama key
+        if not any(config.get(k) for k in ("groq_api_key", "gemini_api_key", "ollama_api_key", "ollama_url")):
+            show_settings(config)  # first run: ask for the AI keys
     log.info("%s started", APP_NAME)
     try:
         if claude_setup.upgrade():  # connected by an older helper: add the new hooks
@@ -1289,7 +1378,7 @@ def main():
         usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),
                                                helper.claude.serve(helper.stop_event), helper.call_loop(),
-                                               usage.run(helper.stop_event)))
+                                               usage.run(helper.stop_event), helper.ytm_loop()))
     except KeyboardInterrupt:
         pass
     finally:
