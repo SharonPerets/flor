@@ -1,28 +1,26 @@
-"""Opens YouTube Music and starts it, for Play when no music app is open.
+"""Opens YouTube Music and starts it, for Play when no music app is playing.
 
-- If a YouTube Music window is already there (the installed app, or a browser
-  tab that's showing), that one is used.
-- Otherwise the installed YouTube Music app is started (its Start menu
-  shortcut, from Chrome or Edge), or music.youtube.com in the default browser.
-- YouTube Music doesn't start playing by itself when it opens, so once the
-  page has loaded its window is brought to the front and Space (YouTube Music's
-  play key) is pressed.
+- YouTube Music has no song loaded when it opens fresh, so pressing play does
+  nothing. So it is opened straight on a "play this" link: your Liked songs.
+- The installed YouTube Music app (a Chrome or Edge app with a Start menu
+  shortcut) is opened on that link; without the app, the default browser is.
+- Once a song is loaded it is started through Windows' media controls (no key
+  presses into whatever window happens to be in front).
 """
 
 import asyncio
-import ctypes
 import glob
 import logging
 import os
+import subprocess
 import time
 
 log = logging.getLogger("gorgi.music")
 
-URL = "https://music.youtube.com/"
 TITLE = "YouTube Music"
-VK_SPACE = 0x20
-KEYEVENTF_KEYUP = 0x2
-SW_RESTORE = 9
+PLAY_URL = "https://music.youtube.com/watch?list=LM"  # your Liked songs
+CREATE_NO_WINDOW = 0x08000000
+APP_URL_SWITCH = "--app-launch-url-for-shortcuts-menu-item="  # Chrome/Edge: open the app on this link
 
 
 def find_shortcut():
@@ -36,8 +34,26 @@ def find_shortcut():
     return None
 
 
+def read_shortcut(path):
+    """(program, arguments) of a Windows shortcut, or (None, None)."""
+    script = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:GORGI_LNK); "
+              "Write-Output $s.TargetPath; Write-Output $s.Arguments")
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=10, creationflags=CREATE_NO_WINDOW,
+            env=dict(os.environ, GORGI_LNK=path)).stdout.splitlines()
+        if out and out[0].strip():
+            return out[0].strip(), (out[1].strip() if len(out) > 1 else "")
+    except Exception as e:
+        log.info("couldn't read the YouTube Music shortcut: %s", e)
+    return None, None
+
+
 def find_window():
-    """A visible window with "YouTube Music" in its title, or None."""
+    """A visible window with "YouTube Music" in its title, or None (used by the self-test)."""
+    import ctypes
+
     user32 = ctypes.windll.user32
     found = []
 
@@ -57,29 +73,19 @@ def find_window():
     return found[0] if found else None
 
 
-def press_space(hwnd):
-    """Brings the window to the front and presses Space in it."""
-    user32 = ctypes.windll.user32
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-    # Windows only lets the app that has the keyboard move focus: a tap of Alt
-    # first makes SetForegroundWindow work from the background.
-    user32.keybd_event(0x12, 0, 0, 0)
-    user32.keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0)
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.3)
-    user32.keybd_event(VK_SPACE, 0, 0, 0)
-    user32.keybd_event(VK_SPACE, 0, KEYEVENTF_KEYUP, 0)
-
-
-def launch():
+def launch(url=PLAY_URL):
+    """Opens YouTube Music on url: in the installed app if there is one, else in the browser."""
     shortcut = find_shortcut()
     if shortcut:
-        log.info("opening the YouTube Music app: %s", shortcut)
-        os.startfile(shortcut)
-    else:
-        log.info("no YouTube Music app found: opening %s in the browser", URL)
-        os.startfile(URL)
+        program, args = read_shortcut(shortcut)
+        if program and "--app-id=" in (args or ""):
+            log.info("opening the YouTube Music app on %s", url)
+            subprocess.Popen(f'"{program}" {args} {APP_URL_SWITCH}{url}', creationflags=CREATE_NO_WINDOW)
+            return
+        log.info("YouTube Music shortcut %s isn't a browser app (%s %s): using the browser", shortcut,
+                 program, args)
+    log.info("opening %s in the browser", url)
+    os.startfile(url)
 
 
 async def _playing(media):
@@ -87,42 +93,30 @@ async def _playing(media):
     return bool(info.get("playing"))
 
 
-async def open_and_play(media, load_wait=5.0, timeout=30.0):
-    """media: WindowsMedia (get_info, _session). Never raises."""
+async def open_and_play(media, url=PLAY_URL, timeout=40.0, play_after=5.0):
+    """media: WindowsMedia (get_info, _session). Opens YouTube Music on url and makes
+    sure it plays. Never raises."""
     try:
-        hwnd = await asyncio.to_thread(find_window)
-        if hwnd is None:
-            await asyncio.to_thread(launch)
-        else:
-            log.info("YouTube Music is open but not playing")
-        # Wait for its window, then a few seconds for the page to load
+        await asyncio.to_thread(launch, url)
         start = time.monotonic()
-        while hwnd is None and time.monotonic() - start < timeout:
-            await asyncio.sleep(1)
-            hwnd = await asyncio.to_thread(find_window)
-        if hwnd is None:
-            log.warning("YouTube Music didn't open within %d s", timeout)
-            return
-        for _ in range(int(load_wait)):
+        loaded_at = None  # when a song first showed up in Windows' media controls
+        nudged = 0
+        while time.monotonic() - start < timeout:
             await asyncio.sleep(1)
             if await _playing(media):
-                return
-        # The page has a media session already (it played before): just play it
-        session = await media._session()
-        if session is not None:
-            try:
-                if await session.try_play_async():
-                    log.info("YouTube Music: playing")
-                    return
-            except Exception as e:
-                log.debug("play failed: %s", e)
-        log.info("YouTube Music: pressing Space to play")
-        await asyncio.to_thread(press_space, hwnd)
-        for _ in range(5):
-            await asyncio.sleep(1)
-            if await _playing(media):
-                log.info("YouTube Music: playing")
-                return
-        log.info("YouTube Music opened, but it didn't start playing")
+                log.info("YouTube Music: playing after %.0f s", time.monotonic() - start)
+                return True
+            if await media._session() is None:
+                continue
+            now = time.monotonic()
+            if loaded_at is None:
+                loaded_at = now
+            # The browser may block playing by itself: give it a few seconds, then press play
+            if now - loaded_at >= play_after * (nudged + 1) and nudged < 3:
+                nudged += 1
+                log.info("YouTube Music: loaded but not playing, pressing play (%d)", nudged)
+                await media.play_session()
+        log.warning("YouTube Music didn't start playing within %d s", timeout)
     except Exception as e:
         log.warning("couldn't open YouTube Music: %s", e)
+    return False

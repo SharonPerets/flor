@@ -1103,7 +1103,9 @@ def self_test(out_path):
         if sys.platform == "win32":
             import youtube_music
 
-            lines.append(f"youtube music: window {youtube_music.find_window()}, app {youtube_music.find_shortcut()}")
+            app = youtube_music.find_shortcut()
+            lines.append(f"youtube music: window {youtube_music.find_window()}, app {app}"
+                         f" {youtube_music.read_shortcut(app) if app else ''}")
         from icon import make_image
 
         make_image(64)
