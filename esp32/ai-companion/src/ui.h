@@ -78,8 +78,8 @@ Target hitTest(int x, int y);
 int volumeFromX(int x);
 
 // Converts UTF-8 text (curly quotes, dashes, emoji...) into plain ASCII
-// that the fonts can show.
-String toAscii(const String& utf8);
+// that the fonts can show. keepHebrew keeps Hebrew letters (only for song names).
+String toAscii(const String& utf8, bool keepHebrew = false);
 
 // Screen background
 constexpr gfx::Color BACKGROUND = gfx::rgb(0x05070A);

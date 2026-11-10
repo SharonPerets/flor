@@ -90,6 +90,8 @@ class Canvas {
 
   // Text. x is the left edge, baseline the y of the line the letters sit on.
   void text(const gfont::Font& f, const char* s, float x, int baseline, const Color& c, float alpha = 1.0f);
+  // Like text(), in a box from x to x + w: Hebrew lines sit at the right edge, others at the left.
+  void textIn(const gfont::Font& f, const char* s, float x, float w, int baseline, const Color& c, float alpha = 1.0f);
   static float textWidth(const gfont::Font& f, const char* s);
 
   // Generic shape: sdf(x, y) must return the distance from the pixel centre (x, y)
@@ -120,7 +122,7 @@ class Canvas {
 
  private:
   void fillSpan(uint16_t* rowp, int x0, int x1, const Color& c, uint32_t a8);
-  void blitGlyph(const gfont::Font& f, const gfont::Glyph& g, int x, int y, const Color& c, float alpha);
+  void blitGlyph(const uint8_t* alphaBase, const gfont::Glyph& g, int x, int y, const Color& c, float alpha);
 
   uint16_t* buf_ = nullptr;
   int w_ = 0, h_ = 0, ox_ = 0, oy_ = 0;
