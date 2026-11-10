@@ -127,6 +127,7 @@ uint32_t alertStart = 0, alertNudge = 0, alertMoodBack = 0;
 Mood alertMood = Mood::Happy;
 constexpr uint32_t ALERT_NUDGE_MS = 30 * 1000;
 constexpr uint32_t ALERT_GIVE_UP_MS = 10 * 60 * 1000;
+constexpr uint32_t CLAUDE_ALERT_MS = 8 * 1000;  // Claude alerts go away by themselves (into the Action Center)
 
 ui::MediaInfo media;
 String pcName;
@@ -658,7 +659,8 @@ void endAlert(bool tapped) {
 }
 
 void updateAlert(uint32_t now) {
-  if (msSince(now, alertStart) > ALERT_GIVE_UP_MS) {  // nobody tapped it: keep it as a notification
+  // nobody tapped it: keep it as a notification
+  if (msSince(now, alertStart) > (alertClaude ? CLAUDE_ALERT_MS : ALERT_GIVE_UP_MS)) {
     const String text = alertText, title = alertTitle;
     const uint8_t kind = alertNotice;
     endAlert(false);
