@@ -24,9 +24,10 @@ REFRESH_SECONDS = 5 * 60   # the Liked songs list is read again this often
 WATCH = "https://music.youtube.com/watch?"
 
 PROMPT = """You can also play music from YouTube Music on your friend's PC. Put a tag at the END of your reply:
-[music: play Muse]  plays a band or singer (their songs)
-[music: play Bohemian Rhapsody by Queen]  plays a song (write the song and, if known, the artist)
-[music: play Absolution by Muse]  plays an album
+[music: band Muse]  plays a band or singer (their songs)
+[music: song Bohemian Rhapsody by Queen]  plays a song (the song and, if you know it, "by" the artist)
+[music: album Absolution by Muse]  plays an album
+[music: play chill jazz]  when it's not clear (a mood, a style, anything else)
 [music: liked]  plays your friend's Liked songs; [music: shuffle liked] plays them from a random song
 [music: like]  likes the song that is playing now; [music: dislike] dislikes it (and skips it)
 Use these when your friend asks to play, put on or listen to something, or says they love or hate this song.
@@ -93,6 +94,38 @@ def song_url(video_id):
 
 def playlist_url(playlist_id, video_id=None):
     return f"{WATCH}v={video_id}&list={playlist_id}" if video_id else f"{WATCH}list={playlist_id}"
+
+
+EXTRA_WORDS = ("live", "remix", "acoustic", "version", "karaoke", "instrumental", "cover", "edit", "mix",
+               "anniversary", "deluxe", "remaster", "demo", "sped up", "slowed")
+
+
+def split_by(query):
+    """'Hysteria by Muse' -> ('Hysteria', 'Muse'); 'Muse' -> ('Muse', '')"""
+    m = re.match(r"^(.*\S)\s+by\s+(\S.*)$", (query or "").strip(), re.IGNORECASE)
+    return (m.group(1), m.group(2)) if m else ((query or "").strip(), "")
+
+
+def best(results, title, by):
+    """The result that fits best: same title, the right artist, not a live / remix version you didn't ask for."""
+    t, wanted = _plain(title), _artist_words(by)
+    asked = (title + " " + by).lower()
+
+    def score(r):
+        name = r.get("title") or ""
+        names = _names(r) or ({_plain(r.get("artist"))} if r.get("artist") else set())
+        s = 0
+        if _plain(name) == t:
+            s += 4
+        elif t and t in _plain(name):
+            s += 1
+        if wanted and (wanted & names or any(w in n or n in w for w in wanted for n in names)):
+            s += 3
+        if any(w in name.lower() and w not in asked for w in EXTRA_WORDS):
+            s -= 2
+        return s
+
+    return max(results, key=score) if results else None  # max keeps the first of equal ones
 
 
 def choose(results, query):
@@ -214,35 +247,68 @@ class Account:
         pick = (exact or songs or [None])[0]
         return pick["videoId"] if pick else None
 
-    def url_for(self, query):
-        """What to open for "play <query>": (link, name for Gorgi to say), or (None, None)."""
+    def url_for(self, query, kind=None):
+        """What to open for "play <query>": (link, name for Gorgi to say), or (None, None).
+        kind: "band", "song", "album", or None (work it out)."""
         api = self._search_api()
-        results = api.search(query, limit=10)
-        kind, name, item = choose(results, query)
-        log.info("search %r -> %s %s", query, kind, name)
-        if kind == "song":
-            return song_url(item["videoId"]), name
+        title, by = split_by(query)
+        if kind in ("band", None) and not by:
+            artists = [r for r in api.search(title, filter="artists", limit=5) if r.get("browseId")]
+            exact = [r for r in artists if _plain(r.get("artist") or r.get("title")) == _plain(title)]
+            pick = (exact or (artists if kind == "band" else []) or [None])[0]
+            if pick:
+                url = self._artist_url(api, pick["browseId"])
+                if url:
+                    return url, pick.get("artist") or title
         if kind == "album":
+            albums = [r for r in api.search(query, filter="albums", limit=10) if r.get("browseId")]
+            pick = best(albums, title, by)
+            if pick:
+                try:
+                    album = api.get_album(pick["browseId"])
+                    if album.get("audioPlaylistId"):
+                        return playlist_url(album["audioPlaylistId"]), pick.get("title") or title
+                except Exception as e:
+                    log.info("album %s: %s", pick["browseId"], e)
+        songs = [r for r in api.search(query, filter="songs", limit=10) if r.get("videoId")]
+        pick = best(songs, title, by)
+        if pick and (kind == "song" or _plain(pick.get("title")) == _plain(title) or by):
+            names = ", ".join(a.get("name", "") for a in (pick.get("artists") or [])[:1])
+            return song_url(pick["videoId"]), (pick.get("title") or title) + (f" by {names}" if names else "")
+        # Not clear: whatever YouTube Music puts on top
+        kind2, name, item = choose(api.search(query, limit=10), query)
+        log.info("search %r -> %s %s", query, kind2, name)
+        if kind2 == "song":
+            return song_url(item["videoId"]), name
+        if kind2 == "artist":
+            url = self._artist_url(api, item["browseId"])
+            if url:
+                return url, name
+        if kind2 == "album":
             try:
                 album = api.get_album(item["browseId"])
                 if album.get("audioPlaylistId"):
                     return playlist_url(album["audioPlaylistId"]), name
             except Exception as e:
                 log.info("album %s: %s", item["browseId"], e)
-            return None, None
-        if kind == "artist":
-            try:
-                artist = api.get_artist(item["browseId"])
-            except Exception as e:
-                log.info("artist %s: %s", item["browseId"], e)
-                artist = {}
-            for key in ("shuffleId", "radioId"):  # the artist's own Shuffle button, else their radio
-                if artist.get(key):
-                    return playlist_url(artist[key]), name
-            songs = (artist.get("songs") or {}).get("results") or []
-            if songs and songs[0].get("videoId"):
-                return song_url(songs[0]["videoId"]), name
+        if pick:
+            return song_url(pick["videoId"]), pick.get("title") or title
         return None, None
+
+    @staticmethod
+    def _artist_url(api, browse_id):
+        try:
+            artist = api.get_artist(browse_id)
+        except Exception as e:
+            log.info("artist %s: %s", browse_id, e)
+            return None
+        for key in ("shuffleId", "radioId"):  # the artist's own Shuffle button, else their radio
+            if artist.get(key):
+                return playlist_url(artist[key])
+        songs = (artist.get("songs") or {}).get("results") or []
+        if songs and songs[0].get("videoId"):
+            return song_url(songs[0]["videoId"])
+        return None
 
     # -- rating
 

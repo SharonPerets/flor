@@ -1228,10 +1228,11 @@ def self_test(out_path):
         lines.append(f"to-do from speech: {task}")
         # YouTube Music search (no sign-in): what "play ..." would open. ::notice:: lines show up on GitHub.
         acc = ytmusic.Account(Path(out_path).resolve().parent)
-        for query in ("Muse", "Hysteria by Muse", "Absolution Muse"):
+        for kind, query in (("band", "Muse"), ("song", "Hysteria by Muse"), ("album", "Absolution by Muse"),
+                            (None, "Bohemian Rhapsody"), (None, "Pink Floyd"), (None, "chill jazz")):
             try:
-                url, name = acc.url_for(query)
-                lines.append(f"::notice::youtube music: play {query!r} -> {name!r} {url}")
+                url, name = acc.url_for(query, kind)
+                lines.append(f"::notice::youtube music: {kind} {query!r} -> {name!r} {url}")
             except Exception as e:
                 lines.append(f"::warning::youtube music search {query!r} failed: {e!r}")
         from voice import word_timings

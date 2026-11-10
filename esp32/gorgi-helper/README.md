@@ -50,8 +50,19 @@ paired helper, then set it up again.
 - After answering, Gorgi listens about 5 more seconds for a follow-up. Stay quiet to end.
 - **Tap the face again** to stop at any time.
 - Music commands work too: "next song", "pause the music", "volume 30", "turn it up".
+- YouTube Music: "play Muse", "put on Hysteria by Muse", "play my liked songs", "shuffle my liked songs",
+  "I love this song" (like) and "I hate this song" (dislike, skips it). Songs play in the YouTube Music app.
 - Ask about the weather: "will it rain tomorrow?". Gorgi uses the forecast from its weather screen
   (for the city picked there).
+
+### YouTube Music sign-in (for Liked songs and the thumbs)
+
+Searching and playing need nothing. To like / dislike songs (the thumbs on Gorgi's Music screen, or by voice)
+and to see which songs you liked, open **Settings → Connect YouTube Music...** and follow the steps: in
+Chrome or Edge on music.youtube.com press F12, Network tab, filter `browse`, click Library, right-click the
+"browse" line → Copy → Copy request headers, paste, Connect. It's kept only in `youtube-music.json` in the
+settings folder (it works like a password). It uses ytmusicapi, which is unofficial: if YouTube changes
+something, Gorgi says so and everything else keeps working.
 
 If Gorgi says it didn't hear anything: Windows **Settings → Privacy & security → Microphone**,
 turn on **Let desktop apps access your microphone**, and check the right microphone is the

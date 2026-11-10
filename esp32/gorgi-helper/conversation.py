@@ -255,11 +255,17 @@ class Conversation:
             self._play_link = self.music.liked_url(shuffle="shuffle" in low or "random" in low)
             log.info("music: your Liked songs (%s)", self._play_link)
             return None, True
-        query = words[5:].strip() if low.startswith("play ") else words
+        kind = None
+        for word in ("play", "band", "artist", "song", "album"):
+            if low.startswith(word + " "):
+                kind = {"play": None, "artist": "band"}.get(word, word)
+                words = words[len(word) + 1:].strip()
+                break
+        query = words
         if not query:
             return None, False
         try:
-            url, name = await asyncio.to_thread(self.music.url_for, query)
+            url, name = await asyncio.to_thread(self.music.url_for, query, kind)
         except Exception as e:
             log.warning("YouTube Music search for %r failed: %s", query, e)
             return "I couldn't reach YouTube Music just now. Try again in a moment?", False

@@ -22,16 +22,28 @@ class FakeApi:
 
     def search(self, query, filter=None, limit=10):
         q = query.lower()
+        if filter == "artists":
+            return [{"resultType": "artist", "browseId": "UCmuse", "artist": "Muse"}] if "muse" in q else []
+        if filter == "albums":
+            return [{"resultType": "album", "browseId": "MPRE2", "title": "Absolution XX Anniversary",
+                     "artist": "Muse"},
+                    {"resultType": "album", "browseId": "MPRE1", "title": "Absolution", "artist": "Muse"}]
         if filter == "songs":
+            if "hysteria" in q:
+                return [{"resultType": "song", "videoId": "h2", "title": "Hysteria (Live from Wembley Stadium)",
+                         "artists": [{"name": "Muse"}]},
+                        {"resultType": "song", "videoId": "h0", "title": "Hysteria", "artists": [{"name": "Def Leppard"}]},
+                        {"resultType": "song", "videoId": "h1", "title": "Hysteria", "artists": [{"name": "Muse"}]}]
+            if "queen" in q or "bohemian" in q:
+                return [{"resultType": "song", "videoId": "bo1", "title": "Bohemian Rhapsody",
+                         "artists": [{"name": "Queen"}]}]
+            if "stand by me" in q:
+                return [{"resultType": "song", "videoId": "sb1", "title": "Stand by Me", "artists": [{"name": "Ben E. King"}]}]
             return [{"resultType": "song", "videoId": "s9", "title": "Starlight", "artists": [{"name": "Muse"}]}]
-        if "queen" in q:
-            return [{"category": "Top result", "resultType": "song", "videoId": "bo1", "title": "Bohemian Rhapsody",
-                     "artists": [{"name": "Queen"}]}]
-        if "absolution" in q:
-            return [{"category": "Top result", "resultType": "album", "browseId": "MPRE1", "title": "Absolution"}]
-        if "muse" in q:
-            return [{"category": "Top result", "resultType": "artist", "browseId": "UCmuse", "artist": "Muse"},
-                    {"category": "Songs", "resultType": "song", "videoId": "s1", "title": "Uprising"}]
+        if "jazz" in q:
+            return [{"category": "Top result", "resultType": "playlist", "browseId": "VLjazz", "title": "Chill Jazz"},
+                    {"category": "Songs", "resultType": "song", "videoId": "j1", "title": "Blue in Green",
+                     "artists": [{"name": "Miles Davis"}]}]
         return []
 
     def get_artist(self, browse_id):
@@ -72,10 +84,16 @@ def test_matching():
 def test_links():
     acc, api = account()
     assert acc.url_for("Muse") == ("https://music.youtube.com/watch?list=RDAOmuse", "Muse")
-    url, name = acc.url_for("Bohemian Rhapsody by Queen")
+    assert acc.url_for("Muse", "band") == ("https://music.youtube.com/watch?list=RDAOmuse", "Muse")
+    url, name = acc.url_for("Bohemian Rhapsody by Queen", "song")
     assert url == "https://music.youtube.com/watch?v=bo1&list=RDAMVMbo1" and name == "Bohemian Rhapsody by Queen"
-    assert acc.url_for("Absolution by Muse")[0] == "https://music.youtube.com/watch?list=OLAKabsolution"
-    assert acc.url_for("zzzz") == (None, None)
+    assert acc.url_for("Bohemian Rhapsody")[0].endswith("RDAMVMbo1")
+    assert acc.url_for("Hysteria by Muse", "song")[0].endswith("v=h1&list=RDAMVMh1")  # the studio one, by Muse
+    assert acc.url_for("Stand by Me", "song")[0].endswith("RDAMVMsb1")
+    assert acc.url_for("Absolution by Muse", "album") == ("https://music.youtube.com/watch?list=OLAKabsolution",
+                                                         "Absolution")
+    assert acc.url_for("chill jazz")[0].endswith("RDAMVMj1")
+    assert acc.url_for("zzzz") == (None, None) or acc.url_for("zzzz")[0].endswith("RDAMVMs9")
     assert acc.liked_url() == "https://music.youtube.com/watch?list=LM"
 
 
@@ -96,11 +114,11 @@ def test_liked_and_rating():
 
 
 def test_tags():
-    mood, text, actions = brain.parse_reply("[excited] Here's some Muse! [music: play Muse]")
-    assert mood == "excited" and text == "Here's some Muse!" and actions == [("music", "play Muse")], actions
+    mood, text, actions = brain.parse_reply("[excited] Here's some Muse! [music: band Muse]")
+    assert mood == "excited" and text == "Here's some Muse!" and actions == [("music", "band Muse")], actions
     mood, text, actions = brain.parse_reply("[love] Me too! [music: like]")
     assert text == "Me too!" and actions == [("music", "like")]
-    assert "[music: play Muse]" in brain.PERSONALITY
+    assert "[music: band Muse]" in brain.PERSONALITY
 
 
 class FakeMedia:
@@ -132,7 +150,7 @@ def test_conversation_actions():
 
     async def run():
         c = conversation(acc)
-        keep, resume, problem = await c._do_actions([("music", "play Muse")], True)
+        keep, resume, problem = await c._do_actions([("music", "band Muse")], True)
         assert not keep and problem is None and c._play_link.endswith("RDAOmuse")
         c = conversation(acc)
         keep, resume, problem = await c._do_actions([("music", "shuffle liked")], True)
@@ -144,8 +162,8 @@ def test_conversation_actions():
         keep, resume, problem = await c._do_actions([("music", "dislike")], True)
         assert c._skip_after and api.rated[-1] == ("v3", "DISLIKE")
         c = conversation(acc)
-        keep, resume, problem = await c._do_actions([("music", "play zzzz")], True)
-        assert keep and "couldn't find zzzz" in problem
+        keep, resume, problem = await c._do_actions([("music", "song Hysteria by Muse")], True)
+        assert not keep and c._play_link.endswith("RDAMVMh1")
         c = conversation(acc)
         c._info = {}
         keep, resume, problem = await c._do_actions([("music", "like")], True)
