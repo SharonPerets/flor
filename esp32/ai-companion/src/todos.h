@@ -50,6 +50,8 @@ bool remove(uint32_t id);
 bool setStar(uint32_t id, bool star);
 bool setDue(uint32_t id, int32_t due, bool someday);
 bool setAlarm(uint32_t id, uint32_t alarmId);
+// A reminder time (seconds since 1970, 0 = none). The caller arms / disarms the alarm.
+bool setRemind(uint32_t id, uint32_t remindAt);
 const Task* find(uint32_t id);
 int openCount();
 

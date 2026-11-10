@@ -24,6 +24,7 @@ void loop(uint32_t nowMs);
 struct Due {
   enum Kind : uint8_t { Timer, Focus, Reminder, Missed } kind;
   String text;  // what Gorgi shows and the PC says, e.g. "Ding! Your pasta timer is done!"
+  uint32_t id;  // the timer or reminder that went off (0 = not known)
 };
 // Takes the oldest due item, if any.
 bool takeDue(Due& out);

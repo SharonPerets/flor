@@ -27,6 +27,12 @@ constexpr gfx::Rect KB_WHEN_AREA{0, 116, 800, 48};
 constexpr gfx::Rect KB_KEYS_AREA{0, 164, 800, 244};
 constexpr gfx::Rect KB_BOTTOM_AREA{0, 408, 800, 72};
 
+// The reminder-time picker (a task's "Time" button, or "Time" on the keyboard)
+constexpr gfx::Rect PICK_DAYS_AREA{0, 104, 800, 56};
+constexpr gfx::Rect PICK_TIME_AREA{0, 160, 800, 248};  // the time and the quick times
+constexpr int PICK_DAYS = 7;   // Today, Tomorrow and the next five days
+constexpr int PICK_QUICK = 5;  // In 1 hour, 9:00, 12:00, 17:00, 20:00
+
 enum Voice : uint8_t { VOICE_IDLE, VOICE_LISTENING, VOICE_THINKING };
 
 struct Row {
@@ -54,6 +60,20 @@ struct Keyboard {
   int pressed = -1;       // key under the finger
   uint8_t voice = VOICE_IDLE;
   const char* note = "";  // shown in the voice button for a moment ("PC not connected")
+  int32_t atDay = 0;      // a reminder picked with "Time" (atMinute < 0 = none)
+  int atMinute = -1;
+  char atLabel[16] = "";  // "17:00" / "Fri 17:00", filled in by main
+};
+
+struct Picker {
+  bool open = false;
+  uint32_t taskId = 0;  // 0 = for the task being typed
+  char title[todos::TEXT_MAX + 1] = "";
+  int32_t today = 0;  // day numbers: today, and the one picked
+  int32_t day = 0;
+  int minute = 17 * 60;  // minute of the day
+  bool hadTime = false;  // the task has a reminder: offer "No reminder"
+  const char* note = "";  // "That time has passed" for a moment
 };
 
 struct View {
@@ -69,6 +89,7 @@ struct View {
   bool toastUndo = false;  // ...with an Undo button
   uint8_t voice = VOICE_IDLE;
   Keyboard kb;
+  Picker pick;
 };
 
 // Fills the rows of the current tab from the list (keeps tab, first, openRow; fixes them if out of range)
@@ -78,10 +99,17 @@ void draw(gfx::Canvas& c, const View& v);
 
 enum class Tap {
   None, Tab, Check, Star, Row, Action, Undo, Voice, Type, Elsewhere,
-  KbKey, KbWhen, KbStar, KbCancel, KbVoice
+  KbKey, KbWhen, KbStar, KbCancel, KbVoice, KbTime,
+  Pick  // a part of the time picker (index = PickPart, action = which day / quick time)
 };
 // Row buttons (when a row is open)
-enum Action : uint8_t { ACT_STAR, ACT_TODAY, ACT_TOMORROW, ACT_DELETE, ACT_NOT_DONE };
+enum Action : uint8_t { ACT_STAR, ACT_TODAY, ACT_TOMORROW, ACT_DELETE, ACT_NOT_DONE, ACT_TIME };
+enum PickPart : uint8_t { PICK_DAY, PICK_HOUR_UP, PICK_HOUR_DOWN, PICK_MIN_UP, PICK_MIN_DOWN, PICK_QUICK_TIME,
+                          PICK_CLEAR, PICK_CANCEL, PICK_SET };
+// The quick times: minute of the day, -1 = "In 1 hour"
+extern const int QUICK_MINUTES[PICK_QUICK];
+// The day name on the picker's chips and the keyboard ("Today", "Tomorrow", "Fri")
+const char* dayName(int32_t day, int32_t today);
 struct TapResult {
   Tap what;
   int index;  // tab, row (0 = first row shown), key, when choice

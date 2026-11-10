@@ -13,7 +13,10 @@ constexpr int TOP_H = 44;   // the top bar
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 56;  // a little lower since 4.3: the music bar folds away
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk, Like, Dislike, Seek };
+enum class Target {
+  None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk, Like, Dislike, Seek,
+  AlertMain, AlertLater  // the two buttons under a reminder that went off
+};
 
 struct MediaInfo {
   String title;
@@ -43,6 +46,9 @@ void setTalkButton(bool on);
 // The round Talk button left of the face (face screen only). Active = a conversation
 // is on, so it shows Stop. Tapping it gives Target::Talk.
 void setFaceTalkActive(bool active);
+// Two buttons at the bottom of the face screen while a reminder rings, in place of the music line:
+// main (teal, e.g. "Done") and later ("In 10 min"). Empty main = no buttons.
+void setAlertButtons(const String& main, const String& later);
 // No music bar or slim line at the bottom (the Sketch screen uses all of it)
 void setBottomHidden(bool hidden);
 void setSubtitle(const String& text);

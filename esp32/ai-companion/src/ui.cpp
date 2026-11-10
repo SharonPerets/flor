@@ -82,6 +82,7 @@ const Color STOP_RED = gfx::rgb(0xE5484D);
 bool faceTalkActive = false;  // a conversation is on: the button says Stop
 bool dirtyFaceTalk = true;
 bool barOpen = false;
+String alertMain, alertLater;  // buttons under a reminder (empty = none)
 bool deck = false;  // the Music screen: the big bar stays open
 uint32_t barOpenUntil = 0;
 constexpr uint32_t BAR_OPEN_MS = 10000;
@@ -399,6 +400,25 @@ void drawDeck(Canvas& c) {
   c.text(gfont::SMALL, pct, 734, BAR_CY + 7, TEXT_MUTED);
 }
 
+constexpr Rect ALERT_MAIN_BTN{150, 404, 270, 64};
+constexpr Rect ALERT_LATER_BTN{436, 404, 214, 64};
+
+void drawAlertButtons(Canvas& c) {
+  const Rect& m = ALERT_MAIN_BTN;
+  const bool downM = pressed == Target::AlertMain, downL = pressed == Target::AlertLater;
+  c.fillRRect(m.x, m.y, m.w, m.h, m.h / 2.0f, downM ? ACCENT_PRESSED : ACCENT);
+  // a tick
+  const float tw = Canvas::textWidth(gfont::SUBTITLE, alertMain.c_str()), tx = m.x + (m.w - tw - 34) / 2.0f;
+  const float cx = tx + 12, cy = m.y + m.h / 2.0f;
+  c.fillCapsule(cx - 10, cy, cx - 3, cy + 7, 2.6f, PLAY_ICON);
+  c.fillCapsule(cx - 3, cy + 7, cx + 10, cy - 7, 2.6f, PLAY_ICON);
+  c.text(gfont::SUBTITLE, alertMain.c_str(), tx + 34, m.y + 42, PLAY_ICON);
+  const Rect& l = ALERT_LATER_BTN;
+  c.fillRRect(l.x, l.y, l.w, l.h, l.h / 2.0f, downL ? BTN_PRESSED : TILE);
+  const float lw = Canvas::textWidth(gfont::SUBTITLE, alertLater.c_str());
+  c.text(gfont::SUBTITLE, alertLater.c_str(), l.x + (l.w - lw) / 2.0f, l.y + 42, TEXT);
+}
+
 void drawMini(Canvas& c) { tabs::drawMiniPlayer(c, media.title.c_str(), media.artist.c_str(), media.playing); }
 
 void redraw(const Rect& area, const Color& bg, void (*draw)(Canvas&)) {
@@ -498,6 +518,13 @@ void setStatus(const String& text, const Color& color, bool pulse) {
   statusPulse = pulse;
   pulseOn = true;
   dirtyStatus = true;
+}
+
+void setAlertButtons(const String& main, const String& later) {
+  if (main == alertMain && later == alertLater) return;
+  alertMain = main;
+  alertLater = later;
+  dirtyBar = true;
 }
 
 void setBottomHidden(bool hidden) {
@@ -609,6 +636,11 @@ void update(uint32_t now) {
     dirtyText = dirtyButtons = dirtyVolume = false;
     return;
   }
+  if (alertMain.length() && subtitleVisible) {  // a reminder's buttons in place of the music
+    if (dirtyBar || dirtyButtons) redraw(BOTTOM_AREA, BG, drawAlertButtons);
+    dirtyBar = dirtyText = dirtyButtons = dirtyVolume = false;
+    return;
+  }
   if (deck) {  // the Music screen's own bar: never folds away
     if (dirtyBar) redraw(BOTTOM_AREA, BG, drawDeck);
     if (!dirtyBar && dirtyButtons) redraw(DECK_BUTTON_AREA, BG, drawDeck);
@@ -639,6 +671,12 @@ Target hitTest(int x, int y) {
     if (y < TOP_H && tabAt(x, y) >= 0) return Target::Tab;
     if (y < TOP_H && talkButton && x >= 780 - TALK_W - 8) return Target::Talk;
     return y >= TOP_H ? Target::Face : Target::None;
+  }
+  if (alertMain.length() && subtitleVisible && y >= BAR_Y) {
+    auto in = [&](const Rect& r) { return x >= r.x - 8 && x < r.right() + 8 && y >= r.y - 8 && y < r.bottom() + 8; };
+    if (in(ALERT_MAIN_BTN)) return Target::AlertMain;
+    if (in(ALERT_LATER_BTN)) return Target::AlertLater;
+    return Target::None;
   }
   if (deck && y >= BAR_Y - 8) {
     auto near = [&](int cx, int r) { return abs(x - cx) <= r && abs(y - BAR_CY) <= r; };

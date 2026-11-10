@@ -154,5 +154,36 @@ int main() {
   k.kb.symbols = true;
   k.kb.voice = todoscreen::VOICE_LISTENING;
   save("todo_keyboard_123.ppm", k);
+  // the time picker (a task's "Time" button) and the keyboard with a time picked
+  todoscreen::View pk;
+  todoscreen::fill(pk, today, 0);
+  pk.pick.open = true;
+  snprintf(pk.pick.title, sizeof pk.pick.title, "Call the bank about the card");
+  pk.pick.today = today;
+  pk.pick.day = today + 1;
+  pk.pick.minute = 17 * 60;
+  pk.pick.hadTime = true;
+  save("todo_picker.ppm", pk);
+  {  // taps land on the right parts
+    todoscreen::TapResult t = todoscreen::tap(500, 190, pk);
+    assert(t.what == todoscreen::Tap::Pick && t.index == todoscreen::PICK_MIN_UP);
+    t = todoscreen::tap(300, 322, pk);
+    assert(t.what == todoscreen::Tap::Pick && t.index == todoscreen::PICK_HOUR_DOWN);
+    t = todoscreen::tap(660, 440, pk);
+    assert(t.what == todoscreen::Tap::Pick && t.index == todoscreen::PICK_SET);
+    t = todoscreen::tap(100, 440, pk);
+    assert(t.what == todoscreen::Tap::Pick && t.index == todoscreen::PICK_CLEAR);
+  }
+  v.tab = todos::TODAY;
+  v.first = 0;
+  todoscreen::fill(v, today, 0);
+  v.openRow = 1;
+  save("todo_open_time.ppm", v);
+  k.kb.symbols = false;
+  k.kb.voice = todoscreen::VOICE_IDLE;
+  k.kb.when = todoscreen::WHEN_NONE;
+  k.kb.atMinute = 9 * 60;
+  snprintf(k.kb.atLabel, sizeof k.kb.atLabel, "Fri 9:00");
+  save("todo_keyboard_time.ppm", k);
   printf("to-do: ALL OK (pictures todo_*.ppm)\n");
 }

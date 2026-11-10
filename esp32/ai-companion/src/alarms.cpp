@@ -151,9 +151,9 @@ String focusDoneText(int n) {
   return buf;
 }
 
-void addDue(Due::Kind kind, const String& text) {
+void addDue(Due::Kind kind, const String& text, uint32_t id = 0) {
   if (dueList.size() >= 8) dueList.erase(dueList.begin());
-  dueList.push_back(Due{kind, text});
+  dueList.push_back(Due{kind, text, id});
   Serial.printf("alarms: due: %s\n", text.c_str());
 }
 
@@ -372,7 +372,7 @@ void loop(uint32_t nowMs) {
     for (ReminderRec& r : reminders) {
       if (!r.used || r.at == 0 || r.at > now) continue;
       any = true;
-      addDue(Due::Reminder, String("Hey! Reminder: ") + sentence(r.text));
+      addDue(Due::Reminder, String("Hey! Reminder: ") + sentence(r.text), r.id);
       if (r.days) r.at = (int32_t)nextRepeat(r, now);
       else r.used = 0;
     }

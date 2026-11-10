@@ -302,6 +302,19 @@ bool setAlarm(uint32_t id, uint32_t alarmId) {
   return true;
 }
 
+bool setRemind(uint32_t id, uint32_t remindAt) {
+  const int i = indexOf(id);
+  if (i < 0) return false;
+  Task& t = tasks[i];
+  t.remindAt = remindAt;
+  if (remindAt) {  // the task moves to that day
+    t.due = dayOf((time_t)remindAt);
+    t.flags &= ~SOMEDAY;
+  }
+  changed();
+  return true;
+}
+
 const Task* find(uint32_t id) {
   const int i = indexOf(id);
   return i < 0 ? nullptr : &tasks[i];

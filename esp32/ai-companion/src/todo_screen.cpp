@@ -38,6 +38,13 @@ constexpr Rect KB_FIELD{16, 54, 768, 56};
 constexpr Rect KB_CANCEL{16, 416, 200, 52};
 constexpr Rect KB_VOICE{228, 416, 556, 52};
 constexpr float KB_STAR_X = 760, KB_STAR_Y = 138;
+// The time picker
+constexpr float PICK_HOUR_X = 300, PICK_MIN_X = 500, PICK_UP_Y = 190, PICK_NUM_BASE = 290, PICK_DOWN_Y = 322;
+constexpr int PICK_QUICK_Y = 358;
+constexpr Rect PICK_CLEAR_BTN{16, 414, 200, 56};
+constexpr Rect PICK_CANCEL_BTN{360, 414, 180, 56};
+constexpr Rect PICK_SET_BTN{552, 414, 232, 56};
+const char* const DAY_SHORT[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 float textW(const gfont::Font& f, const char* s) { return Canvas::textWidth(f, s); }
 
@@ -111,9 +118,20 @@ void segments(const View& v, float xs[3], float ws[3], char labels[3][20]) {
   }
 }
 
+const char* actionLabel(int act, bool starred) {
+  switch (act) {
+    case ACT_STAR: return starred ? "Unstar" : "Star";
+    case ACT_TODAY: return "Today";
+    case ACT_TOMORROW: return "Tomorrow";
+    case ACT_NOT_DONE: return "Not done";
+    case ACT_TIME: return "Time";
+    default: return "Delete";
+  }
+}
+
 // The buttons of an open row, right to left: their x, width and what they do
-int rowActions(const View& v, const Row& r, float xs[4], float ws[4], int acts[4]) {
-  int list[4];
+int rowActions(const View& v, const Row& r, float xs[5], float ws[5], int acts[5]) {
+  int list[5];
   int n = 0;
   if (r.done) {
     list[n++] = ACT_NOT_DONE;
@@ -122,31 +140,18 @@ int rowActions(const View& v, const Row& r, float xs[4], float ws[4], int acts[4
     list[n++] = ACT_STAR;
     if (v.tab == todos::UPCOMING) list[n++] = ACT_TODAY;
     list[n++] = ACT_TOMORROW;
+    list[n++] = ACT_TIME;
     list[n++] = ACT_DELETE;
   }
   float x = 776;
   for (int i = n - 1; i >= 0; --i) {
-    const char* label = list[i] == ACT_STAR ? (r.star ? "Unstar" : "Star")
-                        : list[i] == ACT_TODAY ? "Today"
-                        : list[i] == ACT_TOMORROW ? "Tomorrow"
-                        : list[i] == ACT_NOT_DONE ? "Not done" : "Delete";
-    ws[i] = textW(gfont::SMALL, label) + 30;
+    ws[i] = textW(gfont::SMALL, actionLabel(list[i], r.star)) + 30;
     x -= ws[i];
     xs[i] = x;
     acts[i] = list[i];
     x -= 8;
   }
   return n;
-}
-
-const char* actionLabel(int act, bool starred) {
-  switch (act) {
-    case ACT_STAR: return starred ? "Unstar" : "Star";
-    case ACT_TODAY: return "Today";
-    case ACT_TOMORROW: return "Tomorrow";
-    case ACT_NOT_DONE: return "Not done";
-    default: return "Delete";
-  }
 }
 
 void drawHeader(Canvas& c, const View& v) {
@@ -185,8 +190,8 @@ void drawRow(Canvas& c, const View& v, int i) {
   }
   float right = 736;  // where the text must stop
   if (open) {
-    float xs[4], ws[4];
-    int acts[4];
+    float xs[5], ws[5];
+    int acts[5];
     const int n = rowActions(v, r, xs, ws, acts);
     for (int k = 0; k < n; ++k) {
       const bool del = acts[k] == ACT_DELETE;
@@ -338,6 +343,130 @@ void whenChips(float xs[WHEN_COUNT], float ws[WHEN_COUNT]) {
   }
 }
 
+// The "Time" chip after the When chips: its x and width
+void timeChip(const Keyboard& kb, float& x, float& w) {
+  float xs[WHEN_COUNT], ws[WHEN_COUNT];
+  whenChips(xs, ws);
+  x = xs[WHEN_COUNT - 1] + ws[WHEN_COUNT - 1] + 8;
+  w = textW(gfont::SMALL, kb.atMinute >= 0 ? kb.atLabel : "Time") + 50;
+}
+
+void clockIcon(Canvas& c, float cx, float cy, float r, const Color& col, const Color& bg) {
+  c.fillCircle(cx, cy, r, col);
+  c.fillCircle(cx, cy, r - 2.2f, bg);
+  c.fillCapsule(cx, cy, cx, cy - r * 0.55f, 1.1f, col);
+  c.fillCapsule(cx, cy, cx + r * 0.45f, cy, 1.1f, col);
+}
+
+// ---- the time picker
+
+void quickLabel(int i, char* out, int size) {
+  const int m = QUICK_MINUTES[i];
+  if (m < 0) snprintf(out, size, "In 1 hour");
+  else snprintf(out, size, "%d:%02d", m / 60, m % 60);
+}
+
+void pickDays(const Picker& p, float xs[PICK_DAYS], float ws[PICK_DAYS]) {
+  float total = 0;
+  for (int i = 0; i < PICK_DAYS; ++i) {
+    ws[i] = textW(gfont::SMALL, dayName(p.today + i, p.today)) + 32;
+    total += ws[i] + (i ? 8 : 0);
+  }
+  float x = 400 - total / 2;
+  for (int i = 0; i < PICK_DAYS; ++i) {
+    xs[i] = x;
+    x += ws[i] + 8;
+  }
+}
+
+void pickQuick(float xs[PICK_QUICK], float ws[PICK_QUICK]) {
+  float total = 0;
+  char label[16];
+  for (int i = 0; i < PICK_QUICK; ++i) {
+    quickLabel(i, label, sizeof label);
+    ws[i] = textW(gfont::SMALL, label) + 36;
+    total += ws[i] + (i ? 10 : 0);
+  }
+  float x = 400 - total / 2;
+  for (int i = 0; i < PICK_QUICK; ++i) {
+    xs[i] = x;
+    x += ws[i] + 10;
+  }
+}
+
+void chevron(Canvas& c, float cx, float cy, bool up, const Color& col) {
+  const float d = up ? -1 : 1;
+  c.fillCapsule(cx - 11, cy - d * 5, cx, cy + d * 6, 2.6f, col);
+  c.fillCapsule(cx, cy + d * 6, cx + 11, cy - d * 5, 2.6f, col);
+}
+
+void drawPicker(Canvas& c, const View& v) {
+  const Picker& p = v.pick;
+  c.text(gfont::HEADLINE, "Remind me", 20, 90, TEXT);
+  char title[todos::TEXT_MAX + 8];
+  const float tx = 36 + textW(gfont::HEADLINE, "Remind me");
+  fit(gfont::NOTE, p.title[0] ? p.title : "about this task", 780 - tx, title, sizeof title);
+  c.text(gfont::NOTE, title, tx, 88, MUTED);
+
+  float xs[PICK_DAYS], ws[PICK_DAYS];
+  pickDays(p, xs, ws);
+  for (int i = 0; i < PICK_DAYS; ++i) {
+    const bool on = p.day == p.today + i;
+    c.fillRRect(xs[i], 112, ws[i], 38, 19, on ? ACCENT : BORDER);
+    centered(c, gfont::SMALL, dayName(p.today + i, p.today), xs[i] + ws[i] / 2, 137, on ? DARK : MUTED);
+  }
+
+  // the time: hours and minutes, each with an up and a down button
+  const float cols[2] = {PICK_HOUR_X, PICK_MIN_X};
+  const int values[2] = {p.minute / 60, p.minute % 60};
+  for (int k = 0; k < 2; ++k) {
+    const float x = cols[k];
+    c.fillCircle(x, PICK_UP_Y, 24, BORDER);
+    chevron(c, x, PICK_UP_Y, true, TEXT);
+    c.fillRRect(x - 72, 214, 144, 86, 18, ROW_BG);
+    char num[4];
+    snprintf(num, sizeof num, "%02d", values[k]);
+    centered(c, gfont::BIG, num, x, (int)PICK_NUM_BASE, TEXT);
+    c.fillCircle(x, PICK_DOWN_Y, 24, BORDER);
+    chevron(c, x, PICK_DOWN_Y, false, TEXT);
+  }
+  c.fillCircle(400, 244, 6, TEXT);  // the colon
+  c.fillCircle(400, 270, 6, TEXT);
+  if (p.note && p.note[0]) {
+    centered(c, gfont::SMALL, p.note, 400, 343, RED);
+  } else {
+    centered(c, gfont::SMALL, "hours", PICK_HOUR_X - 124, 262, FAINT);
+    centered(c, gfont::SMALL, "minutes", PICK_MIN_X + 134, 262, FAINT);
+  }
+
+  float qx[PICK_QUICK], qw[PICK_QUICK];
+  pickQuick(qx, qw);
+  char label[16];
+  for (int i = 0; i < PICK_QUICK; ++i) {
+    quickLabel(i, label, sizeof label);
+    const bool on = QUICK_MINUTES[i] >= 0 && QUICK_MINUTES[i] == p.minute;
+    c.fillRRect(qx[i], PICK_QUICK_Y, qw[i], 40, 20, on ? SEL : BORDER);
+    if (on) c.fillRRect(qx[i], PICK_QUICK_Y + 37, qw[i], 3, 1.5f, ACCENT);
+    centered(c, gfont::SMALL, label, qx[i] + qw[i] / 2, PICK_QUICK_Y + 26, on ? TEXT : MUTED);
+  }
+
+  if (p.hadTime) {
+    const Rect& b = PICK_CLEAR_BTN;
+    c.fillRRect(b.x, b.y, b.w, b.h, b.h / 2.0f, DANGER);
+    centered(c, gfont::SMALL, "No reminder", b.x + b.w / 2.0f, b.y + 34, RED);
+  }
+  const Rect& cb = PICK_CANCEL_BTN;
+  c.fillRRect(cb.x, cb.y, cb.w, cb.h, cb.h / 2.0f, BORDER);
+  centered(c, gfont::SMALL, "Cancel", cb.x + cb.w / 2.0f, cb.y + 34, TEXT);
+  const Rect& sb = PICK_SET_BTN;
+  c.fillRRect(sb.x, sb.y, sb.w, sb.h, sb.h / 2.0f, ACCENT);
+  char set[24];
+  snprintf(set, sizeof set, "Remind at %d:%02d", p.minute / 60, p.minute % 60);
+  const float w = textW(gfont::SMALL, set) + 30, x = sb.x + (sb.w - w) / 2;
+  clockIcon(c, x + 9, sb.y + 28, 9, DARK, ACCENT);
+  c.text(gfont::SMALL, set, x + 30, sb.y + 34, DARK);
+}
+
 void drawKeyboard(Canvas& c, const View& v) {
   const Keyboard& kb = v.kb;
   // the text being typed (the end of it, when it's long)
@@ -362,6 +491,12 @@ void drawKeyboard(Canvas& c, const View& v) {
     c.fillRRect(xs[i], 120, ws[i], 36, 18, on ? ACCENT : BORDER);
     centered(c, gfont::SMALL, WHEN_NAMES[i], xs[i] + ws[i] / 2, 144, on ? DARK : MUTED);
   }
+  float tx, tw;
+  timeChip(kb, tx, tw);
+  const bool timed = kb.atMinute >= 0;
+  c.fillRRect(tx, 120, tw, 36, 18, timed ? ACCENT : BORDER);
+  clockIcon(c, tx + 22, 138, 8, timed ? DARK : MUTED, timed ? ACCENT : BORDER);
+  c.text(gfont::SMALL, timed ? kb.atLabel : "Time", tx + 38, 144, timed ? DARK : MUTED);
   star(c, KB_STAR_X, KB_STAR_Y, 15, kb.star ? STAR_C : FAINT, rgb(0x05070A), kb.star);
 
   for (int k = 0; k < KEY_COUNT; ++k) drawKey(c, kb, k);
@@ -381,6 +516,14 @@ void drawKeyboard(Canvas& c, const View& v) {
 }
 
 }  // namespace
+
+const int QUICK_MINUTES[PICK_QUICK] = {-1, 9 * 60, 12 * 60, 17 * 60, 20 * 60};
+
+const char* dayName(int32_t day, int32_t today) {
+  if (day == today) return "Today";
+  if (day == today + 1) return "Tomorrow";
+  return DAY_SHORT[todos::weekday(day)];
+}
 
 Rect keyRect(int key) {
   if (key >= 0 && key < 10) return Rect((int)(4 + key * KSTEP), 168, (int)KW, (int)KH);
@@ -456,6 +599,10 @@ void fill(View& v, int32_t today, uint32_t freshId) {
 }
 
 void draw(Canvas& c, const View& v) {
+  if (v.pick.open) {
+    drawPicker(c, v);
+    return;
+  }
   if (v.kb.open) {
     drawKeyboard(c, v);
     return;
@@ -466,11 +613,45 @@ void draw(Canvas& c, const View& v) {
 }
 
 TapResult tap(int x, int y, const View& v) {
+  if (v.pick.open) {
+    const Picker& p = v.pick;
+    if (y >= 104 && y < 160) {
+      float xs[PICK_DAYS], ws[PICK_DAYS];
+      pickDays(p, xs, ws);
+      for (int i = 0; i < PICK_DAYS; ++i)
+        if (x >= xs[i] - 4 && x < xs[i] + ws[i] + 4) return TapResult(Tap::Pick, PICK_DAY, i);
+      return TapResult();
+    }
+    if (y >= 160 && y < 348) {
+      for (int k = 0; k < 2; ++k) {
+        const float cx = k ? PICK_MIN_X : PICK_HOUR_X;
+        if (fabsf(x - cx) > 80) continue;
+        if (y < 214) return TapResult(Tap::Pick, k ? PICK_MIN_UP : PICK_HOUR_UP);
+        if (y >= 300) return TapResult(Tap::Pick, k ? PICK_MIN_DOWN : PICK_HOUR_DOWN);
+        return TapResult();
+      }
+      return TapResult();
+    }
+    if (y >= PICK_QUICK_Y - 8 && y < PICK_QUICK_Y + 48) {
+      float qx[PICK_QUICK], qw[PICK_QUICK];
+      pickQuick(qx, qw);
+      for (int i = 0; i < PICK_QUICK; ++i)
+        if (x >= qx[i] - 5 && x < qx[i] + qw[i] + 5) return TapResult(Tap::Pick, PICK_QUICK_TIME, i);
+      return TapResult();
+    }
+    if (p.hadTime && inside(gfx::inflate(PICK_CLEAR_BTN, 4), x, y)) return TapResult(Tap::Pick, PICK_CLEAR);
+    if (inside(gfx::inflate(PICK_CANCEL_BTN, 4), x, y)) return TapResult(Tap::Pick, PICK_CANCEL);
+    if (inside(gfx::inflate(PICK_SET_BTN, 4), x, y)) return TapResult(Tap::Pick, PICK_SET);
+    return TapResult();
+  }
   if (v.kb.open) {
     const int k = keyAt(x, y);
     if (k >= 0) return TapResult(Tap::KbKey, k);
     if (y >= 116 && y < 164) {
       if (fabsf(x - KB_STAR_X) < 30) return TapResult(Tap::KbStar);
+      float tx, tw;
+      timeChip(v.kb, tx, tw);
+      if (x >= tx - 4 && x < tx + tw + 4) return TapResult(Tap::KbTime);
       float xs[WHEN_COUNT], ws[WHEN_COUNT];
       whenChips(xs, ws);
       for (int i = 1; i < WHEN_COUNT; ++i)
@@ -498,8 +679,8 @@ TapResult tap(int x, int y, const View& v) {
     const Row& r = v.rows[i];
     if (x < 80) return TapResult(Tap::Check, i);
     if (v.openRow == i) {
-      float xs[4], ws[4];
-      int acts[4];
+      float xs[5], ws[5];
+      int acts[5];
       const int n = rowActions(v, r, xs, ws, acts);
       for (int k = 0; k < n; ++k)
         if (x >= xs[k] - 4 && x < xs[k] + ws[k] + 4) return TapResult(Tap::Action, i, acts[k]);

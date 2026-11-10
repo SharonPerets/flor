@@ -104,6 +104,11 @@ uint32_t claudeDrawnAt = 0;
 bool alertClaude = false;  // the alert on screen is from Claude Code
 String alertText, alertTitle;  // for a notification if nobody taps it
 uint8_t alertNotice = 0;
+// A reminder that went off: its buttons ("Done" / "In 10 min") and what they act on
+bool alertButtons = false;
+uint32_t alertTodoId = 0;  // the to-do it belongs to (0 = a plain reminder)
+String alertRemindText;    // the reminder's own words (to ring again later)
+constexpr uint32_t SNOOZE_SECONDS = 10 * 60;
 String alertSession;       // ...for this session
 
 // Claude alerts can be muted from the Action Center (saved, and told to the helper so it stays quiet too)
@@ -283,6 +288,9 @@ void todoShown();
 void todoHidden();
 void todoVoiceReset();
 void sendTodoList();
+const todos::Task* todoForAlarm(uint32_t alarmId);
+void todoSetTime(uint32_t id, uint32_t at);
+uint32_t epochNow();
 void drawClaude(uint32_t now);
 
 // Switches screens right away (no animation)
@@ -652,7 +660,26 @@ void showAlert(const alarms::Due& d) {
   face.setTalking(false);
   face.setMood(d.kind == alarms::Due::Missed ? Mood::Sad : Mood::Surprised);
   ui::setSubtitle(d.text);
-  ui::setStatus("Tap to stop", ui::COLOR_ACCENT, true);
+  alertButtons = false;
+  alertTodoId = 0;
+  alertRemindText = "";
+  if (d.kind == alarms::Due::Reminder) {  // Done / In 10 min buttons under it
+    const todos::Task* t = d.id ? todoForAlarm(d.id) : nullptr;
+    if (t) {
+      alertTodoId = t->id;
+      alertRemindText = t->text;
+      todos::setAlarm(t->id, 0);  // it has rung
+      alertText = String("To-do: ") + t->text;
+      ui::setSubtitle(alertText);
+    } else {
+      alertRemindText = d.text;
+      if (alertRemindText.startsWith("Hey! Reminder: ")) alertRemindText.remove(0, 15);
+      if (alertRemindText.endsWith(".")) alertRemindText.remove(alertRemindText.length() - 1);
+    }
+    alertButtons = true;
+    ui::setAlertButtons(alertTodoId ? "Done" : "OK", "In 10 min");
+  }
+  ui::setStatus(alertButtons ? "Reminder" : "Tap to stop", ui::COLOR_ACCENT, true);
   setPhase(Phase::Alert);
   // the PC says it out loud
   JsonDocument doc;
@@ -662,9 +689,14 @@ void showAlert(const alarms::Due& d) {
   pclink::send(doc);
 }
 
-void endAlert(bool tapped) {
+void endAlert(bool tapped, const char* say = "Okay!") {
   alertOn = false;
   alertClaude = false;
+  if (alertButtons) {
+    alertButtons = false;
+    alertTodoId = 0;
+    ui::setAlertButtons("", "");
+  }
   if (sleepAfterAlert) {  // it was asleep before: back to sleep
     sleepAfterAlert = false;
     goToSleep();
@@ -675,7 +707,7 @@ void endAlert(bool tapped) {
   setPhase(Phase::Idle);
   if (tapped) {
     face.setMood(Mood::Happy);
-    ui::setSubtitle("Okay!");
+    ui::setSubtitle(say);
     moodHoldUntil = millis() + 2000;
   } else {
     face.setMood(Mood::Neutral);
@@ -866,6 +898,8 @@ todos::Task todoUndoTask;
 bool todoVoiceForKb = false;  // the words go into the keyboard's text box
 char todoKbNote[40] = "";
 uint32_t todoKbNoteUntil = 0;
+uint32_t todoPickNoteUntil = 0;  // "That time has passed" on the time picker
+uint32_t todoPickDaysKey = 0, todoPickTimeKey = 0;
 bool todoScrolled = false;   // this touch scrolls the list (it's no tap)
 int todoFirstAtDown = 0;
 constexpr uint32_t TODO_FRESH_MS = 4000;
@@ -906,6 +940,40 @@ void todoDisarmReminder(uint32_t id) {
   if (!t || !t->alarmId) return;
   alarms::cancel(t->alarmId);
   todos::setAlarm(id, 0);
+}
+
+// The to-do whose reminder is this alarm
+const todos::Task* todoForAlarm(uint32_t alarmId) {
+  const todos::Task* list[todos::MAX_OPEN];
+  const int32_t today = todoToday();
+  for (int s = todos::TODAY; s <= todos::UPCOMING; ++s) {
+    const int n = todos::collect((todos::Section)s, today, list, todos::MAX_OPEN);
+    for (int i = 0; i < n; ++i)
+      if (list[i]->alarmId == alarmId) return list[i];
+  }
+  return nullptr;
+}
+
+// A new reminder time for a task (0 = no reminder); the task moves to that day
+void todoSetTime(uint32_t id, uint32_t at) {
+  todoDisarmReminder(id);
+  todos::setRemind(id, at);
+  todoArmReminder(id);
+}
+
+// Seconds since 1970 for a day number and a minute of that day (local time)
+uint32_t todoEpochAt(int32_t day, int minute) {
+  int y, mo, d;
+  todos::dateOf(day, y, mo, d);
+  struct tm tmv = {};
+  tmv.tm_year = y - 1900;
+  tmv.tm_mon = mo - 1;
+  tmv.tm_mday = d;
+  tmv.tm_hour = minute / 60;
+  tmv.tm_min = minute % 60;
+  tmv.tm_isdst = -1;
+  const time_t t = mktime(&tmv);
+  return t > 0 ? (uint32_t)t : 0;
 }
 
 // Adds a task (from the keyboard, voice or Gorgi's AI) and shows where it landed
@@ -964,7 +1032,17 @@ void todoAddFromKeyboard() {
     return;
   }
   const bool someday = kb.when == todoscreen::WHEN_SOMEDAY;
-  if (todoAdd(text, todoDueFor(kb.when, todoToday()), someday, kb.star, 0, true)) todoCloseKeyboard();
+  int32_t due = todoDueFor(kb.when, todoToday());
+  uint32_t at = 0;
+  if (kb.atMinute >= 0) {
+    at = todoEpochAt(kb.atDay, kb.atMinute);
+    if (at <= epochNow()) {
+      todoKbSay("That time has passed");
+      return;
+    }
+    due = kb.atDay;
+  }
+  if (todoAdd(text, due, someday && !at, kb.star, at, true)) todoCloseKeyboard();
   else todoKbSay("My list is full");
 }
 
@@ -1037,6 +1115,9 @@ void onTodoMessage(const char* type, JsonObjectConst msg) {
     const uint32_t id = msg["id"] | 0u;
     todoDisarmReminder(id);
     todos::remove(id);
+  } else if (strcmp(type, "todo_time") == 0) {
+    const uint32_t at = msg["at"] | 0u;
+    todoSetTime(msg["id"] | 0u, at > epochNow() ? at : 0);
   } else if (strcmp(type, "todo_star") == 0) {
     todos::setStar(msg["id"] | 0u, msg["star"] | true);
   }
@@ -1082,6 +1163,7 @@ void todoShown() {
 void todoHidden() {
   if (todoView.voice != todoscreen::VOICE_IDLE || todoView.kb.voice != todoscreen::VOICE_IDLE) todoStopVoice();
   todoView.kb = todoscreen::Keyboard();
+  todoView.pick = todoscreen::Picker();
   todoView.openRow = -1;
   todoScrolled = false;
 }
@@ -1110,6 +1192,137 @@ void todoMove(int x, int y) {
   }
 }
 
+// The time picker: for a task on the list (id), or for the task being typed (id 0)
+void todoOpenPicker(uint32_t id) {
+  const int32_t today = todoToday();
+  if (today == todos::NO_DAY) {
+    if (id) todoToast("I don't know the time yet", false);
+    else todoKbSay("I don't know the time yet");
+    return;
+  }
+  todoscreen::Picker& p = todoView.pick;
+  p = todoscreen::Picker();
+  p.open = true;
+  p.taskId = id;
+  p.today = today;
+  p.day = today;
+  // start from: the task's time, else the next full hour (at least 9:00)
+  const time_t now = wallclock::now();
+  struct tm lt;
+  localtime_r(&now, &lt);
+  p.minute = max(9 * 60, (lt.tm_hour + 1) * 60);
+  if (p.minute >= 24 * 60) {
+    p.minute = 9 * 60;
+    p.day = today + 1;
+  }
+  if (id) {
+    const todos::Task* t = todos::find(id);
+    if (!t) return;
+    snprintf(p.title, sizeof p.title, "%s", t->text);
+    if (t->due != todos::NO_DAY && t->due > today) p.day = t->due;
+    if (t->remindAt) {
+      const time_t at = t->remindAt;
+      struct tm r;
+      localtime_r(&at, &r);
+      p.minute = r.tm_hour * 60 + r.tm_min;
+      p.day = max(today, todos::dayOf(at));
+      p.hadTime = true;
+    }
+  } else {
+    const todoscreen::Keyboard& kb = todoView.kb;
+    snprintf(p.title, sizeof p.title, "%s", kb.text);
+    const int32_t due = todoDueFor(kb.when, today);
+    if (due != todos::NO_DAY) p.day = due;
+    if (kb.atMinute >= 0) {
+      p.day = max(today, kb.atDay);
+      p.minute = kb.atMinute;
+      p.hadTime = true;
+    }
+  }
+  if (p.day > today + todoscreen::PICK_DAYS - 1) p.day = today + todoscreen::PICK_DAYS - 1;
+  todoView.openRow = -1;
+  todoFull = true;
+}
+
+void todoClosePicker() {
+  todoView.pick.open = false;
+  todoPickNoteUntil = 0;
+  todoFull = true;
+}
+
+void todoPickSay(const char* text) {
+  todoView.pick.note = text;
+  todoPickNoteUntil = millis() + TODO_NOTE_MS;
+}
+
+void onPickTap(const todoscreen::TapResult& t) {
+  todoscreen::Picker& p = todoView.pick;
+  switch (t.index) {
+    case todoscreen::PICK_DAY: p.day = p.today + t.action; break;
+    case todoscreen::PICK_HOUR_UP: p.minute = (p.minute + 60) % (24 * 60); break;
+    case todoscreen::PICK_HOUR_DOWN: p.minute = (p.minute + 23 * 60) % (24 * 60); break;
+    case todoscreen::PICK_MIN_UP: p.minute = p.minute / 60 * 60 + (p.minute % 60 / 5 * 5 + 5) % 60; break;
+    case todoscreen::PICK_MIN_DOWN: p.minute = p.minute / 60 * 60 + ((p.minute % 60 + 4) / 5 * 5 + 55) % 60; break;
+    case todoscreen::PICK_QUICK_TIME: {
+      const int q = todoscreen::QUICK_MINUTES[t.action];
+      if (q >= 0) {
+        p.minute = q;
+        // a time that has passed today means tomorrow
+        if (p.day == p.today && todoEpochAt(p.day, q) <= epochNow()) p.day = p.today + 1;
+      } else {  // in 1 hour, rounded up to 5 minutes
+        const time_t at = wallclock::now() + 3600 + 299;
+        struct tm r;
+        localtime_r(&at, &r);
+        p.minute = r.tm_hour * 60 + r.tm_min / 5 * 5;
+        p.day = todos::dayOf(at);
+      }
+      break;
+    }
+    case todoscreen::PICK_CLEAR:
+      if (p.taskId) {
+        todoSetTime(p.taskId, 0);
+        todoToast("Reminder removed", false);
+      } else {
+        todoView.kb.atMinute = -1;
+      }
+      todoClosePicker();
+      break;
+    case todoscreen::PICK_CANCEL: todoClosePicker(); break;
+    case todoscreen::PICK_SET: {
+      const uint32_t at = todoEpochAt(p.day, p.minute);
+      if (at <= epochNow()) {
+        todoPickSay("That time has passed. Pick a later one.");
+        break;
+      }
+      if (p.taskId) {
+        todoSetTime(p.taskId, at);
+        const todos::Task* task = todos::find(p.taskId);
+        if (task) {  // show it in its list
+          todoView.tab = todos::sectionOf(*task, todoToday());
+          todoView.first = 0;
+        }
+        todoFreshId = p.taskId;
+        todoFreshUntil = millis() + 1500;
+        char msg[48];
+        snprintf(msg, sizeof msg, "I'll remind you %s at %d:%02d",
+                 p.day == p.today ? "today" : p.day == p.today + 1 ? "tomorrow" : todoscreen::dayName(p.day, p.today),
+                 p.minute / 60, p.minute % 60);
+        todoToast(msg, false);
+      } else {
+        todoscreen::Keyboard& kb = todoView.kb;
+        kb.atDay = p.day;
+        kb.atMinute = p.minute;
+        kb.when = todoscreen::WHEN_NONE;
+        if (p.day == p.today) snprintf(kb.atLabel, sizeof kb.atLabel, "%d:%02d", p.minute / 60, p.minute % 60);
+        else snprintf(kb.atLabel, sizeof kb.atLabel, "%s %d:%02d", todoscreen::dayName(p.day, p.today), p.minute / 60,
+                      p.minute % 60);
+      }
+      todoClosePicker();
+      break;
+    }
+  }
+}
+
 void onTodoTap(int x, int y) {
   todoscreen::Keyboard& kb = todoView.kb;
   if (todoScrolled) {
@@ -1121,11 +1334,18 @@ void onTodoTap(int x, int y) {
   const todoscreen::TapResult t = todoscreen::tap(x, y, todoView);
   const todoscreen::Row* row = (t.index >= 0 && t.index < todoView.rowCount) ? &todoView.rows[t.index] : nullptr;
   switch (t.what) {
+    case todoscreen::Tap::Pick:
+      onPickTap(t);
+      return;
+    case todoscreen::Tap::KbTime:
+      todoOpenPicker(0);
+      return;
     case todoscreen::Tap::KbKey:
       if (pressedKey == t.index && todoscreen::press(kb, t.index) == todoscreen::Press::Add) todoAddFromKeyboard();
       return;
     case todoscreen::Tap::KbWhen:
       kb.when = kb.when == t.index ? todoscreen::WHEN_NONE : (uint8_t)t.index;
+      kb.atMinute = -1;  // a day chip replaces a picked time
       return;
     case todoscreen::Tap::KbStar:
       kb.star = !kb.star;
@@ -1183,13 +1403,27 @@ void onTodoTap(int x, int y) {
             todoToast("I don't know the date yet", false);
             break;
           }
-          todos::setDue(id, today + (t.action == todoscreen::ACT_TOMORROW ? 1 : 0), false);
+          {
+            const int32_t day = today + (t.action == todoscreen::ACT_TOMORROW ? 1 : 0);
+            const todos::Task* task = todos::find(id);
+            if (task && task->remindAt) {  // its reminder moves along, same time of day
+              const time_t at = task->remindAt;
+              struct tm r;
+              localtime_r(&at, &r);
+              const uint32_t moved = todoEpochAt(day, r.tm_hour * 60 + r.tm_min);
+              todoSetTime(id, moved > epochNow() ? moved : 0);
+            }
+            todos::setDue(id, day, false);
+          }
           todoFreshId = id;
           todoFreshUntil = millis() + 1500;
           break;
         case todoscreen::ACT_NOT_DONE:
           todos::setDone(id, false, 0);
           todoArmReminder(id);
+          break;
+        case todoscreen::ACT_TIME:
+          todoOpenPicker(id);
           break;
         case todoscreen::ACT_DELETE: {
           const todos::Task* task = todos::find(id);
@@ -1253,6 +1487,23 @@ void drawTodo() {
   v.allDone = v.counts[todos::TODAY] == 0 && todoAllDoneToday(today);
   v.kb.note = todoKbNoteUntil ? todoKbNote : "";
   auto draw = [](gfx::Canvas& c) { todoscreen::draw(c, todoView); };
+  if (v.pick.open) {
+    const uint32_t days = mix(2166136261u, (uint32_t)(v.pick.day - v.pick.today));
+    const uint32_t time = mixText(mix(2166136261u, (uint32_t)v.pick.minute), v.pick.note);
+    if (todoFull) {
+      display::render(todoscreen::AREA, ui::BACKGROUND, draw);
+    } else {
+      if (days != todoPickDaysKey) display::render(todoscreen::PICK_DAYS_AREA, ui::BACKGROUND, draw);
+      if (time != todoPickTimeKey) {
+        display::render(todoscreen::PICK_TIME_AREA, ui::BACKGROUND, draw);
+        display::render(todoscreen::KB_BOTTOM_AREA, ui::BACKGROUND, draw);  // "Remind at 17:00"
+      }
+    }
+    todoPickDaysKey = days;
+    todoPickTimeKey = time;
+    todoFull = false;
+    return;
+  }
   if (v.kb.open) {
     const uint32_t field = mixText(2166136261u, v.kb.text);
     const uint32_t when = mix(mix(2166136261u, v.kb.when), v.kb.star);
@@ -1312,6 +1563,10 @@ void updateTodo(uint32_t now) {
     todoUndoKind = TodoUndo::None;
   }
   if (todoKbNoteUntil && (int32_t)(now - todoKbNoteUntil) >= 0) todoKbNoteUntil = 0;
+  if (todoPickNoteUntil && (int32_t)(now - todoPickNoteUntil) >= 0) {
+    todoPickNoteUntil = 0;
+    todoView.pick.note = "";
+  }
   static uint32_t lastTidy = 0;
   if (msSince(now, lastTidy) > 60 * 1000) {  // finished tasks older than a week go
     lastTidy = now;
@@ -1704,7 +1959,20 @@ void handleTouch(uint32_t now) {
     touchUsed = true;
     touchTarget = ui::Target::None;
     lastActivity = now;
-    endAlert(true);
+    const ui::Target hit = alertButtons ? ui::hitTest(tp.x, tp.y) : ui::Target::None;
+    if (hit == ui::Target::AlertMain && alertTodoId) {  // "Done": tick the to-do off
+      const uint32_t id = alertTodoId;
+      todos::setDone(id, true, epochNow());
+      endAlert(true, "Nice, ticked off!");
+    } else if (hit == ui::Target::AlertLater && epochNow()) {  // ring again in 10 minutes
+      const uint32_t id = alertTodoId, at = epochNow() + SNOOZE_SECONDS;
+      const String text = alertRemindText;
+      if (id) todoSetTime(id, at);
+      else alarms::remindAt((time_t)at, text.c_str());
+      endAlert(true, "Okay, again in 10 minutes!");
+    } else {
+      endAlert(true);
+    }
     return;
   }
   if (touchUsed) {  // wait for the finger to lift
@@ -1784,7 +2052,7 @@ void handleTouch(uint32_t now) {
     // A sideways drag in the middle of the screen moves the screens
     if (touchTarget == ui::Target::Face && !swiping && !longPressDone && abs(dx) > 16 &&
         abs(dx) * 5 > abs(tp.y - touchY0) * 6 &&
-        !(page == Page::Todo && (todoView.kb.open || todoScrolled)) && !(musicTouch && musicpage::blocksSwipe())) {
+        !(page == Page::Todo && (todoView.kb.open || todoView.pick.open || todoScrolled)) && !(musicTouch && musicpage::blocksSwipe())) {
       swiping = true;
       if (musicTouch) {
         musicTouch = false;
