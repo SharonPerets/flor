@@ -53,7 +53,7 @@
 #include "ui.h"
 
 // Shown at startup and sent to the helper, so it's easy to see which version is running
-#define GORGI_VERSION "4.8.19"
+#define GORGI_VERSION "4.8.20"
 
 namespace pclink {
 
