@@ -5,6 +5,7 @@ tag like [happy]. It can also ask for music actions with tags like
 [action:next]. This module turns a reply into (mood, spoken text, actions).
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -116,6 +117,32 @@ class Brain:
             r.raise_for_status()
             return sorted(m["name"] for m in r.json().get("models", []))
 
+    async def _post_chat(self, body):
+        """Sends the chat request. A server hiccup (5xx, a dropped connection) or a 400 gets a second
+        try after a short pause; a 400 for a thinking model is tried again without "think"."""
+        r = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=60) as client:
+                    r = await client.post(f"{self._base_url()}/api/chat", json=body, headers=self._headers())
+            except httpx.HTTPError as e:
+                log.warning("AI request failed (try %d): %r", attempt + 1, e)
+                if attempt == 2:
+                    raise BrainError("I can't reach my brain right now. Is the internet working?")
+                await asyncio.sleep(1.5)
+                continue
+            if r.status_code < 400 or r.status_code in (401, 403, 404, 429):
+                return r
+            log.warning("AI error %s (try %d, model %s): %s", r.status_code, attempt + 1, body.get("model"),
+                        r.text[:300])
+            if attempt == 2:
+                break
+            if r.status_code == 400 and "think" in body:
+                body = dict(body)
+                body.pop("think")  # some servers refuse it
+            await asyncio.sleep(1.5)
+        return r
+
     async def ask(self, text, context):
         """Ask Gorgi something. context: a line about time / music to help the model."""
         if self.needs_key():
@@ -132,12 +159,7 @@ class Brain:
         if model.startswith("gpt-oss"):
             body["think"] = "low"  # these models think before answering; keep it quick
 
-        try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                r = await client.post(f"{self._base_url()}/api/chat", json=body, headers=self._headers())
-        except httpx.HTTPError as e:
-            log.warning("AI request failed: %s", e)
-            raise BrainError("I can't reach my brain right now. Is the internet working?")
+        r = await self._post_chat(body)
 
         if r.status_code in (401, 403):
             raise BrainError("My Ollama key doesn't work. Please check it in Settings.", "confused")
@@ -146,7 +168,6 @@ class Brain:
         if r.status_code == 429:
             raise BrainError("I've been thinking too much today. Ollama says to slow down for a bit.", "sleepy")
         if r.status_code >= 400:
-            log.warning("AI error %s: %s", r.status_code, r.text[:300])
             raise BrainError("Something went wrong in my brain. Let's try again.", "confused")
 
         reply = (r.json().get("message") or {}).get("content", "").strip()

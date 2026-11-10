@@ -279,6 +279,12 @@ Done and confirmed:
   gives `Target::Talk`; on the face page it starts/stops talking. Touching the face itself does nothing (long press
   still cycles moods, swipes still work). Mock-up: /mnt/project-files/talk-button/.
 
+- **4.8.13 - brain retries** (helper only, on top of 4.8.12; branch `claude/project-thread-9uc4k7`; NOT confirmed yet):
+  user on 4.8.12: Talk heard them, then "Something went wrong in my brain" (= Ollama answered an HTTP error other than
+  401/403/404/429; not caused by the Talk button, which sends the same `talk`). `Brain._post_chat` now tries 3 times
+  (1.5 s apart) on 5xx / 400 / dropped connections, drops `think` after a 400, and logs "AI error <code> (try n, model)".
+  Test: `test_brain.py`. If it still fails, ask for `gorgi-helper.log` lines "AI error".
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
@@ -305,6 +311,7 @@ Done and confirmed:
   `claude/project-thread-fkdcer`. Waiting for the user's test.
 - **4.8.12** (round Talk button left of the face; touching the face no longer talks) = 4.8.11 + that, branch
   `claude/project-thread-9uc4k7`. Waiting for the user's test.
+- **4.8.13** (helper retries Ollama errors) = 4.8.12 + that, branch `claude/project-thread-9uc4k7`. Waiting for the user's test.
 
 Lessons from 3.9 (keep for future screens):
 - Every screen that needs voice should have its own talk button (the user didn't know where to tap).
