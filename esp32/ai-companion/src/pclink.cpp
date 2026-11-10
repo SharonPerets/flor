@@ -94,6 +94,7 @@ void handleMessage(uint8_t client, const uint8_t* payload, size_t length) {
     m.dur = doc["dur"] | 0.0f;
     m.posAtMs = millis();
     m.artId = doc["art"] | 0u;
+    m.liked = doc["liked"].is<bool>() ? (doc["liked"].as<bool>() ? 1 : 0) : -1;
     if (handlers.onMedia) handlers.onMedia(m);
   } else if (strcmp(type, "clock") == 0) {
     if (handlers.onClock) handlers.onClock(String((const char*)(doc["text"] | "")), doc["epoch"] | 0u);

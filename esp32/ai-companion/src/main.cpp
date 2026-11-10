@@ -1593,7 +1593,8 @@ void sendVolume(bool force) {
 
 void onTap(ui::Target target) {
   bool pc = pclink::helperConnected();
-  bool mediaButton = target == ui::Target::PlayPause || target == ui::Target::Next || target == ui::Target::Prev;
+  bool mediaButton = target == ui::Target::PlayPause || target == ui::Target::Next || target == ui::Target::Prev ||
+                     target == ui::Target::Like || target == ui::Target::Dislike;
   if (mediaButton && !pc) {
     react(Mood::Confused, "My PC helper isn't connected yet.");
     return;
@@ -1627,6 +1628,18 @@ void onTap(ui::Target target) {
     case ui::Target::Prev:
       pclink::sendCommand("prev");
       react(Mood::Happy, "Going back!");
+      break;
+    case ui::Target::Like:  // YouTube Music: like it, or un-like it when it's already liked
+      pclink::sendCommand("like");
+      media.liked = media.liked == 1 ? 0 : 1;  // the PC confirms a moment later
+      ui::setLiked(media.liked);
+      if (media.liked == 1) react(Mood::Love, "Ooh, I like this one too!");
+      break;
+    case ui::Target::Dislike:  // YouTube Music: dislike it (and it skips to the next song)
+      pclink::sendCommand("dislike");
+      media.liked = 0;
+      ui::setLiked(0);
+      react(Mood::Neutral, "Okay, skipping that one.");
       break;
     default:
       break;

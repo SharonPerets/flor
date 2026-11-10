@@ -41,6 +41,7 @@ from timekeeper import TimeKeeper  # noqa: E402
 from todolist import TodoKeeper  # noqa: E402
 import updater  # noqa: E402
 import weather  # noqa: E402
+import ytmusic  # noqa: E402
 
 APP_NAME = "Gorgi Helper"
 VERSION = "4.8.15"  # must match esp32/VERSION
@@ -218,8 +219,9 @@ def make_update_window(on_word):
 
 class Helper:
     def __init__(self, media, config, on_status=None, make_conversation=None, timekeeper=None, speak=None,
-                 todos=None):
+                 todos=None, ytm=None):
         self.media = media
+        self.ytm = ytm  # your YouTube Music account (Liked songs, like / dislike), or None
         self.config = config
         self.timekeeper = timekeeper or TimeKeeper()  # Gorgi's timers and reminders, for the AI
         self.todos = todos or TodoKeeper()  # Gorgi's to-do list, for the AI
@@ -724,6 +726,9 @@ class Helper:
             if action == "check_updates":
                 asyncio.get_running_loop().create_task(self.check_updates_soon())
                 continue
+            if action in ("like", "dislike"):
+                asyncio.get_running_loop().create_task(self.rate_current(action))
+                continue
             if action in ("playpause", "next", "prev"):
                 await self.media.command(action)
             elif action == "volume" and isinstance(msg.get("value"), (int, float)):
@@ -731,6 +736,48 @@ class Helper:
                 self.ignore_volume_until = time.monotonic() + 0.5
             # Report the new state soon, once the media app has reacted
             asyncio.get_running_loop().call_later(0.4, self.refresh_event.set)
+
+    # ------------------------------------------------------------ YouTube Music
+
+    async def rate_current(self, action):
+        """Gorgi's thumbs: "like" likes the song playing now (or un-likes it), "dislike" dislikes it and skips."""
+        try:
+            info = await self.media.get_info()
+            if not info["title"]:
+                return
+            if self.ytm is None or not self.ytm.connected():
+                self.on_notify("Gorgi", "To like songs from Gorgi, connect YouTube Music in Gorgi Helper's settings.")
+                return
+            if action == "like":
+                rating = "INDIFFERENT" if self.ytm.is_liked(info["title"], info["artist"]) else "LIKE"
+            else:
+                rating = "DISLIKE"
+            problem = await asyncio.to_thread(self.ytm.rate, info["title"], info["artist"], rating)
+            if problem:
+                self.on_notify("Gorgi", problem)
+            elif action == "dislike":
+                await self.media.command("next")
+        except Exception as e:
+            log.warning("like / dislike failed: %s", e)
+        finally:
+            self.refresh_event.set()  # Gorgi gets the real thumbs-up state
+
+    async def ytm_loop(self):
+        """Keeps your Liked songs list fresh (for the thumbs-up on Gorgi)."""
+        if self.ytm is None:
+            return
+        while not self.stop_event.is_set():
+            if self.ytm.connected():
+                try:
+                    if not self.ytm.liked_at:
+                        log.info("YouTube Music connected: reading your Liked songs")
+                    await asyncio.to_thread(self.ytm.refresh_liked)
+                    self.refresh_event.set()
+                except Exception as e:
+                    log.warning("Liked songs: %s", e)
+            elif self.ytm.liked_at:
+                self.ytm.liked, self.ytm.liked_at = [], 0.0  # disconnected in Settings
+            await self._sleep(20)
 
     # ------------------------------------------------------------ Claude Code and calls
 
@@ -864,6 +911,9 @@ class Helper:
                 "volume": 50 if volume is None else volume,
                 "art": art_id,
             }
+            liked = self.ytm.is_liked(info["title"], info["artist"]) if self.ytm else None
+            if liked is not None:
+                media["liked"] = liked  # the thumbs-up on Gorgi's Music screen
             pos, dur = info.get("pos"), info.get("dur")
             # The position moves all the time; Gorgi counts along by itself. It's
             # only sent again when it jumps (you skipped ahead) or with other news.
@@ -1047,7 +1097,11 @@ def run_settings_window():
 
         return asyncio.run(check_all())
 
-    show_window(config, save_config, check_keys)
+    folder = data_dir()
+    show_window(config, save_config, check_keys,
+                youtube=(lambda: (folder / ytmusic.AUTH_FILE).exists(),
+                         lambda headers: ytmusic.connect(folder, headers),
+                         lambda: ytmusic.disconnect(folder)))
 
 
 # ---------------------------------------------------------------- voice
@@ -1075,9 +1129,9 @@ def make_voice(config):
         voice = config.get("voice") or "en-US-AnaNeural"  # read each time: Settings may change it
         return Speaker(voice, pitch="+5Hz")
 
-    def factory(send, media, timekeeper, extra_context=None, todos=None):
+    def factory(send, media, timekeeper, extra_context=None, todos=None, music=None):
         return Conversation(send, media, brain, Recorder(), transcriber, speaker(), timekeeper=timekeeper,
-                            extra_context=extra_context, todos=todos)
+                            extra_context=extra_context, todos=todos, music=music)
 
     async def speak(text):
         await speaker().say(text)
@@ -1172,6 +1226,14 @@ def self_test(out_path):
         task = todolist.parse_spoken("buy milk tomorrow")
         assert task["text"] == "Buy milk" and task["due"], task
         lines.append(f"to-do from speech: {task}")
+        # YouTube Music search (no sign-in): what "play ..." would open. ::notice:: lines show up on GitHub.
+        acc = ytmusic.Account(Path(out_path).resolve().parent)
+        for query in ("Muse", "Hysteria by Muse", "Absolution Muse"):
+            try:
+                url, name = acc.url_for(query)
+                lines.append(f"::notice::youtube music: play {query!r} -> {name!r} {url}")
+            except Exception as e:
+                lines.append(f"::warning::youtube music search {query!r} failed: {e!r}")
         from voice import word_timings
 
         assert word_timings("Hi there", [(0.1, "Hi"), (0.4, "there")], 1.0) == [[100, 1], [400, 2]]
@@ -1287,6 +1349,7 @@ def main():
     voice_factory, speak = make_voice(config)
     timekeeper = TimeKeeper()
     todos = TodoKeeper()
+    ytm = ytmusic.Account(data_dir())
     helper = None
 
     def extra_context():
@@ -1295,10 +1358,10 @@ def main():
             lines.append("Your friend is on a Teams call right now.")
         return "\n".join(x for x in lines if x)
 
-    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context, todos))
+    make_conversation = ((lambda send: voice_factory(send, media, timekeeper, extra_context, todos, ytm))
                          if voice_factory else None)
     helper = Helper(media, config, make_conversation=make_conversation, timekeeper=timekeeper, speak=speak,
-                    todos=todos)
+                    todos=todos, ytm=ytm)
     icon = None
     if not args.no_tray:
         icon = start_tray(helper, loop)
@@ -1314,7 +1377,7 @@ def main():
         usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),
                                                helper.claude.serve(helper.stop_event), helper.call_loop(),
-                                               usage.run(helper.stop_event)))
+                                               usage.run(helper.stop_event), helper.ytm_loop()))
     except KeyboardInterrupt:
         pass
     finally:

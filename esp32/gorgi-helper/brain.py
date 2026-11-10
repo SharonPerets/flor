@@ -14,6 +14,7 @@ import httpx
 
 import timekeeper
 import todolist
+import ytmusic
 
 log = logging.getLogger("gorgi.brain")
 
@@ -57,7 +58,7 @@ and don't repeat facts you already remember. If they ask you to forget something
 [forget: words from that fact], or [forget: everything] to forget it all.
 Use what you remember naturally, without listing it.
 
-""" + timekeeper.PROMPT + "\n\n" + todolist.PROMPT + "\n"
+""" + ytmusic.PROMPT + "\n\n" + timekeeper.PROMPT + "\n\n" + todolist.PROMPT + "\n"
 
 MEMORY_RE = re.compile(r"\[(remember|forget)\s*:\s*([^\]]+)\]", re.IGNORECASE)
 
@@ -78,13 +79,14 @@ def parse_reply(reply):
 
     Memory tags come out as ('remember', 'fact') and ('forget', 'words'), time tags
     as ('timer', '10m | pasta'), ('remind', ...), ('focus', ...), ('cancel', ...), to-do tags as
-    ('todo', 'add buy milk | tomorrow')."""
+    ('todo', 'add buy milk | tomorrow'), YouTube Music tags as ('music', 'play Muse')."""
     mood = None
     actions = [(m.group(1).lower(), m.group(2).strip()) for m in MEMORY_RE.finditer(reply)]
     reply = MEMORY_RE.sub("", reply)
     reply, todo_tags = todolist.extract(reply)
     reply, time_tags = timekeeper.extract(reply)
-    actions += time_tags + todo_tags
+    reply, music_tags = ytmusic.extract(reply)
+    actions += time_tags + todo_tags + music_tags
     for m in TAG_RE.finditer(reply):
         name = m.group(1).lower()
         if name in MOODS and mood is None:

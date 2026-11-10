@@ -1,4 +1,4 @@
-"""A small Settings window: AI keys (Groq, Gemini, Ollama), Gorgi's voice, Claude Code."""
+"""A small Settings window: AI keys (Groq, Gemini, Ollama), Gorgi's voice, Claude Code, YouTube Music."""
 
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -18,12 +18,66 @@ KEYS = [  # (config key, label, where to get one)
 ]
 
 
-def show_window(config, save_config, check_keys):
+YT_STEPS = """Gorgi needs your YouTube Music sign-in to show your Liked songs and to like or dislike songs.
+Copy it once from your browser (about 2 minutes):
+
+1. In Chrome or Edge, open music.youtube.com (signed in, as usual).
+2. Press F12. In the panel that opens, click the Network tab.
+3. In its Filter box, type:  browse
+4. On the YouTube Music page, click Library. A line called "browse" appears in the list.
+5. Right-click that line → Copy → Copy request headers.
+6. Paste it in the box below and press Connect. You can close the F12 panel after that.
+
+This works like a password: it stays only on this PC (in Gorgi Helper's settings folder)
+and is only sent to YouTube. If you sign out of YouTube Music, connect again."""
+
+
+def connect_youtube_window(root, connect):
+    """The "Connect YouTube Music" steps, a box to paste into, and a Connect button.
+    connect(text) -> (ok, message). Returns True if it connected."""
+    win = tk.Toplevel(root)
+    win.title("Connect YouTube Music")
+    win.resizable(False, False)
+    win.attributes("-topmost", True)
+    win.transient(root)
+    frame = ttk.Frame(win, padding=16)
+    frame.grid()
+    ttk.Label(frame, text=YT_STEPS, justify="left").grid(row=0, column=0, columnspan=2, sticky="w")
+    box = tk.Text(frame, width=70, height=8, wrap="none")
+    box.grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 6))
+    result = tk.StringVar(value="")
+    ttk.Label(frame, textvariable=result, foreground="#444", wraplength=480, justify="left").grid(
+        row=2, column=0, sticky="w")
+    done = {"ok": False}
+
+    def go():
+        result.set("Checking with YouTube Music...")
+        win.update()
+        try:
+            ok, message = connect(box.get("1.0", "end"))
+        except Exception as e:  # noqa: BLE001
+            ok, message = False, f"Couldn't connect: {e}"
+        result.set(("✓ " if ok else "✗ ") + message)
+        if ok:
+            done["ok"] = True
+            box.delete("1.0", "end")  # don't leave the sign-in on screen
+            connect_button.configure(text="Close", command=win.destroy)
+
+    connect_button = ttk.Button(frame, text="Connect", command=go)
+    connect_button.grid(row=2, column=1, sticky="e", padx=(8, 0))
+    box.focus_set()
+    win.grab_set()
+    root.wait_window(win)
+    return done["ok"]
+
+
+def show_window(config, save_config, check_keys, youtube=None):
     """Shows the Settings window and returns when it's closed.
 
     Runs in its own process (GorgiHelper.exe --settings): Tkinter must own the
     main thread of a process, or it can crash the app later.
     check_keys({config key: key}) -> [(service name, ok, short text)].
+    youtube: (is_connected(), connect(text) -> (ok, message), disconnect()), or None.
     """
     root = tk.Tk()
     root.title("Gorgi Helper - Settings")
@@ -102,6 +156,29 @@ def show_window(config, save_config, check_keys):
 
     refresh_claude()
 
+    # YouTube Music: your sign-in, for Liked songs and like / dislike (takes effect right away)
+    row += 4
+    if youtube is not None:
+        is_connected, connect_yt, disconnect_yt = youtube
+        ttk.Label(frame, text="YouTube Music").grid(row=row, column=0, sticky="w")
+        yt_var = tk.StringVar()
+        ttk.Label(frame, textvariable=yt_var, foreground="#666").grid(row=row + 1, column=0, sticky="w", pady=(2, 14))
+        yt_button = ttk.Button(frame)
+        yt_button.grid(row=row + 1, column=1, padx=(8, 0), pady=(2, 14))
+
+        def refresh_yt():
+            if is_connected():
+                yt_var.set("Connected: Liked songs and thumbs work")
+                yt_button.configure(text="Disconnect", command=lambda: (disconnect_yt(), refresh_yt()))
+            else:
+                yt_var.set("Not connected: Gorgi can search and play, but not like")
+                yt_button.configure(text="Connect YouTube Music...",
+                                    command=lambda: (connect_youtube_window(root, connect_yt), refresh_yt()))
+
+        refresh_yt()
+        row += 2
+    row -= 4
+
     def save():
         for name, var in key_vars.items():
             config[name] = var.get().strip()
@@ -110,7 +187,7 @@ def show_window(config, save_config, check_keys):
         root.destroy()
 
     buttons = ttk.Frame(frame)
-    buttons.grid(row=row + 4, column=0, columnspan=2, sticky="e")
+    buttons.grid(row=row + 8, column=0, columnspan=2, sticky="e")
     ttk.Button(buttons, text="Cancel", command=root.destroy).grid(row=0, column=0, padx=(0, 8))
     ttk.Button(buttons, text="Save", command=save).grid(row=0, column=1)
 

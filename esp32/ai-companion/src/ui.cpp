@@ -47,10 +47,11 @@ constexpr Rect TEXT_AREA{TEXT_X - 8, BAR_Y + 4, TEXT_W + 16, BAR_H - 8};
 constexpr Rect BUTTON_AREA{PREV_X - 34, BAR_Y + 4, NEXT_X - PREV_X + 68, BAR_H - 8};
 constexpr Rect VOLUME_AREA{560, BAR_Y + 4, 224, BAR_H - 8};
 // The Music screen's own bar ("deck"): bigger buttons and a wide volume slider, always open
-constexpr int DECK_PREV_X = 100, DECK_PLAY_X = 168, DECK_NEXT_X = 236;
-constexpr int DECK_VOL_X0 = 340, DECK_VOL_X1 = 680;
-constexpr Rect DECK_BUTTON_AREA{60, BAR_Y + 4, 220, BAR_H - 8};
-constexpr Rect DECK_VOLUME_AREA{290, BAR_Y + 4, 486, BAR_H - 8};
+constexpr int DECK_PREV_X = 80, DECK_PLAY_X = 146, DECK_NEXT_X = 212;
+constexpr int DECK_LIKE_X = 292, DECK_DISLIKE_X = 352;  // thumbs up / down (YouTube Music, since 4.9)
+constexpr int DECK_VOL_X0 = 440, DECK_VOL_X1 = 690;
+constexpr Rect DECK_BUTTON_AREA{40, BAR_Y + 4, 352, BAR_H - 8};
+constexpr Rect DECK_VOLUME_AREA{392, BAR_Y + 4, 384, BAR_H - 8};
 
 String clockText = "Gorgi";
 String chipText = "";
@@ -125,6 +126,21 @@ void iconSpeaker(Canvas& c, float cx, float cy, const Color& col, bool loud) {
     c.strokeArc(cx + 3.0f, cy, 6.5f, 2.2f, -48, 48, col);
     c.strokeArc(cx + 3.0f, cy, 11.5f, 2.2f, -48, 48, col);
   }
+}
+
+// Thumbs up (or down: turned around), from a 24x24 icon grid, `size` px tall
+void iconThumb(Canvas& c, float cx, float cy, bool up, const Color& col, float size = 24) {
+  const float k = size / 24;
+  auto P = [&](float x, float y) {
+    if (!up) { x = 24 - x; y = 24 - y; }
+    return Pt{cx + (x - 12) * k, cy + (y - 12) * k};
+  };
+  const Pt cuff[4] = {P(1, 9.5f), P(5, 9.5f), P(5, 21), P(1, 21)};
+  const Pt finger[6] = {P(7, 9.2f), P(13.4f, 2.2f), P(14.9f, 2.4f), P(15.8f, 3.8f), P(14.8f, 9), P(7, 11)};
+  const Pt palm[8] = {P(7, 9.5f), P(14, 8.2f), P(21.2f, 8.2f), P(23, 10), P(23, 12), P(19.9f, 19.9f), P(18, 21), P(7, 21)};
+  c.fillPolygon(cuff, 4, col, 1.0f, 0.8f * k);
+  c.fillPolygon(finger, 6, col, 1.0f, 1.0f * k);
+  c.fillPolygon(palm, 8, col, 1.0f, 1.2f * k);
 }
 
 void iconMic(Canvas& c, float cx, float cy, const Color& col) {
@@ -361,18 +377,26 @@ void drawDeck(Canvas& c) {
   c.fillCircle(DECK_NEXT_X, BAR_CY, 28, pressed == Target::Next ? BTN_PRESSED : BTN);
   iconNext(c, DECK_NEXT_X, BAR_CY, TEXT);
 
+  // thumbs up (teal when the song is in your Liked songs) and down
+  const bool liked = media.liked == 1;
+  c.fillCircle(DECK_LIKE_X, BAR_CY, 26,
+               pressed == Target::Like ? (liked ? ACCENT_PRESSED : BTN_PRESSED) : (liked ? ACCENT : BTN));
+  iconThumb(c, DECK_LIKE_X, BAR_CY, true, liked ? PLAY_ICON : TEXT);
+  c.fillCircle(DECK_DISLIKE_X, BAR_CY, 26, pressed == Target::Dislike ? BTN_PRESSED : BTN);
+  iconThumb(c, DECK_DISLIKE_X, BAR_CY, false, TEXT);
+
   // volume: wide slider, big knob, and the number
-  iconSpeaker(c, 312, BAR_CY, TEXT_MUTED, false);
+  iconSpeaker(c, 418, BAR_CY, TEXT_MUTED, false);
   const int v = constrain(media.volume, 0, 100);
   const float kx = DECK_VOL_X0 + (DECK_VOL_X1 - DECK_VOL_X0) * v / 100.0f;
   c.fillRRect(DECK_VOL_X0, BAR_CY - 5, DECK_VOL_X1 - DECK_VOL_X0, 10, 5, TRACK);
   if (kx > DECK_VOL_X0) c.fillRRect(DECK_VOL_X0, BAR_CY - 5, kx - DECK_VOL_X0, 10, 5, ACCENT);
   c.fillCircle(kx, BAR_CY + 1, 16, BG, 0.35f);  // soft shadow
   c.fillCircle(kx, BAR_CY, 14, TEXT);
-  iconSpeaker(c, 706, BAR_CY, TEXT_MUTED, true);
+  iconSpeaker(c, 714, BAR_CY, TEXT_MUTED, true);
   char pct[8];
   snprintf(pct, sizeof pct, "%d%%", v);
-  c.text(gfont::SMALL, pct, 728, BAR_CY + 7, TEXT_MUTED);
+  c.text(gfont::SMALL, pct, 734, BAR_CY + 7, TEXT_MUTED);
 }
 
 void drawMini(Canvas& c) { tabs::drawMiniPlayer(c, media.title.c_str(), media.artist.c_str(), media.playing); }
@@ -521,6 +545,7 @@ void setMedia(const MediaInfo& info) {
   if (title != media.title || artist != media.artist) dirtyText = true;
   if (info.playing != media.playing) dirtyButtons = true;
   if (info.volume != media.volume) dirtyVolume = true;
+  if (info.liked != media.liked) dirtyButtons = true;
   media = info;
   media.title = title;
   media.artist = artist;
@@ -539,8 +564,15 @@ void setVolume(int volume) {
   dirtyVolume = true;
 }
 
+void setLiked(int8_t liked) {
+  if (liked == media.liked) return;
+  media.liked = liked;
+  dirtyButtons = true;
+}
+
 void showPressed(Target t) {
   if (t != Target::Prev && t != Target::PlayPause && t != Target::Next && t != Target::CallMute &&
+      !(deck && (t == Target::Like || t == Target::Dislike)) &&
       !(t == Target::Talk && subtitleVisible))
     return;
   pressed = t;
@@ -613,6 +645,8 @@ Target hitTest(int x, int y) {
     if (near(DECK_PREV_X, 34)) return Target::Prev;
     if (near(DECK_PLAY_X, 34)) return Target::PlayPause;
     if (near(DECK_NEXT_X, 34)) return Target::Next;
+    if (near(DECK_LIKE_X, 30)) return Target::Like;
+    if (near(DECK_DISLIKE_X, 30)) return Target::Dislike;
     if (x >= DECK_VOL_X0 - 40 && x <= DECK_VOL_X1 + 30) return Target::Volume;
     return Target::None;
   }

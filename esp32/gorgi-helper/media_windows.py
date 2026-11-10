@@ -219,6 +219,12 @@ class WindowsMedia:
         except Exception as e:
             log.warning("play failed: %s", e)
 
+    async def play_link(self, url):
+        """Plays a YouTube Music link (a song, a band, your Liked songs) in the background."""
+        if self._opening is not None and not self._opening.done():
+            self._opening.cancel()
+        self._opening = asyncio.get_running_loop().create_task(youtube_music.play_url(self, url))
+
     async def set_playing(self, play):
         """Explicit play or pause (used to pause music while you talk to Gorgi)."""
         try:

@@ -13,7 +13,7 @@ constexpr int TOP_H = 44;   // the top bar
 constexpr int FACE_X = 100;
 constexpr int FACE_Y = 56;  // a little lower since 4.3: the music bar folds away
 
-enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk };
+enum class Target { None, Clock, Face, Prev, PlayPause, Next, Volume, Tab, CallMute, Mini, Talk, Like, Dislike };
 
 struct MediaInfo {
   String title;
@@ -26,6 +26,7 @@ struct MediaInfo {
   float pos = 0, dur = 0;
   uint32_t posAtMs = 0;
   uint32_t artId = 0;  // album art sent by the helper (0 = none)
+  int8_t liked = -1;   // in your YouTube Music Liked songs: 1 yes, 0 no, -1 don't know
 };
 
 // Draws the empty screen background. Call once, after display::begin().
@@ -51,6 +52,7 @@ void setSubtitleReveal(int words);
 void setMedia(const MediaInfo& info);
 void setPlaying(bool playing);
 void setVolume(int volume);
+void setLiked(int8_t liked);  // the thumbs-up on the Music screen (1 = lit)
 void showPressed(Target t);  // brief highlight on a button
 // Screens: icons in the top bar (tabs.h), tap one to go there.
 void setTabs(const uint8_t* icons, int count);
