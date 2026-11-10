@@ -291,6 +291,15 @@ class Brain:
             raise BrainError("I can't find my thinking model. Please check Settings.", "confused")
         raise BrainError("Something went wrong in my brain. Let's try again.", "confused")
 
+    def note(self, text, reply):
+        """A question answered without the AI (see quick.py): kept in the chat so a follow-up
+        like "make it 15" still makes sense to the AI."""
+        if time.monotonic() - self.last_chat > FORGET_AFTER_SECONDS:
+            self.history = []
+        self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+        self.history = self.history[-MAX_HISTORY_TURNS * 2:]
+        self.last_chat = time.monotonic()
+
     async def ask(self, text, context):
         """Ask Gorgi something. context: a line about time / music to help the model."""
         if self.needs_key():

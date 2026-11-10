@@ -19,13 +19,20 @@ def update(msg):
         _received = time.time()
 
 
+def latest():
+    """The latest forecast message from Gorgi, or None if there's no recent one."""
+    if not _latest or time.time() - _received > MAX_AGE:
+        return None
+    return _latest
+
+
 def summary():
     """A few lines for the AI, or "" if there's no recent forecast."""
     if not _latest or time.time() - _received > MAX_AGE:
         return ""
     w = _latest
     now = w.get("now") or {}
-    lines = [f"Weather in {w['city']} (shown on your weather screen; swipe left on you to see it):"]
+    lines = [f"Weather in {w['city']} (pull down from the top of your screen and tap the weather to see it):"]
     if now:
         lines.append(f"  Now: {now.get('sky', '?')}, {now.get('temp', '?')} C "
                      f"(feels like {now.get('feels', '?')} C), humidity {now.get('humidity', '?')}%, "

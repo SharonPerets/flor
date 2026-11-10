@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 
+import quick
 import todolist
 import weather
 from brain import BrainError
@@ -137,15 +138,21 @@ class Conversation:
                     return
                 await self.send({"type": "heard", "text": text})
 
-                log.info("asking the AI...")
-                started = time.monotonic()
-                try:
-                    mood, spoken, actions = await self.brain.ask(text, self._context(info, paused_music))
-                except BrainError as e:
-                    log.info("AI problem: %s", e.spoken)
-                    await self._say(e.mood, e.spoken)
-                    return
-                log.info("AI answered in %.1f s", time.monotonic() - started)
+                fast = quick.answer(text, self.timekeeper)
+                if fast is not None:  # a timer or the weather: no need to ask the AI
+                    mood, spoken, actions = fast
+                    log.info("quick answer: %s %s", spoken, actions)
+                    self.brain.note(text, spoken)
+                else:
+                    log.info("asking the AI...")
+                    started = time.monotonic()
+                    try:
+                        mood, spoken, actions = await self.brain.ask(text, self._context(info, paused_music))
+                    except BrainError as e:
+                        log.info("AI problem: %s", e.spoken)
+                        await self._say(e.mood, e.spoken)
+                        return
+                    log.info("AI answered in %.1f s", time.monotonic() - started)
 
                 keep_talking, resume_music, problem = await self._do_actions(actions, resume_music)
                 if problem:  # e.g. too many timers: say that instead of "done!"

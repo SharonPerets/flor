@@ -30,9 +30,12 @@ PROMPT = """Your friend has a to-do list on your screen (shown below). When aske
 [todo: done call the bank]  ticks a task off (use words from the task)
 [todo: undone call the bank]  puts a ticked task back
 [todo: remove buy milk]  deletes a task
+[todo: time call the bank | 16:00]  sets a reminder time on a task already on the list (also "tomorrow 09:00",
+  "friday 17:00", "in 1h"); [todo: time call the bank | off] removes its reminder
 Use one tag per task. Use these tags whenever your friend says they need to do something, asks to add, finish,
 tick, complete or remove a to-do, or says they did something that is on the list.
 "Remind me at 5 to ..." without a list means a [remind:] reminder; "add to my list" means a to-do.
+"Remind me about <a task on the list> at 4" means [todo: time ...] on that task, not a new reminder.
 Confirm in a few words, like "Added!" or "Nice, ticked off!". To answer "what's on my list?", read the list below."""
 
 WEEKDAYS = timekeeper.DAY_WORDS
@@ -288,7 +291,7 @@ class TodoKeeper:
             return [], "I need my new update for the to-do list. Right-click my icon on your PC and update me!"
         v = " ".join(value.split()).strip()
         m = re.match(r"^(add|new|create|done|complete|completed|finish|finished|tick|check|undone|undo|reopen"
-                     r"|remove|delete|cancel|drop)\b[:\s]*(.*)$", v, re.IGNORECASE)
+                     r"|remove|delete|cancel|drop|time|remind|reminder)\b[:\s]*(.*)$", v, re.IGNORECASE)
         if not m:
             verb, rest = "add", v
         else:
@@ -300,6 +303,8 @@ class TodoKeeper:
                 return self._mark(rest, False)
             if verb in ("remove", "delete", "cancel", "drop"):
                 return self._remove(rest)
+            if verb in ("time", "remind", "reminder"):
+                return self._time(rest, now)
             return self._mark(rest, True)
         except Exception:
             log.exception("todo tag: %s", value)
@@ -355,6 +360,39 @@ class TodoKeeper:
         self.tasks = [t for t in self.tasks if t is not task]
         log.info("to-do remove: %s", task.get("text"))
         return [{"type": "todo_remove", "id": task["id"]}], None
+
+
+    def _time(self, rest, now):
+        text, sep, when = rest.partition("|")
+        if not sep:  # "call the bank at 4": the time is in the words
+            task = parse_spoken(text, now)
+            text, when = task["text"], text
+        pool = [t for t in self.tasks if not t.get("done")]
+        task, problem = self._pick(text, pool, "set a time for")
+        if problem:
+            return [], problem
+        w = " ".join(when.lower().split())
+        if re.fullmatch(r"(off|none|no time|no reminder|remove|clear|cancel)", w):
+            task["at"] = 0
+            log.info("to-do time off: %s", task.get("text"))
+            return [{"type": "todo_time", "id": task["id"], "at": 0}], None
+        at = None
+        m = re.match(r"^(?:in|after)\s+(.+)$", w)
+        if m:
+            seconds = timekeeper.parse_duration(m.group(1))
+            if seconds:
+                at = now + dt.timedelta(seconds=seconds)
+        else:
+            if not timekeeper.parse_clock(w) and re.fullmatch(r"(?:at\s+)?\d{1,2}", w):
+                w = "at " + re.sub(r"^at\s+", "", w)  # "4" -> "at 4"
+            at = parse_when(w, now)["at"]
+        if at is None:
+            return [], "At what time should I remind you?"
+        if at <= now:
+            return [], "That time has already passed. When should I remind you?"
+        task["at"] = int(at.timestamp())
+        log.info("to-do time %s: %s", at.strftime("%Y-%m-%d %H:%M"), task.get("text"))
+        return [{"type": "todo_time", "id": task["id"], "at": int(at.timestamp())}], None
 
 
 def extract(reply):

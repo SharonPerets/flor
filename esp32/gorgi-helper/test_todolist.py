@@ -85,3 +85,28 @@ print(mood, spoken, actions)
 assert spoken == "Added!" and actions == [("todo", "add buy milk | tomorrow"), ("todo", "done bank")]
 print(extract("Sure [TODO: remove milk]"))
 print("ALL OK")
+
+
+def test_time_on_existing():
+    import datetime as dt
+    import todolist
+    k = todolist.TodoKeeper()
+    k.update({"tasks": [{"id": 5, "text": "Call the bank about the card"}, {"id": 6, "text": "Buy milk"}]})
+    now = dt.datetime(2026, 11, 10, 13, 0)
+    msgs, problem = k.handle("time call the bank | 16:00", now)
+    assert problem is None and msgs == [{"type": "todo_time", "id": 5,
+                                        "at": int(dt.datetime(2026, 11, 10, 16, 0).timestamp())}], (msgs, problem)
+    msgs, problem = k.handle("remind bank thing | at 4", now)
+    assert msgs[0]["at"] == int(dt.datetime(2026, 11, 10, 16, 0).timestamp()), msgs
+    msgs, problem = k.handle("time buy milk | tomorrow 9am", now)
+    assert msgs[0]["id"] == 6 and msgs[0]["at"] == int(dt.datetime(2026, 11, 11, 9, 0).timestamp()), msgs
+    msgs, problem = k.handle("time buy milk | in 30m", now)
+    assert msgs[0]["at"] == int(dt.datetime(2026, 11, 10, 13, 30).timestamp()), msgs
+    msgs, problem = k.handle("time buy milk | off", now)
+    assert msgs == [{"type": "todo_time", "id": 6, "at": 0}], msgs
+    msgs, problem = k.handle("time walk the dog | 17:00", now)
+    assert msgs == [] and "couldn't find" in problem
+    print("time on an existing task: ok")
+
+
+test_time_on_existing()
