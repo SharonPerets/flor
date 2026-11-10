@@ -739,13 +739,12 @@ class Helper:
         asyncio.get_running_loop().create_task(self.send(self.claude_message()))
 
     def _claude_alert(self, kind, name, text):
-        if self.claude_muted:
-            log.info("claude alert (%s), muted: %s", kind, text)
-            return
-        log.info("claude alert (%s): %s", kind, text)
+        log.info("claude alert (%s)%s: %s", kind, " (muted)" if self.claude_muted else "", text)
         loop = asyncio.get_running_loop()
+        # Gorgi keeps it as a quiet notification when muted
         loop.create_task(self.send({"type": "claude_alert", "kind": kind, "name": name, "text": text}))
-        loop.create_task(self.announce(text))
+        if not self.claude_muted:  # muted: no pop-up or voice on the PC
+            loop.create_task(self.announce(text))
 
     async def call_loop(self):
         """Every 2 s: is Teams using the microphone?"""

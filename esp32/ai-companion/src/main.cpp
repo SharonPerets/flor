@@ -1441,9 +1441,9 @@ void onOther(const char* type, JsonObjectConst msg) {
     claudeDirty = true;
     updateClaudeBadge();
   } else if (strcmp(type, "claude_alert") == 0) {
-    if (claudeMuted) return;  // muted in the Action Center: nothing at all
     const bool waiting = strcmp(msg["kind"] | "done", "waiting") == 0;
-    if (inConversation || updating || (alertOn && !alertClaude)) {  // busy: keep it for the Action Center
+    // muted in the Action Center (no pop-up), or busy: keep it quietly for the Action Center
+    if (claudeMuted || inConversation || updating || (alertOn && !alertClaude)) {
       addMissed(actioncenter::CLAUDE, waiting ? "Claude needed you" : "Claude finished",
                 String((const char*)(msg["text"] | "")));
       return;
