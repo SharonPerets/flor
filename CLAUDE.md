@@ -352,6 +352,21 @@ Done and confirmed:
   YouTube's mobile client, which answers HTTP 400 when sent with the user's browser sign-in (CI, without sign-in, got
   28 timed lines for Would?). Lyrics are now always asked WITHOUT the sign-in (`self.ytm._anyone()`).
 
+- **4.8.22 - to-do reminders + quick voice answers** (firmware + helper, on top of 4.8.21; branch
+  `claude/project-thread-hqxgph`; NOT confirmed; pictures /mnt/project-files/todo-reminders/). User picked ideas 5 + 6.
+  Firmware: a task's row buttons got **Time** (`ACT_TIME`), the keyboard a **Time** chip (`Tap::KbTime`, `kb.atDay/atMinute`);
+  both open the time picker (`todoscreen::Picker`, drawn over the To-do screen: 7 day chips, hour/minute arrows (5-min
+  steps), quick times In 1 hour / 9 / 12 / 17 / 20, No reminder / Cancel / Remind at). `todos::setRemind` (moves the task
+  to that day), main `todoSetTime` (disarm, set, arm), `todoEpochAt(day, minute)` (mktime). Today/Tomorrow buttons move a
+  task's reminder along. A reminder that rings shows **Done** / **In 10 min** under the face (`ui::setAlertButtons`,
+  `Target::AlertMain/AlertLater`; plain reminders: OK / In 10 min). `alarms::Due.id` = the alarm that rang;
+  `todoForAlarm` finds its to-do. Helper message `todo_time` {id, at (0 = none)}; tag `[todo: time X | 16:00]`.
+  Helper `quick.py`: short timer sentences ("set a timer for 10 minutes for pasta", "cancel the timer", "how much time is
+  left?") and weather questions ("what's the weather", "will it rain tomorrow?", "do I need an umbrella?") are answered
+  without the AI (faster, saves the free quota); anything longer/mixed goes to the AI. `Brain.note()` keeps them in the
+  chat history. Tests: `test_quick.py`, `test_todolist.py`, `tools/pc-tests` (todo_picker.ppm). If it fails, ask for
+  `gorgi-helper.log` ("quick answer", "to-do time").
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
