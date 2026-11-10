@@ -61,6 +61,8 @@ void setNoticeDot(bool on);
 // The music bar: folded into a slim "now playing" line, opened by tapping it
 void openMusicBar();     // opens it for 10 s (again: another 10 s)
 bool musicBarOpen();
+// The Music screen shows its own always-open bar: big buttons and a wide volume slider
+void setMusicDeck(bool on);
 // Everything was covered (the Action Center): draw all of it again
 void redrawAll();
 // Draws the subtitle right away (used to draw the face screen into a picture)

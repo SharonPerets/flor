@@ -283,6 +283,7 @@ void showPage(Page p) {
   ui::setTab((int)p);
   ui::setSubtitleVisible(p == Page::Face);
   ui::setBottomHidden(p == Page::Todo);  // the To-do screen uses the whole height
+  ui::setMusicDeck(p == Page::Music);     // the Music screen: buttons + volume always open
   if (p == Page::Face) {
     // clear around the face (the face and subtitle draw their own background)
     display::render(gfx::Rect{0, ui::TOP_H, 800, ui::FACE_Y - ui::TOP_H}, ui::BACKGROUND, [](gfx::Canvas&) {});
