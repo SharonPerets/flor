@@ -104,6 +104,14 @@ String alertText, alertTitle;  // for a notification if nobody taps it
 uint8_t alertNotice = 0;
 String alertSession;       // ...for this session
 
+// Claude alerts can be muted from the Action Center (saved, and told to the helper so it stays quiet too)
+bool claudeMuted = false;
+Preferences claudePrefs;
+
+void sendClaudeMute() {
+  pclink::sendText(claudeMuted ? "{\"type\":\"claude_mute\",\"on\":true}" : "{\"type\":\"claude_mute\",\"on\":false}");
+}
+
 // A Teams call is going on (the helper notices the microphone)
 bool callOn = false;
 
@@ -507,6 +515,7 @@ void onHelper(bool connected, const String& name) {
     sendWeather();
     sendTimeList();
     sendTodoList();
+    sendClaudeMute();
     showMediaPlaceholder();
     if (!isSleeping()) react(Mood::Happy, String("Connected to ") + name + "!");
   } else {
@@ -1434,7 +1443,8 @@ void onOther(const char* type, JsonObjectConst msg) {
     updateClaudeBadge();
   } else if (strcmp(type, "claude_alert") == 0) {
     const bool waiting = strcmp(msg["kind"] | "done", "waiting") == 0;
-    if (inConversation || updating || (alertOn && !alertClaude)) {  // busy: keep it for the Action Center
+    // muted in the Action Center (no pop-up), or busy: keep it quietly for the Action Center
+    if (claudeMuted || inConversation || updating || (alertOn && !alertClaude)) {
       addMissed(actioncenter::CLAUDE, waiting ? "Claude needed you" : "Claude finished",
                 String((const char*)(msg["text"] | "")));
       return;
@@ -1557,6 +1567,12 @@ void onActionCenterRelease() {
       break;
     case actioncenter::Tap::Dismiss:
       removeNotice(t.index);
+      break;
+    case actioncenter::Tap::MuteClaude:
+      claudeMuted = !claudeMuted;
+      claudePrefs.putBool("muted", claudeMuted);
+      sendClaudeMute();
+      if (claudeMuted && alertOn && alertClaude) endAlert(false);
       break;
     case actioncenter::Tap::None:
       return;
@@ -1887,6 +1903,7 @@ void drawActionCenter() {
   acView.noticeCount = noticeCount < actioncenter::MAX_NOTICES ? noticeCount : actioncenter::MAX_NOTICES;
   for (int i = 0; i < acView.noticeCount; ++i) acView.notices[i] = notices[i];
   acView.busy = updateBusy;
+  acView.claudeMuted = claudeMuted;
   const int rssi = pclink::wifiRssi();
   const char* wifi = rssi == 0 ? "no Wi-Fi" : rssi > -60 ? "Wi-Fi good" : rssi > -72 ? "Wi-Fi OK" : "Wi-Fi weak";
   if (pclink::helperConnected())
@@ -1975,6 +1992,8 @@ void setup() {
 
   wxPrefs.begin("weather", false);
   wxCity = constrain(wxPrefs.getInt("city", weather::DEFAULT_CITY), 0, weather::CITY_COUNT - 1);
+  claudePrefs.begin("claude", false);
+  claudeMuted = claudePrefs.getBool("muted", false);
   ui::setTabs(TAB_ICONS, (int)Page::Count);
   ui::setTab((int)page);
   weather::beginFetching();

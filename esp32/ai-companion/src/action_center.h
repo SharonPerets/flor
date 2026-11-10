@@ -1,6 +1,6 @@
 // The Action Center: pull down from the top bar. A full screen of its own with
 // the time and date, the weather, notifications (an update is ready, things you
-// missed...), Sleep, and a status line. Push it back up to close it.
+// missed...), a switch for Claude alerts, Sleep, and a status line. Push it back up to close it.
 //
 // Drawing only, so it also runs in the PC preview. main.cpp keeps the
 // notifications and opens / closes it.
@@ -36,12 +36,13 @@ struct View {
   Notice notices[MAX_NOTICES];
   int noticeCount = 0;
   bool busy = false;     // an update is running (its button shows "Updating...")
+  bool claudeMuted = false;  // the "Claude alerts" switch is off
   char status[96] = "";  // "Gorgi 4.3 - Wi-Fi good - PC: MY-PC"
 };
 
 void draw(gfx::Canvas& c, const View& v);
 
-enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss };
+enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss, MuteClaude };
 struct TapResult {
   Tap what;
   int index;  // the notice, or the city for PickCity
