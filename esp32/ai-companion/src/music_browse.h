@@ -1,5 +1,5 @@
 // The Music screen's top row (Playing / Browse switch), the Browse view (search,
-// mood chips, Liked songs, search results, an artist's or an album's page),
+// Liked songs, search results, an artist's or an album's page),
 // the search keyboard and the lyrics. Since 4.8.19.
 //
 // The helper does the YouTube Music work: it sends lists of songs / albums /
@@ -17,7 +17,7 @@ namespace browse {
 
 // ---- the screen's parts (the Music screen's middle is y 44..388; the deck is under it)
 constexpr gfx::Rect HEAD_AREA{0, 44, 800, 58};     // switch + search bar / Radio + Lyrics
-constexpr gfx::Rect CHIPS_AREA{0, 102, 800, 48};   // mood chips, or Songs / Albums tabs
+constexpr gfx::Rect CHIPS_AREA{0, 102, 800, 48};   // "Liked songs" + Play / Shuffle, or Songs / Albums tabs
 constexpr gfx::Rect LIST_AREA{0, 150, 800, 238};   // the list
 constexpr gfx::Rect LYRICS_AREA{322, 152, 458, 128};  // the lyrics, under the song's name, above its progress bar
 constexpr gfx::Rect KB_AREA{0, 44, 800, 436};      // the keyboard covers the deck too
@@ -50,8 +50,6 @@ struct List {
   Item* items;   // room for MAX_ITEMS
 };
 constexpr int MAX_ITEMS = 120;
-constexpr int MOOD_COUNT = 7;
-extern const char* const MOODS[MOOD_COUNT];
 
 struct Keyboard {
   bool open;
@@ -112,12 +110,12 @@ int visibleItems(const View& v, int out[], int max);
 int rowCount(const View& v);
 
 enum class Tap {
-  None, ToPlaying, ToBrowse, Radio, Lyrics, Search, Mic, Clear, Mood, Back, Tab, Play, Shuffle, Row,
+  None, ToPlaying, ToBrowse, Radio, Lyrics, Search, Mic, Clear, Back, Tab, Play, Shuffle, Row,
   KbKey, KbCancel, KbVoice
 };
 struct TapResult {
   Tap what;
-  int index;  // mood, tab, item (index into the list), key
+  int index;  // tab, item (index into the list), key
   TapResult(Tap w = Tap::None, int i = 0) : what(w), index(i) {}
 };
 TapResult tap(int x, int y, const View& v);

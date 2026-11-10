@@ -182,6 +182,21 @@ def test_home_mood_radio_lyrics_pictures():
     asyncio.run(run())
 
 
+def test_plain_lyrics():
+    """Songs with only plain lyrics: the timed ask finds nothing, the plain one does (Space Cadet, 4.8.20)."""
+    b, sent, pictures, media = setup()
+    api = b.ytm._anyone()
+    api.get_lyrics = lambda browse_id, timestamps=False: (
+        None if timestamps else {"hasTimestamps": False, "lyrics": "I lay on my side\nShe never expects"})
+
+    async def run():
+        await b.lyrics("Would?", "Alice in Chains")
+        ly = sent[-1]
+        assert not ly["synced"] and ly["lines"] == [[0, "I lay on my side"], [0, "She never expects"]], ly
+
+    asyncio.run(run())
+
+
 def test_not_connected():
     b, sent, pictures, media = setup(signed_in=False)
 

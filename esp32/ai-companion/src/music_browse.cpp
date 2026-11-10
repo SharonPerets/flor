@@ -9,8 +9,6 @@
 
 namespace browse {
 
-const char* const MOODS[MOOD_COUNT] = {"Energize", "Relax", "Feel good", "Workout", "Focus", "Party", "Sleep"};
-
 namespace {
 
 using gfx::Canvas;
@@ -39,15 +37,15 @@ constexpr Rect SEARCH_BAR{262, 52, 466, 42};
 constexpr float MIC_X = 758, MIC_Y = 73, MIC_R = 22;
 constexpr Rect BACK_BTN{262, 52, 100, 42};
 // Liked songs header (home)
-constexpr Rect HOME_PLAY{596, 154, 88, 32};
-constexpr Rect HOME_SHUFFLE{692, 154, 92, 32};
-constexpr int HOME_ROW_Y = 192, PAGE_ROW_Y = 154;
+constexpr Rect HOME_PLAY{560, 106, 108, 40};
+constexpr Rect HOME_SHUFFLE{676, 106, 108, 40};
+constexpr int PAGE_ROW_Y = 154;  // the lists start here (Liked songs too, since the moods went in 4.8.20)
 // Keyboard
 constexpr Rect KB_FIELD{16, 54, 768, 56};
 constexpr Rect KB_CANCEL{16, 416, 200, 52};
 constexpr Rect KB_VOICE{228, 416, 556, 52};
 
-enum Btn { B_SWITCH_PLAYING, B_SWITCH_BROWSE, B_RADIO, B_LYRICS, B_MIC, B_BACK, B_PLAY, B_SHUFFLE, B_MOOD0 = 20 };
+enum Btn { B_SWITCH_PLAYING, B_SWITCH_BROWSE, B_RADIO, B_LYRICS, B_MIC, B_BACK, B_PLAY, B_SHUFFLE };
 
 float textW(const gfont::Font& f, const char* s) { return Canvas::textWidth(f, s); }
 bool inside(const Rect& r, int x, int y) { return x >= r.x && y >= r.y && x < r.right() && y < r.bottom(); }
@@ -172,8 +170,8 @@ char tabKind(const View& v) {
   return l->tabs[v.tab < n ? v.tab : 0];
 }
 
-int rowsShown(const View& v) { return isHome(v) ? (388 - HOME_ROW_Y) / ROW_STEP : (388 - PAGE_ROW_Y) / ROW_STEP; }
-int rowY(const View& v) { return isHome(v) ? HOME_ROW_Y : PAGE_ROW_Y; }
+int rowsShown(const View&) { return (388 - PAGE_ROW_Y) / ROW_STEP; }
+int rowY(const View&) { return PAGE_ROW_Y; }
 
 // The list index of the n-th row of the current tab, or -1
 int itemOfRow(const View& v, int n) {
@@ -232,15 +230,6 @@ int pageButtons(const View& v, Rect out[2], int icons[2], const char* labels[2],
   return 2;
 }
 
-void moodRects(Rect out[MOOD_COUNT]) {
-  float x = 16;
-  for (int i = 0; i < MOOD_COUNT; ++i) {
-    const int w = (int)textW(gfont::SMALL, MOODS[i]) + 30;
-    out[i] = Rect((int)x, 108, w, 36);
-    x += w + 10;
-  }
-}
-
 void drawSwitch(Canvas& c, const View& v) {
   const Rect& s = SWITCH;
   c.fillRRect(s.x, s.y, s.w, s.h, s.h / 2.0f, PANEL);
@@ -296,10 +285,16 @@ void drawHead(Canvas& c, const View& v) {
 }
 
 void drawChips(Canvas& c, const View& v) {
-  if (isHome(v)) {
-    Rect r[MOOD_COUNT];
-    moodRects(r);
-    for (int i = 0; i < MOOD_COUNT; ++i) pill(c, r[i], MOODS[i], false, v.pressed == B_MOOD0 + i);
+  if (isHome(v)) {  // Liked songs: its name, how many, Play and Shuffle
+    const List* l = v.home;
+    c.text(gfont::TITLE, "Liked songs", 20, 134, TEXT);
+    if (l && l->total > 0) {
+      char n[16];
+      snprintf(n, sizeof n, "%d songs", l->total);
+      c.text(gfont::SMALL, n, 30 + textW(gfont::TITLE, "Liked songs"), 133, FAINT);
+      iconPill(c, HOME_PLAY, "Play", 0, false, v.pressed == B_PLAY);
+      iconPill(c, HOME_SHUFFLE, "Shuffle", 1, true, v.pressed == B_SHUFFLE);
+    }
     return;
   }
   Rect t[4];
@@ -347,16 +342,6 @@ void drawRow(Canvas& c, const View& v, const List& l, int index, int top, ThumbF
 
 void drawList(Canvas& c, const View& v, ThumbFn thumb) {
   const List* l = shown(v);
-  if (isHome(v)) {
-    c.text(gfont::SMALL, "LIKED SONGS", 20, 176, ACCENT);
-    if (l && l->total > 0) {
-      char n[16];
-      snprintf(n, sizeof n, "%d", l->total);
-      c.text(gfont::SMALL, n, 24 + textW(gfont::SMALL, "LIKED SONGS"), 176, FAINT);
-      iconPill(c, HOME_PLAY, "Play", 0, false, v.pressed == B_PLAY);
-      iconPill(c, HOME_SHUFFLE, "Shuffle", 1, true, v.pressed == B_SHUFFLE);
-    }
-  }
   const int y0 = rowY(v), rows = rowsShown(v);
   int drawn = 0;
   if (l) {
@@ -520,7 +505,6 @@ int pressedCode(const TapResult& t) {
     case Tap::Back: return B_BACK;
     case Tap::Play: return B_PLAY;
     case Tap::Shuffle: return B_SHUFFLE;
-    case Tap::Mood: return B_MOOD0 + t.index;
     default: return -1;
   }
 }
@@ -558,10 +542,8 @@ TapResult tap(int x, int y, const View& v) {
   }
   if (y < CHIPS_AREA.bottom()) {
     if (isHome(v)) {
-      Rect r[MOOD_COUNT];
-      moodRects(r);
-      for (int i = 0; i < MOOD_COUNT; ++i)
-        if (inside(gfx::inflate(r[i], 4), x, y)) return TapResult(Tap::Mood, i);
+      if (inside(gfx::inflate(HOME_PLAY, 4), x, y)) return TapResult(Tap::Play);
+      if (inside(gfx::inflate(HOME_SHUFFLE, 4), x, y)) return TapResult(Tap::Shuffle);
       return TapResult();
     }
     Rect b[2];
@@ -575,11 +557,6 @@ TapResult tap(int x, int y, const View& v) {
     tabRects(v, t, n);
     for (int i = 0; i < n; ++i)
       if (inside(gfx::inflate(t[i], 4), x, y)) return TapResult(Tap::Tab, i);
-    return TapResult();
-  }
-  if (isHome(v) && y < HOME_ROW_Y - 2) {
-    if (inside(gfx::inflate(HOME_PLAY, 6), x, y)) return TapResult(Tap::Play);
-    if (inside(gfx::inflate(HOME_SHUFFLE, 6), x, y)) return TapResult(Tap::Shuffle);
     return TapResult();
   }
   const int r = (y - rowY(v)) / ROW_STEP;

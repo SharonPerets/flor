@@ -241,6 +241,7 @@ class WindowsMedia:
         if self._opening is not None and not self._opening.done():
             self._opening.cancel()
         self._opening = asyncio.get_running_loop().create_task(youtube_music.play_url(self, url))
+        return self._opening  # True when it plays (the Browse view says so on Gorgi)
 
     async def set_playing(self, play):
         """Explicit play or pause (used to pause music while you talk to Gorgi)."""

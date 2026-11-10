@@ -275,9 +275,6 @@ void act(const TapResult& t) {
       syncView();
       fullDirty = true;
       break;
-    case Tap::Mood:
-      if (t.index >= 0 && t.index < browse::MOOD_COUNT) sendMusic("mood", "name", browse::MOODS[t.index]);
-      break;
     case Tap::Back:
       back();
       break;
@@ -557,7 +554,7 @@ void touchMove(int x, int y) {
     return;
   }
   const int rows = browse::rowCount(v);
-  const int shownRows = v.page ? 4 : 3;
+  const int shownRows = 4;
   int first = startFirst - (int)lroundf(dy / (float)browse::ROW_STEP);
   if (first > rows - shownRows) first = rows - shownRows;
   if (first < 0) first = 0;

@@ -28,6 +28,7 @@ folder = None                       # the helper's settings folder (set by gorgi
 notify = lambda title, text: None   # a pop-up on the PC  # noqa: E731
 _asked_at = 0.0                     # when we last asked for permission (not again for a while)
 _told = {}                          # message -> when it was last shown
+problem = None                      # why the last play didn't work (shown on Gorgi), or None
 
 TURN_ON = ("To play songs in YouTube Music Desktop App, open its Settings > Integrations and turn on "
            "\"Companion server\" and \"Enable companion authorization\". Then ask Gorgi again.")
@@ -41,6 +42,8 @@ def setup(settings_folder, on_notify):
 
 def _tell(text, every=300):
     """A pop-up, at most once every few minutes for the same text."""
+    global problem
+    problem = text
     if time.monotonic() - _told.get(text, -1e9) >= every:
         _told[text] = time.monotonic()
         try:
@@ -200,8 +203,32 @@ def link_parts(url):
     return (q.get("v") or [None])[0], (q.get("list") or [None])[0]
 
 
+def state():
+    """What the app is playing (its /state), or None."""
+    token = _token()
+    if not token:
+        return None
+    try:
+        r = _http().get(BASE + "/api/v1/state", headers={"Authorization": token}, timeout=3)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
+def playing_id(title):
+    """The video id of the song playing in the app, if its name is title (exact song for lyrics / radio)."""
+    if not title or not installed():
+        return None
+    video = (state() or {}).get("video") or {}
+    if video.get("id") and (video.get("title") or "").strip().lower() == title.strip().lower():
+        return video["id"]
+    return None
+
+
 def play(url):
     """Plays a YouTube Music link in YouTube Music Desktop App. True if the app took it."""
+    global problem
+    problem = None
     video_id, playlist_id = link_parts(url)
     if not (video_id or playlist_id):
         return False
@@ -210,5 +237,7 @@ def play(url):
             _tell(TURN_ON)
         return False
     ok = command("changeVideo", {"videoId": video_id, "playlistId": playlist_id})
+    if not ok and not problem:
+        problem = "YouTube Music Desktop App didn't take the song. Ask Gorgi to play it again to retry."
     log.info("YTMD: play %s / %s -> %s", video_id, playlist_id, "ok" if ok else "not taken")
     return ok

@@ -26,6 +26,7 @@ import struct
 import zlib
 from collections import OrderedDict
 
+import ytmd
 import ytmusic
 
 log = logging.getLogger("gorgi.browse")
@@ -264,8 +265,18 @@ class Browser:
             await self.status("I couldn't play that one")
             return
         log.info("music: playing %s (%s)", name, url)
-        await self.status(f"Playing {name}" if name else "Playing...")
-        await self.media.play_link(url)
+        await self.status(f"Starting {name}..." if name else "Starting...")
+        task = await self.media.play_link(url)
+        if task is None:
+            return
+        try:
+            ok = await asyncio.wait_for(asyncio.shield(task), 45)
+        except Exception:
+            ok = None
+        if ok:
+            await self.status(f"Playing {name}" if name else "Playing")
+        elif ok is False:
+            await self.status(ytmd.problem or "The music app didn't start it. Is YouTube Music open?")
 
     async def pick(self, list_id, index):
         found = self.lists.get(list_id)
@@ -347,7 +358,8 @@ class Browser:
             await self.status("Nothing is playing")
             return
         await self.status("Starting song radio...")
-        video_id = await asyncio.to_thread(self.ytm.find_song_id, info["title"], info.get("artist", ""))
+        video_id = await asyncio.to_thread(
+            lambda: ytmd.playing_id(info["title"]) or self.ytm.find_song_id(info["title"], info.get("artist", "")))
         if not video_id:
             await self.status("I couldn't find this song on YouTube Music")
             return
@@ -368,13 +380,19 @@ class Browser:
         if not title:
             return {}
         api = self.ytm._search_api()
-        video_id = self.ytm.find_song_id(title, artist)
+        video_id = ytmd.playing_id(title) or self.ytm.find_song_id(title, artist)
         if not video_id:
             return {}
         browse_id = (api.get_watch_playlist(videoId=video_id, limit=1) or {}).get("lyrics")
         if not browse_id:
             return {}
-        found = api.get_lyrics(browse_id, timestamps=True) or {}
+        found = {}
+        try:
+            found = api.get_lyrics(browse_id, timestamps=True) or {}
+        except Exception as e:
+            log.info("timed lyrics for %r: %s", title, e)
+        if not found.get("lyrics"):  # many songs only have plain lyrics, and the timed ask then finds nothing
+            found = api.get_lyrics(browse_id, timestamps=False) or {}
         raw = found.get("lyrics")
         if found.get("hasTimestamps") and isinstance(raw, list):
             lines = [[int(getattr(l, "start_time", 0) or 0), str(getattr(l, "text", "") or "")] for l in raw]
