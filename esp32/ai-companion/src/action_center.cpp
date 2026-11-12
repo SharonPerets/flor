@@ -36,6 +36,7 @@ constexpr float N_X = PAD, N_W = 800 - 2 * PAD;  // notifications: the whole wid
 constexpr float ROW_Y = CARD_Y + 58, ROW_H = 66, ROW_GAP = 10;
 constexpr float SW_W = 48, SW_H = 26;  // the "Claude alerts" switch, top right of the card
 constexpr float SW_X = N_X + N_W - 24 - SW_W, SW_Y = CARD_Y + 21;
+constexpr float CLR_Y = CARD_Y + 12, CLR_H = 32;  // "Clear all", next to the card's title
 constexpr float BACK_X = 24, BACK_Y = 6, BACK_W = 108, BACK_H = 34;
 
 void card(Canvas& c, float x, float y, float w, float h) {
@@ -166,11 +167,25 @@ void claudeSwitch(Canvas& c, bool on) {
   c.fillCircle(on ? SW_X + SW_W - SW_H / 2 : SW_X + SW_H / 2, SW_Y + SW_H / 2, r, on ? DARK_TEXT : MUTED);
 }
 
+// "Clear all" clears everything but an update that is waiting (that one has its own button)
+bool canClearAll(const View& v) {
+  for (int i = 0; i < v.noticeCount; ++i)
+    if (v.notices[i].kind != UPDATE) return true;
+  return false;
+}
+float clearX() { return N_X + 24 + Canvas::textWidth(gfont::SMALL, "NOTIFICATIONS") + 20; }
+float clearW() { return Canvas::textWidth(gfont::SMALL, "Clear all") + 32; }
+
 void noticesCard(Canvas& c, const View& v) {
   card(c, N_X, CARD_Y, N_W, CARD_H);
   const float x = N_X + 24;
   c.text(gfont::SMALL, "NOTIFICATIONS", x, (int)CARD_Y + 34, MUTED);
   claudeSwitch(c, !v.claudeMuted);
+  if (canClearAll(v)) {
+    const float bx = clearX();
+    c.fillRRect(bx, CLR_Y, clearW(), CLR_H, CLR_H / 2, CARD_EDGE);
+    c.text(gfont::SMALL, "Clear all", bx + 16, (int)CARD_Y + 34, TEXT);
+  }
   if (v.noticeCount == 0) {
     const float mx = N_X + N_W / 2;
     bellIcon(c, mx, CARD_Y + 120, FAINT);
@@ -250,6 +265,8 @@ TapResult tap(int x, int y, const View& v) {
   }
   if (inside(x, y, SLEEP_X - 8, SLEEP_Y - 8, SLEEP_W + 16, SLEEP_H + 16)) return TapResult(Tap::Sleep);
   if (inside(x, y, WX_X - 8, WX_Y - 8, WX_W + 12, WX_H + 16)) return TapResult(Tap::Weather);
+  if (canClearAll(v) && inside(x, y, clearX() - 10, CARD_Y, clearW() + 20, ROW_Y - CARD_Y - 2))
+    return TapResult(Tap::ClearAll);
   if (inside(x, y, SW_X - 230, CARD_Y, SW_W + 254, ROW_Y - CARD_Y - 2)) return TapResult(Tap::MuteClaude);
   for (int i = 0; i < v.noticeCount && i < 3; ++i) {
     const Notice& n = v.notices[i];

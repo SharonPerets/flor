@@ -1839,6 +1839,10 @@ void onActionCenterRelease() {
     case actioncenter::Tap::Dismiss:
       removeNotice(t.index);
       break;
+    case actioncenter::Tap::ClearAll:  // all but a waiting update (it comes back from the helper anyway)
+      for (int i = noticeCount - 1; i >= 0; --i)
+        if (notices[i].kind != actioncenter::UPDATE) removeNotice(i);
+      break;
     case actioncenter::Tap::MuteClaude:
       claudeMuted = !claudeMuted;
       claudePrefs.putBool("muted", claudeMuted);

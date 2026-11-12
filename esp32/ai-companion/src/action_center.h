@@ -42,7 +42,7 @@ struct View {
 
 void draw(gfx::Canvas& c, const View& v);
 
-enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss, MuteClaude };
+enum class Tap { None, Sleep, Weather, Back, OpenPicker, PickCity, ClosePicker, Action, Dismiss, MuteClaude, ClearAll };
 struct TapResult {
   Tap what;
   int index;  // the notice, or the city for PickCity
