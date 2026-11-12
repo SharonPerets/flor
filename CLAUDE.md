@@ -367,6 +367,11 @@ Done and confirmed:
   chat history. Tests: `test_quick.py`, `test_todolist.py`, `tools/pc-tests` (todo_picker.ppm). If it fails, ask for
   `gorgi-helper.log` ("quick answer", "to-do time").
 
+- **4.8.23 - Clear all for notifications** (firmware only, on top of 4.8.22; branch `claude/project-thread-xdzlhg`; NOT
+  confirmed yet): a "Clear all" pill next to "NOTIFICATIONS" in the Action Center (`Tap::ClearAll`). It clears every
+  notice except a waiting UPDATE (that one has its own button and comes back from the helper); shown only when there is
+  something to clear. Picture: /mnt/project-files/clear-all/.
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.
