@@ -388,6 +388,11 @@ Done and confirmed:
   ("" = automatic) and shows "Switching account..." (30 s max) until a `claude` message's `usage.chosen` matches. Helper
   saves it to config.json and `UsageFetcher.choose()` re-checks at once; `usage` now also carries `accounts` [{email,
   plan}], `chosen`, `email` (sent after the numbers). Pictures: /mnt/project-files/claude-account/.
+- **4.8.25 - the desktop app's new sign-in folder** (helper only, on top of 4.8.24): on 4.8.24 Settings found only the
+  Pro account (= `.credentials.json`). Newer Claude desktop apps (2026) moved config.json + `Local State` to
+  `%LOCALAPPDATA%\Claude-Data\claude_<publisher>\` (e.g. claude_pzs8sxrjxfjjc; old folders keep only an empty
+  `.user-data-left...` marker; same keys and v10 format; CodeZeno/Claude-Code-Usage-Monitor issue #183).
+  `desktop_config_paths()` looks there first. `claude-usage.json` now always has `desktop_app` (what was found there).
 
 ## Handover for the next session (2026-10-24)
 

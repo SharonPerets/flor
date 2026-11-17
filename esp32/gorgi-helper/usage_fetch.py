@@ -88,9 +88,23 @@ def read_sign_in(path=None):
 
 
 def desktop_config_paths():
-    """Where the Claude desktop app may keep its config.json (normal install, then Store installs)."""
+    """Where the Claude desktop app may keep its config.json.
+
+    Newer versions (2026) moved everything to %LOCALAPPDATA%\\Claude-Data\\claude_<publisher>\\ and leave only an
+    empty marker file in the old folders, so that's looked at first; then the normal install, then Store installs.
+    """
     paths = []
     appdata, local = os.environ.get("APPDATA"), os.environ.get("LOCALAPPDATA")
+    if local:
+        data = Path(local) / "Claude-Data"
+        try:
+            found = sorted(p for p in data.iterdir() if p.is_dir() and p.name.lower().startswith("claude"))
+        except OSError:
+            found = []
+        found.sort(key=lambda p: p.name.lower() != STORE_PACKAGE.lower())
+        paths += [p / "config.json" for p in found]
+        if (data / "config.json").exists():
+            paths.append(data / "config.json")
     if appdata:
         paths.append(Path(appdata) / "Claude" / "config.json")
     if local:
@@ -391,6 +405,7 @@ class UsageFetcher:
         if not tokens:
             return None, why, file_plan, []
         seen = [{k: a[k] for k in ("email", "plan", "where")} for a in accounts]
+        self.desktop_note = why
         self.seen = (seen, "")
         if len(tokens) == 1 and not accounts:  # the only sign-in: let the usage ask tell what's wrong
             return tokens[0][0], tokens[0][1], None, seen
@@ -444,6 +459,7 @@ class UsageFetcher:
         data = data if isinstance(data, dict) else {}
         got = _percents(data) if status == 200 else None
         self._note(source=source, status=status, plan=plan, accounts=accounts,
+                   desktop_app=getattr(self, "desktop_note", ""),
                    reply={k: v for k, v in data.items() if k in ("five_hour", "seven_day", "error")})
         if got:
             p5, r5, p7, r7 = got

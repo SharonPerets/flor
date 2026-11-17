@@ -269,6 +269,16 @@ asyncio.run(f6.check_once(None)); assert asked[-1] == "pro-tok"
 assert uf.parse_profile({"account": {"has_claude_max": True}})["plan"] == "Max"
 assert uf.parse_profile({"organization": {"organization_type": "claude_team"}})["plan"] == "Team"
 assert uf.parse_profile(None) == {"email": "", "plan": "", "rank": 0}
+# where the desktop app keeps its sign-in: the new Claude-Data folder (2026) first, then the old places
+_old_env = dict(os.environ)
+os.environ["LOCALAPPDATA"] = str(d / "local"); os.environ["APPDATA"] = str(d / "roaming")
+(d / "local" / "Claude-Data" / "claude_pzs8sxrjxfjjc").mkdir(parents=True)
+(d / "local" / "Claude-Data" / "claude_abcdefghijklm").mkdir(parents=True)
+(d / "local" / "Packages" / "Claude_pzs8sxrjxfjjc").mkdir(parents=True)
+ps = [str(p.relative_to(d)).replace(os.sep, "/") for p in uf.desktop_config_paths()]
+assert ps == ["local/Claude-Data/claude_pzs8sxrjxfjjc/config.json", "local/Claude-Data/claude_abcdefghijklm/config.json",
+              "roaming/Claude/config.json", "local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/config.json"], ps
+os.environ.clear(); os.environ.update(_old_env)
 # the Settings list: best plan first, emails once
 uf.UsageFetcher.ask_profile = two_profiles
 import types as _types
