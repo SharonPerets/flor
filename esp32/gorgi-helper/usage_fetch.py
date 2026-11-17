@@ -367,29 +367,38 @@ class UsageFetcher:
             self.profiles[token] = (now, profile)
         return profile
 
-    async def find_account(self, client):
-        """(token, where, plan, accounts seen for the notes) for the account to show, or (None, why, plan, [])."""
+    async def accounts(self, client):
+        """(every working sign-in as {token, where, email, plan, rank}, number of sign-ins, why none, file plan)."""
         tokens, why = read_desktop_sign_ins()
         file_token, file_plan = read_sign_in()
         if file_token and all(file_token != t for t, _ in tokens):
             tokens.append((file_token, "Claude Code sign-in file"))
-        if not tokens:
-            return None, why, file_plan, []
-        accounts = []
+        found = []
         for token, where in tokens:
             profile = await self.profile_of(client, token)
             if profile is None:
                 continue
             plan = profile["plan"] or (file_plan if token == file_token else "")
-            accounts.append({"token": token, "where": where, "email": profile["email"], "plan": plan,
-                             "rank": profile["rank"] or PLAN_RANK.get(plan.lower(), 0)})
+            found.append({"token": token, "where": where, "email": profile["email"], "plan": plan,
+                          "rank": profile["rank"] or PLAN_RANK.get(plan.lower(), 0)})
+        return found, tokens, why, file_plan
+
+    async def find_account(self, client):
+        """(token, where, plan, accounts seen for the notes) for the account to show, or (None, why, plan, [])."""
+        accounts, tokens, why, file_plan = await self.accounts(client)
+        if not tokens:
+            return None, why, file_plan, []
         seen = [{k: a[k] for k in ("email", "plan", "where")} for a in accounts]
         if len(tokens) == 1 and not accounts:  # the only sign-in: let the usage ask tell what's wrong
-            return tokens[0][0], tokens[0][1], file_plan if tokens[0][0] == file_token else None, seen
-        best = choose_account(accounts, self.wanted_email())
+            return tokens[0][0], tokens[0][1], None, seen
+        wanted = self.wanted_email().strip()
+        best = choose_account(accounts, wanted)
         if not best:
             return None, "Anthropic refused every sign-in found", file_plan, seen
-        return best["token"], f"{best['where']}, {best['email'] or 'unknown account'}", best["plan"] or None, seen
+        where = f"{best['where']}, {best['email'] or 'unknown account'}"
+        if wanted and best["email"].lower() != wanted.lower():
+            where += f" (chosen account {wanted} not found, so the best plan)"
+        return best["token"], where, best["plan"] or None, seen
 
     async def check_once(self, client):
         if time.time() < self.wait_until:
@@ -434,3 +443,19 @@ class UsageFetcher:
                     await asyncio.wait_for(stop_event.wait(), EVERY)
                 except asyncio.TimeoutError:
                     pass
+
+
+def list_accounts():
+    """For the Settings window: [(email, plan)] of the Claude accounts signed in on this PC (asks Anthropic)."""
+    import httpx
+
+    async def ask():
+        async with httpx.AsyncClient() as client:
+            found = (await UsageFetcher(None).accounts(client))[0]
+        out = []
+        for a in sorted(found, key=lambda a: -a["rank"]):
+            if a["email"] and all(a["email"].lower() != e.lower() for e, _ in out):
+                out.append((a["email"], a["plan"]))
+        return out
+
+    return asyncio.run(ask())

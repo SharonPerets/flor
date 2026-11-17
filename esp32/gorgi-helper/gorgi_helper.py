@@ -1161,7 +1161,8 @@ def show_settings(config):
         config.update(load_config())  # the brain and voice read this same dict
         keys = [n for n, k in (("Groq", "groq_api_key"), ("Gemini", "gemini_api_key"), ("Ollama", "ollama_api_key"))
                 if config.get(k)]
-        log.info("settings reloaded (AI keys: %s, voice: %s)", ", ".join(keys) or "none", config.get("voice"))
+        log.info("settings reloaded (AI keys: %s, voice: %s, Claude account: %s)", ", ".join(keys) or "none",
+                 config.get("voice"), config.get("claude_usage_account") or "automatic")
 
     threading.Thread(target=wait_and_reload, args=(_settings_process,), daemon=True).start()
 
@@ -1169,6 +1170,7 @@ def show_settings(config):
 def run_settings_window():
     """The --settings process: show the window in this process's main thread."""
     from brain import Brain
+    import usage_fetch
     from settings_window import show_window
 
     config = load_config()
@@ -1185,7 +1187,8 @@ def run_settings_window():
     show_window(config, save_config, check_keys,
                 youtube=(lambda: (folder / ytmusic.AUTH_FILE).exists(),
                          lambda headers: ytmusic.connect(folder, headers),
-                         lambda: ytmusic.disconnect(folder)))
+                         lambda: ytmusic.disconnect(folder)),
+                claude_accounts=usage_fetch.list_accounts)
 
 
 # ---------------------------------------------------------------- voice

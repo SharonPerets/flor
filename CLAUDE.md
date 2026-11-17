@@ -379,7 +379,8 @@ Done and confirmed:
   `read_desktop_sign_ins` returns one fresh token per account (user id = 2nd part of the cache key) + the file's token,
   each is checked once an hour with `GET https://api.anthropic.com/api/oauth/profile` (unofficial, same headers as usage;
   `organization.organization_type` / `rate_limit_tier` / `account.has_claude_max`) and the best plan wins
-  (Max > Team/Enterprise > Pro); config.json `claude_usage_account` (email) overrides. Plan name now comes from the
+  (Max > Team/Enterprise > Pro). User chose a picker: Settings "Claude account for usage" (Automatic or an email; the list
+  comes from `usage_fetch.list_accounts()` in a thread when the window opens) = config.json `claude_usage_account`. Plan name now comes from the
   profile. `claude-usage.json` lists the accounts seen (email, plan, where; never tokens). If it's still wrong, ask for it.
 
 ## Handover for the next session (2026-10-24)

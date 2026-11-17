@@ -258,6 +258,22 @@ asyncio.run(f6.check_once(None)); assert asked[-1] == "pro-tok"
 assert uf.parse_profile({"account": {"has_claude_max": True}})["plan"] == "Max"
 assert uf.parse_profile({"organization": {"organization_type": "claude_team"}})["plan"] == "Team"
 assert uf.parse_profile(None) == {"email": "", "plan": "", "rank": 0}
+# the Settings list: best plan first, emails once
+uf.UsageFetcher.ask_profile = two_profiles
+import types as _types
+class _FakeClient:
+    async def __aenter__(self): return self
+    async def __aexit__(self, *a): return False
+sys.modules.setdefault("httpx", _types.SimpleNamespace(AsyncClient=_FakeClient))
+assert uf.list_accounts() == [("me@work.com", "Max"), ("me@gmail.com", "Pro")], uf.list_accounts()
 uf.read_desktop_sign_ins = real_desktop
+try:
+    import settings_window as sw
+    ch = sw.account_choices([("me@work.com", "Max")], "old@x.com")
+    assert ch == [(sw.AUTO_ACCOUNT, ""), ("me@work.com (Max)", "me@work.com"), ("old@x.com (not signed in right now)",
+                                                                               "old@x.com")], ch
+    assert sw.account_choices([("me@work.com", "Max")], "ME@work.com")[1:] == [("me@work.com (Max)", "me@work.com")]
+except ImportError as e:  # no Tk on this machine
+    print("settings window not tested:", e)
 print(fw.summary())
 print("ALL OK")

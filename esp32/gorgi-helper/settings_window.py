@@ -1,5 +1,6 @@
-"""A small Settings window: AI keys (Groq, Gemini, Ollama), Gorgi's voice, Claude Code, YouTube Music."""
+"""A small Settings window: AI keys (Groq, Gemini, Ollama), Gorgi's voice, Claude Code, which Claude account's usage, YouTube Music."""
 
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -72,13 +73,27 @@ def connect_youtube_window(root, connect):
     return done["ok"]
 
 
-def show_window(config, save_config, check_keys, youtube=None):
+AUTO_ACCOUNT = "Automatic (the best plan, e.g. Max)"
+
+
+def account_choices(found, current):
+    """Combobox entries [(text, email)]: Automatic first, then each account; the saved one stays even if not found."""
+    choices = [(AUTO_ACCOUNT, "")]
+    for email, plan in found:
+        choices.append((f"{email} ({plan})" if plan else email, email))
+    if current and all(e.lower() != current.lower() for _t, e in choices):
+        choices.append((f"{current} (not signed in right now)", current))
+    return choices
+
+
+def show_window(config, save_config, check_keys, youtube=None, claude_accounts=None):
     """Shows the Settings window and returns when it's closed.
 
     Runs in its own process (GorgiHelper.exe --settings): Tkinter must own the
     main thread of a process, or it can crash the app later.
     check_keys({config key: key}) -> [(service name, ok, short text)].
     youtube: (is_connected(), connect(text) -> (ok, message), disconnect()), or None.
+    claude_accounts() -> [(email, plan)] of the Claude accounts on this PC (slow: asks Anthropic), or None.
     """
     root = tk.Tk()
     root.title("Gorgi Helper - Settings")
@@ -157,6 +172,47 @@ def show_window(config, save_config, check_keys, youtube=None):
 
     refresh_claude()
 
+    # Which Claude account's plan usage Gorgi shows (more than one can be signed in on the PC)
+    row += 4
+    current_account = str(config.get("claude_usage_account") or "")
+    account_list = [account_choices([], current_account)]
+    account_var = tk.StringVar(value=next(t for t, e in account_list[0] if e == current_account))
+    if claude_accounts is not None:
+        ttk.Label(frame, text="Claude account for usage").grid(row=row, column=0, sticky="w")
+        account_box = ttk.Combobox(frame, textvariable=account_var, state="readonly", width=34,
+                                   values=[t for t, _e in account_list[0]])
+        account_box.grid(row=row + 1, column=0, sticky="we", pady=(2, 2))
+        account_note = tk.StringVar(value="Looking for your Claude accounts...")
+        ttk.Label(frame, textvariable=account_note, foreground="#666").grid(row=row + 2, column=0, columnspan=2,
+                                                                           sticky="w", pady=(0, 14))
+        result = {}
+
+        def look():
+            try:
+                result["found"] = claude_accounts()
+            except Exception as e:  # noqa: BLE001
+                result["error"] = str(e)
+
+        def show_found():
+            if not result:
+                root.after(200, show_found)
+                return
+            found = result.get("found") or []
+            account_list[0] = account_choices(found, current_account)
+            account_box.configure(values=[t for t, _e in account_list[0]])
+            account_var.set(next(t for t, e in account_list[0] if e.lower() == current_account.lower()))
+            if "error" in result:
+                account_note.set(f"Couldn't look up the accounts: {result['error'][:60]}")
+            elif not found:
+                account_note.set("No Claude sign-in found on this PC (open the Claude app once)")
+            else:
+                account_note.set(f"Found {len(found)} account(s) signed in on this PC")
+
+        threading.Thread(target=look, daemon=True).start()
+        root.after(200, show_found)
+        row += 3
+    row -= 4
+
     # YouTube Music: your sign-in, for Liked songs and like / dislike (takes effect right away)
     row += 4
     if youtube is not None:
@@ -184,6 +240,7 @@ def show_window(config, save_config, check_keys, youtube=None):
         for name, var in key_vars.items():
             config[name] = var.get().strip()
         config["voice"] = VOICES[voice_var.get()]
+        config["claude_usage_account"] = next((e for t, e in account_list[0] if t == account_var.get()), "")
         save_config(config)
         root.destroy()
 
