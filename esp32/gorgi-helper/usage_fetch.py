@@ -321,6 +321,8 @@ class UsageFetcher:
         self.wait_until = 0.0
         self.wanted_email = wanted_email or (lambda: "")  # a function: the setting can change while running
         self.profiles = {}  # token -> (time asked, profile)
+        self.recheck = False  # the account was changed: ask again now
+        self.seen = None      # (accounts found, the one used) in the last check, for Gorgi
 
     def _note(self, **info):
         if not self.debug_file:
@@ -389,20 +391,45 @@ class UsageFetcher:
         if not tokens:
             return None, why, file_plan, []
         seen = [{k: a[k] for k in ("email", "plan", "where")} for a in accounts]
+        self.seen = (seen, "")
         if len(tokens) == 1 and not accounts:  # the only sign-in: let the usage ask tell what's wrong
             return tokens[0][0], tokens[0][1], None, seen
         wanted = self.wanted_email().strip()
         best = choose_account(accounts, wanted)
         if not best:
             return None, "Anthropic refused every sign-in found", file_plan, seen
+        self.seen = (seen, best["email"])
         where = f"{best['where']}, {best['email'] or 'unknown account'}"
         if wanted and best["email"].lower() != wanted.lower():
             where += f" (chosen account {wanted} not found, so the best plan)"
         return best["token"], where, best["plan"] or None, seen
 
+    def _tell_accounts(self, seen, shown):
+        """Gorgi's Claude screen lists the accounts so the user can pick one there."""
+        if self.watch is not None and hasattr(self.watch, "set_accounts"):
+            ranked = sorted(seen, key=lambda a: -PLAN_RANK.get(a["plan"].lower(), 0))
+            unique = []
+            for a in ranked:
+                if a["email"] and all(a["email"].lower() != u["email"].lower() for u in unique):
+                    unique.append(a)
+            self.watch.set_accounts(unique, self.wanted_email().strip(), shown)
+
+    def choose(self, email):
+        """The account was picked on Gorgi: show its usage as soon as possible."""
+        self.recheck = True
+        self.wait_until = 0.0
+
     async def check_once(self, client):
         if time.time() < self.wait_until:
             return
+        self.seen = None
+        try:
+            await self._check(client)
+        finally:
+            if self.seen is not None:  # after the numbers, so Gorgi gets both together
+                self._tell_accounts(*self.seen)
+
+    async def _check(self, client):
         token, source, plan, accounts = await self.find_account(client)
         if not token:
             self._note(result="no fresh sign-in found, so no usage", desktop_app=source, plan=plan, accounts=accounts)
@@ -439,10 +466,14 @@ class UsageFetcher:
                     await self.check_once(client)
                 except Exception as e:
                     log.warning("usage check failed: %s", e)
-                try:
-                    await asyncio.wait_for(stop_event.wait(), EVERY)
-                except asyncio.TimeoutError:
-                    pass
+                waited = 0
+                while waited < EVERY and not self.recheck and not stop_event.is_set():
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), 1)
+                    except asyncio.TimeoutError:
+                        pass
+                    waited += 1
+                self.recheck = False
 
 
 def list_accounts():

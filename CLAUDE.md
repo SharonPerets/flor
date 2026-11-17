@@ -372,7 +372,7 @@ Done and confirmed:
   notice except a waiting UPDATE (that one has its own button and comes back from the helper); shown only when there is
   something to clear. Picture: /mnt/project-files/clear-all/.
 
-- **4.8.24 - usage from the right Claude account** (helper only, on top of 4.8.23; branch `claude/project-thread-5vsf5d`;
+- **4.8.24 - usage from the right Claude account** (helper + firmware, on top of 4.8.23; branch `claude/project-thread-5vsf5d`;
   NOT confirmed). User (2026-11-17) has TWO accounts: work = **Max** (Claude desktop app on the laptop), personal = **Pro**
   (Chrome); Gorgi showed "Usage - Pro". Cause: `pick_token` took the longest-living token in the desktop app's cache
   (entries of any account) and the plan name came from `.credentials.json`, not from the token used. Now
@@ -382,6 +382,12 @@ Done and confirmed:
   (Max > Team/Enterprise > Pro). User chose a picker: Settings "Claude account for usage" (Automatic or an email; the list
   comes from `usage_fetch.list_accounts()` in a thread when the window opens) = config.json `claude_usage_account`. Plan name now comes from the
   profile. `claude-usage.json` lists the accounts seen (email, plan, where; never tokens). If it's still wrong, ask for it.
+  User also wanted to pick it **on Gorgi**: the Claude screen's Usage card has an account button (plan name + arrow, top
+  right; shown when >= 2 accounts or one is chosen) that opens a list in the card (Automatic + each account: plan, email);
+  `claudescreen::hit` / `Accounts` (claude_screen.h), main `onClaudeTap` sends `{"type":"claude_account","email"}`
+  ("" = automatic) and shows "Switching account..." (30 s max) until a `claude` message's `usage.chosen` matches. Helper
+  saves it to config.json and `UsageFetcher.choose()` re-checks at once; `usage` now also carries `accounts` [{email,
+  plan}], `chosen`, `email` (sent after the numbers). Pictures: /mnt/project-files/claude-account/.
 
 ## Handover for the next session (2026-10-24)
 

@@ -35,6 +35,23 @@ struct Usage {
   char weekTokens[12] = "";
 };
 
+constexpr int MAX_ACCOUNTS = 4;
+
+struct Account {
+  char email[48];
+  char plan[12];  // "Max", "Pro", or ""
+};
+
+// Which Claude account's usage is shown (more than one can be signed in on the PC).
+struct Accounts {
+  Account list[MAX_ACCOUNTS];
+  int count = 0;
+  char chosen[48] = "";  // "" = automatic (the best plan)
+  char shown[48] = "";   // the account the numbers belong to
+  bool picking = false;  // the list is open in the Usage card
+  bool switching = false;  // a choice was sent, waiting for the new numbers
+};
+
 // 1234567 -> "1.2M"
 void formatTokens(uint32_t n, char* out, int size);
 
@@ -44,7 +61,15 @@ struct View {
   bool pc = false;      // the helper is connected
   bool hooked = false;  // Claude Code reports to the helper
   Usage usage;
+  Accounts accounts;
 };
+
+// Taps on the Usage card
+constexpr int HIT_NONE = -3;
+constexpr int HIT_PILL = -2;  // the account button: open / close the list
+constexpr int HIT_AUTO = -1;  // "Automatic" in the list; 0.. = that account
+int hit(const View& v, int x, int y);
+bool showsPill(const View& v);
 
 constexpr gfx::Rect AREA{0, 44, 800, 332};
 

@@ -113,6 +113,9 @@ class ClaudeWatch:
         self.usage = None    # {"five", "five_reset", "week", "week_reset", "at"}
         self.model = ""
         self.hooked = False  # we've heard from Claude Code
+        self.accounts = []   # [{"email", "plan"}] Claude accounts signed in on the PC (for Gorgi's account button)
+        self.chosen = ""     # the account picked on Gorgi or in Settings ("" = automatic)
+        self.shown = ""      # the account the usage numbers belong to
 
     # ------------------------------------------------------------ events
 
@@ -251,6 +254,14 @@ class ClaudeWatch:
                 or old.get("plan") != self.usage["plan"]):
             self.on_change()
 
+    def set_accounts(self, accounts, chosen, shown):
+        """The Claude accounts found on the PC, the one picked, and the one the numbers are from."""
+        accounts = [{"email": str(a.get("email") or "")[:47], "plan": str(a.get("plan") or "")[:11]}
+                    for a in accounts if a.get("email")][:4]
+        if (accounts, chosen, shown) != (self.accounts, self.chosen, self.shown):
+            self.accounts, self.chosen, self.shown = accounts, chosen or "", shown or ""
+            self.on_change()
+
     def status_line(self):
         parts = [self.model] if self.model else []
         if self.usage and self.usage.get("mode") == "percent":
@@ -273,8 +284,9 @@ class ClaudeWatch:
         msg = {"type": "claude", "hooked": bool(self.hooked if hooked is None else hooked),
                "sessions": [{"name": s["name"][:27], "state": s["state"], "text": s["text"][:47],
                              "since": int(s["since"])} for s in self._visible()]}
-        if self.usage:
-            msg["usage"] = {k: v for k, v in self.usage.items() if k != "source"}
+        if self.usage or self.accounts or self.chosen:
+            msg["usage"] = {k: v for k, v in (self.usage or {}).items() if k != "source"}
+            msg["usage"].update(accounts=self.accounts, chosen=self.chosen, email=self.shown)
         return msg
 
     def summary(self):

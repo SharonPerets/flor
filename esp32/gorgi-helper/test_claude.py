@@ -246,6 +246,17 @@ assert asked == ["max-tok"] and fw4.message()["usage"]["plan"] == "Max", (asked,
 debug = (d / "usage-debug.json").read_text()
 assert "me@work.com" in debug and "me@gmail.com" in debug and "max-tok" not in debug and "pro-tok" not in debug
 asyncio.run(f4.check_once(None)); assert len(profile_asks) == 2  # profiles kept for an hour
+m = fw4.message()["usage"]  # Gorgi gets the accounts for its account button, best plan first
+assert m["accounts"] == [{"email": "me@work.com", "plan": "Max"}, {"email": "me@gmail.com", "plan": "Pro"}], m
+assert m["chosen"] == "" and m["email"] == "me@work.com" and m["five"] == 41.0, m
+# picked on Gorgi: asked again at once, numbers and the choice arrive together
+picked = [""]
+fw7 = FakeWatch(); f7 = uf.UsageFetcher(fw7, wanted_email=lambda: picked[0]); f7.ask_anthropic = ok
+asyncio.run(f7.check_once(None)); assert asked[-1] == "max-tok"
+picked[0] = "me@gmail.com"; f7.wait_until = _t.time() + 999; f7.choose("me@gmail.com")
+assert f7.recheck and f7.wait_until == 0
+asyncio.run(f7.check_once(None)); assert asked[-1] == "pro-tok"
+m = fw7.message()["usage"]; assert m["chosen"] == "me@gmail.com" and m["email"] == "me@gmail.com", m
 # chosen by hand in config.json
 f5 = uf.UsageFetcher(FakeWatch(), wanted_email=lambda: "ME@gmail.com"); f5.ask_anthropic = ok
 asyncio.run(f5.check_once(None)); assert asked[-1] == "pro-tok"

@@ -17,6 +17,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <esp_heap_caps.h>
+#include <strings.h>
 
 #include "alarms.h"
 #include "board.h"
@@ -97,7 +98,8 @@ bool todoFull = true;  // the To-do screen needs drawing in full
 
 // Claude Code on the PC (sessions and usage, sent by the helper)
 claudescreen::View claudeView;
-int32_t claudeSince[claudescreen::MAX_SESSIONS];  // when each session's state changed (seconds since 1970)
+int32_t claudeSince[claudescreen::MAX_SESSIONS];
+uint32_t claudeSwitchAt = 0;  // when an account was picked on the Claude screen  // when each session's state changed (seconds since 1970)
 int32_t claudeUsageAt = 0;
 bool claudeDirty = true;
 uint32_t claudeDrawnAt = 0;
@@ -1695,6 +1697,18 @@ void onOther(const char* type, JsonObjectConst msg) {
       if (alertOn && alertClaude && alertSession == out.name && out.state == claudescreen::WORKING) endAlert(false);
     }
     JsonObjectConst u = msg["usage"];
+    claudescreen::Accounts& acc = claudeView.accounts;
+    acc.count = 0;
+    for (JsonObjectConst a : u["accounts"].as<JsonArrayConst>()) {
+      if (acc.count >= claudescreen::MAX_ACCOUNTS) break;
+      claudescreen::Account& out = acc.list[acc.count++];
+      snprintf(out.email, sizeof out.email, "%s", ui::toAscii(String((const char*)(a["email"] | ""))).c_str());
+      snprintf(out.plan, sizeof out.plan, "%s", (const char*)(a["plan"] | ""));
+    }
+    if (!acc.switching) snprintf(acc.chosen, sizeof acc.chosen, "%s", (const char*)(u["chosen"] | ""));
+    snprintf(acc.shown, sizeof acc.shown, "%s", (const char*)(u["email"] | ""));
+    // the helper has the new choice and numbers for it
+    if (acc.switching && strcasecmp(acc.chosen, u["chosen"] | "") == 0) acc.switching = false;
     const bool tokens = !u.isNull() && strcmp(u["mode"] | "percent", "tokens") == 0;
     claudeView.usage.known = !u.isNull() && (tokens || u["five"].is<float>());
     claudeView.usage.tokens = tokens;
@@ -1749,7 +1763,42 @@ void onOther(const char* type, JsonObjectConst msg) {
   }
 }
 
+// A tap on the Claude screen: the account button in the Usage card and its list
+void onClaudeTap(int x, int y) {
+  claudescreen::Accounts& acc = claudeView.accounts;
+  const int h = claudescreen::hit(claudeView, x, y);
+  if (h == claudescreen::HIT_NONE) {
+    if (acc.picking) {  // a tap elsewhere closes the list
+      acc.picking = false;
+      claudeDirty = true;
+    }
+    return;
+  }
+  if (h == claudescreen::HIT_PILL) {
+    acc.picking = !acc.picking;
+    claudeDirty = true;
+    return;
+  }
+  const char* email = h == claudescreen::HIT_AUTO ? "" : acc.list[h].email;
+  acc.picking = false;
+  claudeDirty = true;
+  if (strcasecmp(email, acc.chosen) == 0) return;
+  snprintf(acc.chosen, sizeof acc.chosen, "%s", email);
+  acc.switching = true;
+  claudeSwitchAt = millis();
+  JsonDocument doc;
+  doc["type"] = "claude_account";
+  doc["email"] = email;
+  pclink::send(doc);
+  Serial.printf("claude usage account: %s\n", email[0] ? email : "automatic");
+}
+
 void drawClaude(uint32_t now) {
+  // no answer from the helper: stop saying "Switching..."
+  if (claudeView.accounts.switching && msSince(now, claudeSwitchAt) > 30000) {
+    claudeView.accounts.switching = false;
+    claudeDirty = true;
+  }
   if (!claudeDirty && msSince(now, claudeDrawnAt) < 30000) return;  // "4 min ago" changes slowly
   claudeDirty = false;
   claudeDrawnAt = now;
@@ -2140,6 +2189,7 @@ void handleTouch(uint32_t now) {
     if (released == ui::Target::Face && page != Page::Face) {
       if (!longPressDone && page == Page::Time) onTimeTap(touchX0, touchY0);
       if (page == Page::Todo) onTodoTap(touchX0, touchY0);
+      if (page == Page::Claude) onClaudeTap(touchX0, touchY0);
       return;
     }
     if (released == ui::Target::Seek) {

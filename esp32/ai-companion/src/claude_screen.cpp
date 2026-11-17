@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "gfont.h"
 
@@ -104,7 +105,77 @@ void gauge(Canvas& c, const char* label, float pct, const char* reset, float y) 
   }
 }
 
+// the account button at the top right of the Usage card
+constexpr float PILL_H = 32, PILL_Y = P_Y + 12;
+constexpr float LIST_Y = P_Y + 58, LIST_ROW = 56;
+
+void pillText(const View& v, char* out, int size) {
+  const char* plan = v.usage.plan[0] ? v.usage.plan : "Account";
+  snprintf(out, size, "%s", v.accounts.picking ? "Close" : v.accounts.switching ? "..." : plan);
+}
+
+float pillW(const View& v) {
+  char t[24];
+  pillText(v, t, sizeof t);
+  return Canvas::textWidth(gfont::SMALL, t) + 46;
+}
+
+void drawPill(Canvas& c, const View& v) {
+  const float w = pillW(v), x = R_X + R_W - 16 - w;
+  c.fillRRect(x, PILL_Y, w, PILL_H, PILL_H / 2, v.accounts.picking ? ACCENT : TRACK);
+  char t[24];
+  pillText(v, t, sizeof t);
+  const Color& fg = v.accounts.picking ? PANEL : TEXT;
+  c.text(gfont::SMALL, t, x + 14, (int)(PILL_Y + 22), fg);
+  // a small arrow: down = open the list, up = close it
+  const float ax = x + w - 20, ay = PILL_Y + PILL_H / 2;
+  if (v.accounts.picking) {
+    c.fillCapsule(ax - 5, ay + 3, ax, ay - 2, 1.4f, fg);
+    c.fillCapsule(ax, ay - 2, ax + 5, ay + 3, 1.4f, fg);
+  } else {
+    c.fillCapsule(ax - 5, ay - 2, ax, ay + 3, 1.4f, fg);
+    c.fillCapsule(ax, ay + 3, ax + 5, ay - 2, 1.4f, fg);
+  }
+}
+
+bool sameEmail(const char* a, const char* b) { return strcasecmp(a, b) == 0; }
+
+void listRow(Canvas& c, float y, const char* big, const char* small, bool on) {
+  const float x = R_X + 12, w = R_W - 24;
+  c.fillRRect(x, y, w, LIST_ROW - 6, 12, on ? gfx::rgb(0x163A3A) : TRACK);
+  if (on) c.fillCircle(x + w - 18, y + (LIST_ROW - 6) / 2, 6, ACCENT);
+  c.text(gfont::SMALL, big, x + 12, (int)y + 22, TEXT);
+  char line[64];
+  fit(gfont::SMALL, small, w - (on ? 40 : 22), line, sizeof line);
+  c.text(gfont::SMALL, line, x + 12, (int)y + 42, MUTED, 0.8f);
+}
+
+void drawList(Canvas& c, const View& v) {
+  const Accounts& a = v.accounts;
+  float y = LIST_Y;
+  listRow(c, y, "Automatic", "best plan first", !a.chosen[0]);
+  for (int i = 0; i < a.count && i < MAX_ACCOUNTS; ++i) {
+    y += LIST_ROW;
+    listRow(c, y, a.list[i].plan[0] ? a.list[i].plan : "Account", a.list[i].email,
+            a.chosen[0] && sameEmail(a.chosen, a.list[i].email));
+  }
+}
+
 }  // namespace
+
+bool showsPill(const View& v) { return v.pc && (v.accounts.count >= 2 || v.accounts.chosen[0]); }
+
+int hit(const View& v, int x, int y) {
+  if (!showsPill(v)) return HIT_NONE;
+  const float w = pillW(v), px = R_X + R_W - 16 - w;
+  if (x >= px - 10 && x <= R_X + R_W && y >= PILL_Y - 8 && y <= PILL_Y + PILL_H + 8) return HIT_PILL;
+  if (!v.accounts.picking) return HIT_NONE;
+  if (x < R_X || x > R_X + R_W || y < LIST_Y) return HIT_NONE;
+  const int row = (int)((y - LIST_Y) / LIST_ROW);
+  if (row == 0) return HIT_AUTO;
+  if (row - 1 < v.accounts.count && row - 1 < MAX_ACCOUNTS) return row - 1;
+  return HIT_NONE;
+}
 
 void formatTokens(uint32_t n, char* out, int size) {
   if (n >= 10000000) snprintf(out, size, "%uM", (unsigned)(n / 1000000));
@@ -147,10 +218,20 @@ void draw(Canvas& c, const View& v) {
   // usage
   panel(c, R_X, R_W);
   c.text(gfont::TITLE, "Usage", R_X + 18, (int)P_Y + 36, TEXT);
-  if (v.usage.plan[0]) {
+  if (showsPill(v)) {
+    drawPill(c, v);
+    if (v.accounts.picking) {
+      drawList(c, v);
+      return;
+    }
+  } else if (v.usage.plan[0]) {
     char plan[24];
     snprintf(plan, sizeof plan, "- %s", v.usage.plan);
     c.text(gfont::SMALL, plan, R_X + 26 + Canvas::textWidth(gfont::TITLE, "Usage"), (int)P_Y + 35, MUTED);
+  }
+  if (v.accounts.switching) {
+    c.text(gfont::SMALL, "Switching account...", R_X + 18, (int)ROW_Y + 26, MUTED);
+    return;
   }
   if (!v.usage.known) {
     const char* lines[] = {"Plan usage", "not available", "right now."};

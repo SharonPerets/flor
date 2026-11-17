@@ -290,6 +290,7 @@ class Helper:
         self._announcing = asyncio.Lock()
         # Claude Code sessions and usage (hooks -> claude_watch), and Teams calls
         self.claude = ClaudeWatch(on_change=self._claude_changed, on_alert=self._claude_alert)
+        self.usage_fetcher = None  # set in main()
         self.on_call = False
         self.claude_muted = False  # muted on Gorgi (Action Center switch): no Claude pop-ups or voice
         self._paused_for_call = False
@@ -754,6 +755,14 @@ class Helper:
                          "paired" if self.gorgi_paired else "paired with another helper")
                 self.offer_updates()
                 self._push()
+                continue
+            if msg.get("type") == "claude_account":  # picked on Gorgi's Claude screen
+                email = str(msg.get("email") or "").strip()
+                self.config["claude_usage_account"] = email
+                save_config(self.config)
+                if self.usage_fetcher is not None:
+                    self.usage_fetcher.choose(email)
+                log.info("Claude usage account picked on Gorgi: %s", email or "automatic")
                 continue
             if msg.get("type") == "claude_mute":
                 self.claude_muted = bool(msg.get("on"))
@@ -1473,6 +1482,7 @@ def main():
     try:
         usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json",
                              wanted_email=lambda: str(config.get("claude_usage_account") or ""))
+        helper.usage_fetcher = usage
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),
                                                helper.claude.serve(helper.stop_event), helper.call_loop(),
                                                usage.run(helper.stop_event), helper.ytm_loop()))

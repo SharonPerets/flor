@@ -26,6 +26,14 @@ int main() {
   snprintf(v.usage.plan, 12, "Max");
   View t2 = v; t2.usage.tokens = true; formatTokens(1234567, t2.usage.fiveTokens, 12); formatTokens(18400000, t2.usage.weekTokens, 12);
   save("claude_tokens.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &t2);
+  View a = v; a.usage.tokens = false; a.accounts.count = 2;
+  snprintf(a.accounts.list[0].email, 48, "sharon.perets@work-company.com"); snprintf(a.accounts.list[0].plan, 12, "Max");
+  snprintf(a.accounts.list[1].email, 48, "peretsharon@gmail.com"); snprintf(a.accounts.list[1].plan, 12, "Pro");
+  save("claude_account.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &a);
+  a.accounts.picking = true;
+  save("claude_account_list.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &a);
+  if (hit(a, 600, 102 + 28) != HIT_AUTO || hit(a, 600, 102 + 56 + 28) != 0 || hit(a, 600, 102 + 112 + 28) != 1
+      || hit(a, 600, 102 + 168 + 28) != HIT_NONE || hit(a, 760, 70) != HIT_PILL) { printf("hit test FAILED\n"); return 1; }
   View e; e.pc = true; e.hooked = false;
   save("claude_empty.ppm", 44, 332, [](gfx::Canvas& c, void* p) { draw(c, *(View*)p); }, &e);
   save("tabs.ppm", 0, 300, [](gfx::Canvas& c, void*) {
