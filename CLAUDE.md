@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.8.22 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
+## Where things stand (4.8.24 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -373,7 +373,7 @@ Done and confirmed:
   something to clear. Picture: /mnt/project-files/clear-all/.
 
 - **4.8.24 - usage from the right Claude account** (helper + firmware, on top of 4.8.23; branch `claude/project-thread-5vsf5d`;
-  NOT confirmed). User (2026-11-17) has TWO accounts: work = **Max** (Claude desktop app on the laptop), personal = **Pro**
+  released 2026-11-17, NOT confirmed). User has TWO accounts: work = **Max** (Claude desktop app on the laptop), personal = **Pro**
   (Chrome); Gorgi showed "Usage - Pro". Cause: `pick_token` took the longest-living token in the desktop app's cache
   (entries of any account) and the plan name came from `.credentials.json`, not from the token used. Now
   `read_desktop_sign_ins` returns one fresh token per account (user id = 2nd part of the cache key) + the file's token,
