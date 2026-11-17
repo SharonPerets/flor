@@ -372,6 +372,16 @@ Done and confirmed:
   notice except a waiting UPDATE (that one has its own button and comes back from the helper); shown only when there is
   something to clear. Picture: /mnt/project-files/clear-all/.
 
+- **4.8.24 - usage from the right Claude account** (helper only, on top of 4.8.23; branch `claude/project-thread-5vsf5d`;
+  NOT confirmed). User (2026-11-17) has TWO accounts: work = **Max** (Claude desktop app on the laptop), personal = **Pro**
+  (Chrome); Gorgi showed "Usage - Pro". Cause: `pick_token` took the longest-living token in the desktop app's cache
+  (entries of any account) and the plan name came from `.credentials.json`, not from the token used. Now
+  `read_desktop_sign_ins` returns one fresh token per account (user id = 2nd part of the cache key) + the file's token,
+  each is checked once an hour with `GET https://api.anthropic.com/api/oauth/profile` (unofficial, same headers as usage;
+  `organization.organization_type` / `rate_limit_tier` / `account.has_claude_max`) and the best plan wins
+  (Max > Team/Enterprise > Pro); config.json `claude_usage_account` (email) overrides. Plan name now comes from the
+  profile. `claude-usage.json` lists the accounts seen (email, plan, where; never tokens). If it's still wrong, ask for it.
+
 ## Handover for the next session (2026-10-24)
 
 - **4.3.1 is confirmed** by the user (with everything in 4.2.1 and 4.3) and merged to main.

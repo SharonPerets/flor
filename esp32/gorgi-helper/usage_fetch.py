@@ -20,6 +20,13 @@ The usage address isn't officially documented (many tools use it), so it may
 stop working one day. It is also strict about how often it's asked: we ask at
 most every 5 minutes and wait longer when it says "too many requests".
 
+More than one Claude account can be signed in on the PC (for example a work
+account and a personal one used at some point in the desktop app). So we take
+every fresh sign-in we find, ask Anthropic once which account and plan each one
+is (the "profile"), and use the best plan: Max first, then Team / Enterprise,
+then Pro. Setting "claude_usage_account" (an email) in config.json picks one
+account by hand.
+
 What happened last is written to claude-usage.json in the helper's settings
 folder (never the sign-in itself), to make problems easy to find.
 """
@@ -36,6 +43,8 @@ from pathlib import Path
 log = logging.getLogger("gorgi.usage")
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
+PROFILE_KEEP = 3600     # ask again which account a sign-in belongs to after an hour
 USER_AGENT = "claude-cli/2.1.300 (external, cli)"  # the address is stricter with other names
 EVERY = 300             # seconds between checks
 AFTER_401 = 300         # a refused sign-in: wait, so it doesn't turn into "too many requests"
@@ -142,6 +151,38 @@ def _scopes(entry_key):
     return {":".join(first[-2:])} | set(words[1:])
 
 
+def _user_of(entry_key):
+    """'<install>:<user>:<base url>:<scopes>' -> '<user>' (who the sign-in belongs to)."""
+    parts = str(entry_key).split(":")
+    return parts[1] if len(parts) > 2 else ""
+
+
+def fresh_tokens(cache, now=None):
+    """Every fresh token in a decrypted token cache that can read usage (user:profile), best one per user.
+
+    A list of (token, user id), most useful first."""
+    now = now or time.time()
+    best = {}
+    for key, entry in (cache.items() if isinstance(cache, dict) else []):
+        if not isinstance(entry, dict):
+            continue
+        token = entry.get("token")
+        if not isinstance(token, str) or not token.strip():
+            continue
+        scopes = _scopes(key)
+        if "user:profile" not in scopes:
+            continue  # can't read usage
+        expires = _ms(entry.get("expiresAt"))
+        if expires and expires < now + 60:
+            continue  # expired: the app renews it next time it runs
+        user = _user_of(key)
+        rank = ("user:inference" in scopes, expires or float("inf"))
+        if user not in best or rank > best[user][0]:
+            best[user] = (rank, token)
+    found = sorted(best.items(), key=lambda kv: kv[1][0], reverse=True)
+    return [(tok, user) for user, (_rank, tok) in found]
+
+
 def pick_token(cache, now=None):
     """The best fresh token in a decrypted token cache (it needs the user:profile permission), or None."""
     now = now or time.time()
@@ -164,12 +205,12 @@ def pick_token(cache, now=None):
     return best[1] if best else None
 
 
-def read_desktop_sign_in(paths=None, unprotect=None):
-    """(token or None, what happened) from the Claude desktop app's config."""
+def read_desktop_sign_ins(paths=None, unprotect=None):
+    """([(token, where), ...], what happened) from the Claude desktop app's config: every fresh account."""
     if paths is None and sys.platform != "win32":
-        return None, "not Windows"
+        return [], "not Windows"
     unprotect = unprotect or _dpapi_unprotect
-    notes = []
+    notes, found, seen = [], [], set()
     for path in (desktop_config_paths() if paths is None else paths):
         try:
             config = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -189,14 +230,62 @@ def read_desktop_sign_in(paths=None, unprotect=None):
             continue
         for name, value in values:
             try:
-                token = pick_token(json.loads(_decrypt(value, key)))
+                tokens = fresh_tokens(json.loads(_decrypt(value, key)))
             except Exception as e:
                 notes.append(f"{path} {name}: can't read ({type(e).__name__})")
                 continue
-            if token:
-                return token, f"desktop app ({name})"
-            notes.append(f"{path} {name}: no fresh sign-in with usage permission")
-    return None, "; ".join(notes) or "Claude desktop app not found"
+            if not tokens:
+                notes.append(f"{path} {name}: no fresh sign-in with usage permission")
+            for token, user in tokens:
+                if user and user in seen:
+                    continue  # the same account in the older cache
+                seen.add(user)
+                found.append((token, f"desktop app ({name})"))
+    if found:
+        return found, f"{len(found)} sign-in(s) in the desktop app"
+    return [], "; ".join(notes) or "Claude desktop app not found"
+
+
+def read_desktop_sign_in(paths=None, unprotect=None):
+    """(token or None, what happened): the first fresh sign-in in the desktop app (kept for the self-test)."""
+    found, why = read_desktop_sign_ins(paths, unprotect)
+    return (found[0][0], found[0][1]) if found else (None, why)
+
+
+# ---------------------------------------------------------------- which account is it?
+
+PLAN_RANK = {"max": 3, "enterprise": 2, "team": 2, "pro": 1}
+
+
+def parse_profile(data):
+    """{"email", "plan", "rank"} from Anthropic's profile answer (plan: "Max", "Pro", ... or "")."""
+    data = data if isinstance(data, dict) else {}
+    account = data.get("account") if isinstance(data.get("account"), dict) else {}
+    org = data.get("organization") if isinstance(data.get("organization"), dict) else {}
+    words = " ".join(str(org.get(k) or "") for k in ("organization_type", "rate_limit_tier", "billing_type")).lower()
+    plan = ""
+    for name in ("max", "enterprise", "team", "pro"):
+        if name in words:
+            plan = name
+            break
+    if not plan and account.get("has_claude_max"):
+        plan = "max"
+    if not plan and account.get("has_claude_pro"):
+        plan = "pro"
+    return {"email": str(account.get("email") or account.get("email_address") or ""),
+            "plan": plan.title(), "rank": PLAN_RANK.get(plan, 0)}
+
+
+def choose_account(accounts, wanted_email=""):
+    """The sign-in to use: the wanted email if it's there, else the best plan (first found wins a tie)."""
+    if not accounts:
+        return None
+    wanted = (wanted_email or "").strip().lower()
+    if wanted:
+        for a in accounts:
+            if a["email"].lower() == wanted:
+                return a
+    return max(accounts, key=lambda a: a["rank"])  # max() keeps the first of equal ones
 
 
 # ---------------------------------------------------------------- the loop
@@ -226,10 +315,12 @@ def _retry_after(value):
 
 
 class UsageFetcher:
-    def __init__(self, watch, debug_file=None):
+    def __init__(self, watch, debug_file=None, wanted_email=None):
         self.watch = watch
         self.debug_file = debug_file
         self.wait_until = 0.0
+        self.wanted_email = wanted_email or (lambda: "")  # a function: the setting can change while running
+        self.profiles = {}  # token -> (time asked, profile)
 
     def _note(self, **info):
         if not self.debug_file:
@@ -248,15 +339,64 @@ class UsageFetcher:
         data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         return r.status_code, data, r.headers.get("retry-after")
 
+    async def ask_profile(self, client, token):
+        """(status, reply as a dict): which account and plan a sign-in belongs to."""
+        r = await client.get(PROFILE_URL, timeout=15, headers={
+            "Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20",
+            "Content-Type": "application/json", "User-Agent": USER_AGENT})
+        data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        return r.status_code, data
+
+    async def profile_of(self, client, token):
+        """The account behind a sign-in (asked at most once an hour per sign-in), or None if Anthropic said no."""
+        now = time.time()
+        known = self.profiles.get(token)
+        if known and now - known[0] < PROFILE_KEEP:
+            return known[1]
+        try:
+            status, data = await self.ask_profile(client, token)
+        except Exception as e:
+            log.info("couldn't ask which Claude account a sign-in is: %s", e)
+            return {"email": "", "plan": "", "rank": 0, "status": 0}
+        if status in (401, 403):
+            return None  # that sign-in doesn't work (any more)
+        profile = parse_profile(data) if status == 200 else {"email": "", "plan": "", "rank": 0}
+        profile["status"] = status
+        if status == 200:
+            self.profiles = {t: p for t, p in self.profiles.items() if now - p[0] < PROFILE_KEEP}
+            self.profiles[token] = (now, profile)
+        return profile
+
+    async def find_account(self, client):
+        """(token, where, plan, accounts seen for the notes) for the account to show, or (None, why, plan, [])."""
+        tokens, why = read_desktop_sign_ins()
+        file_token, file_plan = read_sign_in()
+        if file_token and all(file_token != t for t, _ in tokens):
+            tokens.append((file_token, "Claude Code sign-in file"))
+        if not tokens:
+            return None, why, file_plan, []
+        accounts = []
+        for token, where in tokens:
+            profile = await self.profile_of(client, token)
+            if profile is None:
+                continue
+            plan = profile["plan"] or (file_plan if token == file_token else "")
+            accounts.append({"token": token, "where": where, "email": profile["email"], "plan": plan,
+                             "rank": profile["rank"] or PLAN_RANK.get(plan.lower(), 0)})
+        seen = [{k: a[k] for k in ("email", "plan", "where")} for a in accounts]
+        if len(tokens) == 1 and not accounts:  # the only sign-in: let the usage ask tell what's wrong
+            return tokens[0][0], tokens[0][1], file_plan if tokens[0][0] == file_token else None, seen
+        best = choose_account(accounts, self.wanted_email())
+        if not best:
+            return None, "Anthropic refused every sign-in found", file_plan, seen
+        return best["token"], f"{best['where']}, {best['email'] or 'unknown account'}", best["plan"] or None, seen
+
     async def check_once(self, client):
         if time.time() < self.wait_until:
             return
-        token, source = read_desktop_sign_in()
-        file_token, plan = read_sign_in()
-        if not token and file_token:
-            token, source = file_token, "Claude Code sign-in file"
+        token, source, plan, accounts = await self.find_account(client)
         if not token:
-            self._note(result="no fresh sign-in found, so no usage", desktop_app=source, plan=plan)
+            self._note(result="no fresh sign-in found, so no usage", desktop_app=source, plan=plan, accounts=accounts)
             return
         try:
             status, data, retry = await self.ask_anthropic(client, token)
@@ -267,7 +407,7 @@ class UsageFetcher:
             return
         data = data if isinstance(data, dict) else {}
         got = _percents(data) if status == 200 else None
-        self._note(source=source, status=status, plan=plan,
+        self._note(source=source, status=status, plan=plan, accounts=accounts,
                    reply={k: v for k, v in data.items() if k in ("five_hour", "seven_day", "error")})
         if got:
             p5, r5, p7, r7 = got

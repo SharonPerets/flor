@@ -177,8 +177,11 @@ assert uf._retry_after("0") == 300 and uf._retry_after("99999") == 3600 and uf._
 class FakeWatch(ClaudeWatch):
     pass
 uf.claude_dir = lambda: d
-real_desktop = uf.read_desktop_sign_in
-uf.read_desktop_sign_in = lambda: real_desktop([app / "config.json"], same)
+real_desktop = uf.read_desktop_sign_ins
+uf.read_desktop_sign_ins = lambda: real_desktop([app / "config.json"], same)
+async def max_profile(self, client, token):
+    return 200, {"account": {"email": "w@work.com"}, "organization": {"organization_type": "claude_max"}}
+uf.UsageFetcher.ask_profile = max_profile
 cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "file-tok", "expiresAt": soon, "subscriptionType": "max"}}))
 asked = []
 async def ok(client, token):
@@ -195,7 +198,7 @@ assert u["mode"] == "percent" and u["five"] == 41.0 and u["plan"] == "Max" and u
 debug = (d / "usage-debug.json").read_text()
 assert "good" not in debug and "file-tok" not in debug and "desktop app" in debug
 # no desktop app: the fresh file sign-in is used
-uf.read_desktop_sign_in = lambda: (None, "Claude desktop app not found")
+uf.read_desktop_sign_ins = lambda: ([], "Claude desktop app not found")
 f2 = uf.UsageFetcher(FakeWatch()); f2.ask_anthropic = ok
 asyncio.run(f2.check_once(None)); assert asked[-1] == "file-tok"
 # nothing fresh: Anthropic isn't asked at all, and there's no usage (no token counting any more)
@@ -217,6 +220,44 @@ async def refused(client, token):
     return 401, {"error": {"type": "authentication_error"}}, None
 f.ask_anthropic = refused; f.wait_until = 0
 asyncio.run(f.check_once(None)); assert f.wait_until > _t.time() + 290
-uf.read_desktop_sign_in = real_desktop
+
+# two accounts (work Max + personal Pro): the Max one is shown, whatever order they come in
+asked.clear()
+cache2 = {"inst:personal:https://api.anthropic.com:user:inference user:profile": {"token": "pro-tok", "expiresAt": later},
+          "inst:work:https://api.anthropic.com:user:inference user:profile": {"token": "max-tok", "expiresAt": soon},
+          "inst:work:https://api.anthropic.com:user:profile": {"token": "max-old", "expiresAt": soon}}
+(app / "config.json").write_text(json.dumps({"oauth:tokenCacheV2": lock(cache2)}))
+found, _ = real_desktop([app / "config.json"], same)
+assert [t for t, _w in found] == ["pro-tok", "max-tok"], found  # one per account
+cred.write_text(json.dumps({"claudeAiOauth": {"accessToken": "pro-tok", "expiresAt": soon, "subscriptionType": "pro"}}))
+profiles = {"pro-tok": {"account": {"email": "me@gmail.com", "has_claude_pro": True},
+                        "organization": {"organization_type": "claude_pro", "rate_limit_tier": "default_claude_pro"}},
+            "max-tok": {"account": {"email": "me@work.com"},
+                        "organization": {"organization_type": "claude_max", "rate_limit_tier": "default_claude_max_20x"}}}
+profile_asks = []
+async def two_profiles(self, client, token):
+    profile_asks.append(token)
+    return 200, profiles[token]
+uf.UsageFetcher.ask_profile = two_profiles
+uf.read_desktop_sign_ins = lambda: real_desktop([app / "config.json"], same)
+fw4 = FakeWatch(); f4 = uf.UsageFetcher(fw4, d / "usage-debug.json"); f4.ask_anthropic = ok
+asyncio.run(f4.check_once(None))
+assert asked == ["max-tok"] and fw4.message()["usage"]["plan"] == "Max", (asked, fw4.message()["usage"])
+debug = (d / "usage-debug.json").read_text()
+assert "me@work.com" in debug and "me@gmail.com" in debug and "max-tok" not in debug and "pro-tok" not in debug
+asyncio.run(f4.check_once(None)); assert len(profile_asks) == 2  # profiles kept for an hour
+# chosen by hand in config.json
+f5 = uf.UsageFetcher(FakeWatch(), wanted_email=lambda: "ME@gmail.com"); f5.ask_anthropic = ok
+asyncio.run(f5.check_once(None)); assert asked[-1] == "pro-tok"
+# a refused sign-in is skipped
+async def pro_refused(self, client, token):
+    return (401, {}) if token == "max-tok" else (200, profiles[token])
+uf.UsageFetcher.ask_profile = pro_refused
+f6 = uf.UsageFetcher(FakeWatch()); f6.ask_anthropic = ok
+asyncio.run(f6.check_once(None)); assert asked[-1] == "pro-tok"
+assert uf.parse_profile({"account": {"has_claude_max": True}})["plan"] == "Max"
+assert uf.parse_profile({"organization": {"organization_type": "claude_team"}})["plan"] == "Team"
+assert uf.parse_profile(None) == {"email": "", "plan": "", "rank": 0}
+uf.read_desktop_sign_ins = real_desktop
 print(fw.summary())
 print("ALL OK")

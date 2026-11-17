@@ -1468,7 +1468,8 @@ def main():
     except Exception as e:
         log.warning("couldn't update Claude Code's hooks: %s", e)
     try:
-        usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json")
+        usage = UsageFetcher(helper.claude, data_dir() / "claude-usage.json",
+                             wanted_email=lambda: str(config.get("claude_usage_account") or ""))
         loop.run_until_complete(asyncio.gather(helper.run(), helper.update_loop(),
                                                helper.claude.serve(helper.stop_event), helper.call_loop(),
                                                usage.run(helper.stop_event), helper.ytm_loop()))
