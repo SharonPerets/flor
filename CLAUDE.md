@@ -78,7 +78,7 @@ and updates. They talk over a WebSocket (Gorgi is the server, port 81, found via
   `request_stop()` force-exits after 8 s, `main()` ends with `os._exit(0)`, and the installer's `PrepareToInstall`
   runs `taskkill /IM GorgiHelper.exe /F` first (that also rescues updates started by the old, buggy helper).
 
-## Where things stand (4.8.24 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
+## Where things stand (4.8.25 released, not confirmed yet; 4.8.17 confirmed by the user and merged to main)
 
 Done and confirmed:
 - 3.8 and before: face with 12 moods, talk by tapping the face (follow-up listening ~5 s), media control +
@@ -388,7 +388,7 @@ Done and confirmed:
   ("" = automatic) and shows "Switching account..." (30 s max) until a `claude` message's `usage.chosen` matches. Helper
   saves it to config.json and `UsageFetcher.choose()` re-checks at once; `usage` now also carries `accounts` [{email,
   plan}], `chosen`, `email` (sent after the numbers). Pictures: /mnt/project-files/claude-account/.
-- **4.8.25 - the desktop app's new sign-in folder** (helper only, on top of 4.8.24): on 4.8.24 Settings found only the
+- **4.8.25 - the desktop app's new sign-in folder** (helper only, on top of 4.8.24; released 2026-11-17, NOT confirmed): on 4.8.24 Settings found only the
   Pro account (= `.credentials.json`). Newer Claude desktop apps (2026) moved config.json + `Local State` to
   `%LOCALAPPDATA%\Claude-Data\claude_<publisher>\` (e.g. claude_pzs8sxrjxfjjc; old folders keep only an empty
   `.user-data-left...` marker; same keys and v10 format; CodeZeno/Claude-Code-Usage-Monitor issue #183).
