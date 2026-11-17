@@ -198,9 +198,10 @@ def show_window(config, save_config, check_keys, youtube=None, claude_accounts=N
                 root.after(200, show_found)
                 return
             found = result.get("found") or []
+            picked = next((e for t, e in account_list[0] if t == account_var.get()), current_account)
             account_list[0] = account_choices(found, current_account)
             account_box.configure(values=[t for t, _e in account_list[0]])
-            account_var.set(next(t for t, e in account_list[0] if e.lower() == current_account.lower()))
+            account_var.set(next((t for t, e in account_list[0] if e.lower() == picked.lower()), AUTO_ACCOUNT))
             if "error" in result:
                 account_note.set(f"Couldn't look up the accounts: {result['error'][:60]}")
             elif not found:
